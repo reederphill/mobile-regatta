@@ -32,7 +32,8 @@ final class RaceCoverController: UIHostingController<AnyView> {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        // Home stays in the window under the race: keep it out of accessibility (and UI tests) while it's covered.
+        // Home stays in the window under the race: keep it out of VoiceOver while it's covered. A UI test's queries
+        // still find its elements there (`RaceUITestCase.homeIsCovered`).
         view.accessibilityViewIsModal = true
     }
 

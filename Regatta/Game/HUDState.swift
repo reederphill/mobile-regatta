@@ -61,7 +61,7 @@ struct HUDState {
 
     /// The HUD for `world`'s latest tick, from your seat. `isBot` marks the bots on the minimap (#19): the roster's,
     /// which the simulation doesn't hold (#60).
-    init(world: RenderWorld, isBot: (Int) -> Bool = { _ in false }) {
+    init(world: RenderWorld, isBot: (Int) -> Bool = { _ in false }, name: ((Int) -> String)? = nil) {
         let frame = world.frame
         let me = world.myBoatIndex
         let p = frame.boats[me]
@@ -82,7 +82,7 @@ struct HUDState {
         isGhost = world.isGhost(ofSeat: me)
         fleet = frame.boats.count
         place = frame.place(of: me)
-        leaderboard = LeaderboardState(frame: frame, me: me)
+        leaderboard = LeaderboardState(frame: frame, me: me, name: name)
         legCount = course.legs.count
         legNumber = min(p.legIndex + 1, legCount)
 

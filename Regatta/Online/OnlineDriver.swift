@@ -35,8 +35,15 @@ final class OnlineDriver: RaceDriver {
     let venue: Venue
     let boatClass: BoatClass
     let isPausable = false
-    /// Names and bot marks, from the race's setup (#60).
-    let roster: FleetRoster
+    /// Names and bot marks as the server's roster has them now (#141): a `RosterChange` renames a seat and marks its
+    /// bot. A seat the setup gives a bot is always one.
+    var roster: FleetRoster {
+        let seats = client.predicted.race.setup.seats
+        return FleetRoster(entries: client.roster.enumerated().map { seat, entry in
+            FleetRoster.Entry(seat: seat, isBot: entry.isBot || (seats.indices.contains(seat) && seats[seat] == .bot),
+                              sailingName: entry.name.isEmpty ? nil : entry.name)
+        })
+    }
     /// Each seat's livery (#119). The wire carries none yet: every other seat wears a seeded free starter.
     let liveries: FleetLiveries
     let client: RaceClient
@@ -52,6 +59,12 @@ final class OnlineDriver: RaceDriver {
 
     /// A builder choice: a failed rejoin is tried again a second later.
     var retryInterval: UInt64 = 1_000_000
+    /// Asked before each rejoin (#141): false holds it back, while the link waits for a fresh token or is closed.
+    var canRejoin: () -> Bool = { true }
+    /// The token a rejoin sends, if not the one the race was joined with: after the gun, a fresh one.
+    var rejoinToken: (() -> [UInt8])?
+    /// The server's race clock in ticks, once the client's clock has synchronised.
+    var serverTick: Int? { client.clock.serverTick(at: now()).map { Int($0.rounded(.down)) } }
 
     private let now: () -> UInt64
     private let connect: () -> RaceTransport
@@ -66,9 +79,10 @@ final class OnlineDriver: RaceDriver {
 
     /// Sails the race `start` joined on `transport`. `now` is the monotonic clock in microseconds;
     /// `connect` opens a new connection to the race server for a rejoin with `token`.
+    /// `joiningUnderway`: the race had begun when this client joined it, so it sails from the server's `Resync`.
     init(start: RaceStart, transport: RaceTransport, token: [UInt8], clientBuild: String,
-         now: @escaping () -> UInt64, connect: @escaping () -> RaceTransport) {
-        client = RaceClient(start: start, transport: transport)
+         now: @escaping () -> UInt64, connect: @escaping () -> RaceTransport, joiningUnderway: Bool = false) {
+        client = RaceClient(start: start, transport: transport, joiningUnderway: joiningUnderway)
         self.now = now
         self.connect = connect
         self.token = token
@@ -78,7 +92,6 @@ final class OnlineDriver: RaceDriver {
         course = race.course
         venue = race.files.venue.content
         boatClass = race.boatClass
-        roster = FleetRoster(setup: start.setup)
         liveries = FleetLiveries(setup: start.setup, mySeat: start.yourSeat)
         corrections = race.boats.map { _ in VisualCorrection(snapDistance: race.boatClass.hull.length) }
         currentFrame = TickFrame(race: race, isOver: false, keepClearOf: start.yourSeat)
@@ -188,8 +201,8 @@ final class OnlineDriver: RaceDriver {
         }
         connection = .reconnecting
         guard let join = rejoin else {
-            if now >= nextRejoinAt {
-                rejoin = RaceJoin(connection: connect(), token: token, clientBuild: clientBuild, now: now)
+            if now >= nextRejoinAt, canRejoin() {
+                rejoin = RaceJoin(connection: connect(), token: rejoinToken?() ?? token, clientBuild: clientBuild, now: now)
             }
             return
         }

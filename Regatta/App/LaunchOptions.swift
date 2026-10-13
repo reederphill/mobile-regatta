@@ -25,7 +25,8 @@ import RegattaServices
 /// - `-camera course|boat` overrides the device's camera as course-up or boat-up (#113).
 /// - `-online` starts an online race on the dev server's instant race at launch (#68, Debug builds).
 /// - `-onlineHost <host:port>` is the dev race server, instead of the Settings page's field (Debug builds).
-/// - `-raceSeconds <n>` closes an online dev race `n` seconds after the gun (the server's e2e override).
+/// - `-raceSeconds <n>` closes an online dev race `n` seconds after the gun (the server's e2e override), and the
+///   fakes' race too (#141: 20 s without it).
 /// - `-startSeconds <n>` gives an online dev race's, and every practice race's, start sequence `n` seconds, 1…60
 ///   (#361: a UI test that waits for the results spends less of its watch before the gun).
 /// - `-laps <n>` sails every practice race `n` laps, 1…9, instead of the setup's (#354: a UI test that waits for the
@@ -53,9 +54,11 @@ import RegattaServices
 ///   `signed-out`, `underage`, `communication-restricted`, `multiplayer-restricted`, `offline`, `queued`,
 ///   `cancelled-race`, `online-results`, `online-results-unrated`, `terms-bump`, and #161's `suspended`,
 ///   `suspended-permanent`, `cooldown`, `cannot-race`, `update-required`, `terms-save-failed`, `session-failed`,
-///   `unreachable` or `connecting`, and #140's `joinable`, `joinable-alone` or `joinable-hold` (`FakeServiceScenario`).
+///   `unreachable` or `connecting`, #140's `joinable`, `joinable-alone` or `joinable-hold`, and #141's `rejoinable` or
+///   `race-gone` (`FakeServiceScenario`).
 ///   Every scenario whose player gets past Race online's gate has a queue to join, to fleet lock and its briefing
-///   (#140). Debug builds only (#314): other builds don't know it, so a
+///   (#140). The `joinable` ones, `signed-out`, `cancelled-race`, `race-gone` and `rejoinable` go on into a fake race
+///   (#141, `FakeRaceDirector`): the gun 75 s after fleet lock, at `-timescale`. Debug builds only (#314): other builds don't know it, so a
 ///   release build always runs on the real services.
 /// - `-tap race-online[,terms-agree]` (Debug builds) taps Home's Race online at launch, then the Terms of Use sheet's
 ///   I agree once it is up: for a local screenshot of a state only a tap reaches (#161: the spinner, an unreachable
@@ -63,7 +66,11 @@ import RegattaServices
 ///   a page, `start-practice` and `ready` start a practice race, `takeover` waits for fleet lock, then
 ///   `briefing-leave` taps the briefing's Leave or `home` waits for the race sequence to end, and `connection-lost`
 ///   and `connection-regained` drop the connection and bring it back. The scripted queue plays a state a second at
-///   `-timescale` (a join answered within 2 s).
+///   `-timescale` (a join answered within 2 s). The race sequence's (#141): `race`, `gun` and `done` wait for the
+///   water, the gun and your results; `race-menu`, `race-leave` and `confirm-leave` open the race menu, ask to leave
+///   and leave; `race-home` and `race-again` are the results' buttons; `rejoin` taps Home's Rejoin race;
+///   `leaderboard` opens the live leaderboard, `last-race` the Last race sheet; `race-ended` closes the fake race
+///   with the queue's stream lagging, so Rejoin race finds none.
 /// - `-myBoat <design-id>` opens My boat with that design tried on (#136): the stand-in for results' Try it deep link.
 /// - `-keepMyBoat` (with `-uitesting`) keeps My boat's livery, owned designs and races from the last launch, which UI
 ///   tests otherwise empty at launch: a relaunch that checks what was saved.
@@ -114,6 +121,22 @@ struct LaunchOptions: Equatable {
         case home
         case connectionLost = "connection-lost"
         case connectionRegained = "connection-regained"
+        /// The online race sequence (#141): waits for the water, the gun and her results; the race menu, Leave race
+        /// and its confirm, the results' Home and Race again, Home's Rejoin race, the live leaderboard open, and the
+        /// Last race sheet.
+        case race
+        case gun
+        case done
+        case raceMenu = "race-menu"
+        case raceLeave = "race-leave"
+        case confirmLeave = "confirm-leave"
+        case raceHome = "race-home"
+        case raceAgain = "race-again"
+        case rejoin
+        case leaderboard
+        case lastRace = "last-race"
+        /// The fake race closes with the queue's stream lagging: Rejoin race is still up, and finds no race.
+        case raceEnded = "race-ended"
     }
     #endif
 

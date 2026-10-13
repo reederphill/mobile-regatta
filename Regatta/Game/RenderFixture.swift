@@ -54,6 +54,8 @@ struct RenderFixture: Codable, Equatable {
     var ruleCues: Bool? = nil
     /// The queue's chip over the race (#140); nil leaves it off.
     var queueChip: QueueFixture? = nil
+    /// The online race menu over the race (#141), "Race continues": `"onlineMenu": true`; nil leaves it off.
+    var onlineMenu: Bool? = nil
 
     /// The queue's wait a fixture draws (#140), in the chip or the bar: `{ "players": 3, "seconds": 25 }`, frozen
     /// with that many seconds to the lock. More than 60 is a hold, 10 or fewer the lock banner.
@@ -149,6 +151,10 @@ struct RenderFixture: Codable, Equatable {
         case practiceSetup
         /// The pause menu over the race's chrome (#131): `{ "gallery": "pauseMenu" }`.
         case pauseMenu
+        /// Home with Rejoin race and its race clock in Race online's place (#141): `{ "gallery": "rejoin" }`.
+        case rejoin
+        /// Home with a Last race row whose rating is in (#141): `{ "gallery": "lastRaceRating" }`.
+        case lastRaceRating
         /// The results sheet on a sample race (#132): `{ "gallery": "results", "results": "live" }` or `"closed"`
         /// (`ResultsGalleryView`), with practice rivals (#235) if the file gives a `"rivalSkill"`.
         case results(ResultsStage, rivalSkill: Double? = nil)
@@ -264,7 +270,7 @@ struct RenderFixture: Codable, Equatable {
 
     private struct GalleryFile: Decodable {
         enum Kind: String, Decodable {
-            case livery, briefing, briefingLocked, queueBar, practiceSetup, pauseMenu, results, myBoat, help
+            case livery, briefing, briefingLocked, queueBar, practiceSetup, pauseMenu, results, myBoat, help, rejoin, lastRaceRating
         }
 
         var gallery: Kind?
@@ -294,6 +300,8 @@ struct RenderFixture: Codable, Equatable {
             case .livery?: return .livery
             case .practiceSetup?: return .practiceSetup
             case .pauseMenu?: return .pauseMenu
+            case .rejoin?: return .rejoin
+            case .lastRaceRating?: return .lastRaceRating
             case .results?:
                 guard let stage = decoded.results else { throw GalleryError.resultsStageMissing }
                 return .results(stage, rivalSkill: decoded.rivalSkill)

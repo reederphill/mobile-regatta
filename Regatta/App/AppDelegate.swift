@@ -18,9 +18,21 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     let services: ServiceSet
     /// The online session and the device identity under it, when there is an endpoint.
     let online: OnlineStatus.Session?
+    /// Opens a hand-off's race connection (#141): the Debug fake race host on the fakes; nothing answers otherwise,
+    /// until #162 gives the app its race server.
+    let raceConnector: RaceConnector
 
     override init() {
-        (services, online) = AppDelegate.makeServices(launchOptions: .current)
+        var (services, online) = AppDelegate.makeServices(launchOptions: .current)
+        var connector: RaceConnector = { _ in UnansweredRaceConnection() }
+        #if DEBUG
+        if let director = FakeRaceDirector.make(launchOptions: .current, services: services) {
+            services.raceSession = FakeRaceSession(director)
+            services.queue = DirectedQueue(services.queue, director: director)
+            connector = { [director] token in director.connect(token) }
+        }
+        #endif
+        (self.services, self.online, raceConnector) = (services, online, connector)
         super.init()
     }
     /// Usage analytics (#128), one for the app over its one set of `analytics.` keys: every scene logs to it. Sent at

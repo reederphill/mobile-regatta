@@ -5,6 +5,33 @@ import Testing
 
 /// #149: the client's roster follows the server's `RosterChange`s, and `leave()` gives the seat up.
 @Suite struct RaceClientTests {
+    /// #141: a close has results and a rating to wait for, a cancel has neither; the client says which it was.
+    @Test func cancelAndCloseAreToldApart() throws {
+        func client() throws -> (RaceClient, ManualTransport) {
+            let setup = try RaceSetup(raceSeed: RaceSeed(141), seats: [.human, .bot], laps: 1, startSequenceTicks: 600)
+            let race = Race(setup: setup, windSeed: WindSeed(0x141))
+            var keys = try WindKeyGenerator(windSeed: WindSeed(0x141), setup: race.windSetup, windows: race.wind.windows)
+            let roster = [RosterEntry(name: "Ann", colorIndex: 0), RosterEntry(name: "Gannet", colorIndex: 1, isBot: true)]
+            let transport = ManualTransport()
+            let start = RaceStart(yourSeat: 0, setup: setup, roster: roster, windKeys: keys.keys(through: 1))
+            return (RaceClient(start: start, transport: transport), transport)
+        }
+        let (closed, closing) = try client()
+        #expect(closed.ending == nil)
+        try closing.deliver(Frame(seq: 1, tick: 0, message: .raceClosed(RaceClosed(results: .none))))
+        closed.update(now: 0)
+        #expect(closed.ending == .closed && closed.status == .finished)
+
+        let (cancelled, cancelling) = try client()
+        try cancelling.deliver(Frame(seq: 1, tick: 0, message: .raceCancelled(RaceCancelled(reason: .serverShutdown))))
+        cancelled.update(now: 0)
+        #expect(cancelled.ending == .cancelled(.serverShutdown) && cancelled.status == .finished)
+        // The first word stands.
+        try cancelling.deliver(Frame(seq: 2, tick: 0, message: .raceClosed(RaceClosed(results: .none))))
+        cancelled.update(now: 16_667)
+        #expect(cancelled.ending == .cancelled(.serverShutdown))
+    }
+
     @Test func rosterChangeUpdatesTheRosterAndLeaveSendsLeaveRace() throws {
         let setup = try RaceSetup(raceSeed: RaceSeed(149), seats: [.human, .human, .bot, .bot], laps: 1, startSequenceTicks: 600)
         let race = Race(setup: setup, windSeed: WindSeed(0x149))

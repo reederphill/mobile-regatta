@@ -75,12 +75,13 @@ final class ResultsUITests: RaceUITestCase {
 
     /// Home → Practice → Start race → Ready, a one-lap race on the default ten boats at `-timescale 32` that nobody
     /// steers, from a 10 s start with the scene hidden (as `PracticeUITests.testFifteenBotRaceRunsFullLength`), run to
-    /// its close: the results are up.
+    /// its close: the results are up. The beat is 120 m (`-beatMetres 120`): on the full beat a slow runner sailed
+    /// skiff@9's race past the 200 s watch about every other run (#504's and #505's CI).
     @MainActor private func openSetupAndRaceToTheClose() -> XCUIApplication {
         let app = XCUIApplication()
         if app.state != .notRunning { app.terminate() }
         app.launchArguments = ["-uitesting", "-seed", "1", "-laps", "1", "-startSeconds", "10", "-timescale", "32",
-                               "-hideScene"]
+                               "-hideScene", "-beatMetres", "120"]
         app.launch()
         let practice = app.buttons["practice"]
         XCTAssertTrue(practice.waitForExistence(timeout: 30), "no Practice on the home screen")

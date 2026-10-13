@@ -3,7 +3,8 @@ import XCTest
 /// The queue from Race online to the locked fleet's briefing (#140) on the fake services' scripted queue
 /// (`-fakeServices joinable`, `joinable-hold`): the bar on Home and every pushed page, Leave, the hold, the background,
 /// and the takeover over a page and over a practice race, with the briefing's Leave. CI only, like every UI test; the
-/// state machine itself is unit-tested (`QueueControllerTests`).
+/// state machine itself is unit-tested (`QueueControllerTests`). What follows the briefing is `OnlineSequenceUITests`'
+/// (#141).
 ///
 /// The scripted queue gives a state a second, slowed by `-timescale` (a join is still answered within 2 s):
 /// `joinable` locks four states after the first, `joinable-hold` seven, its first three a hold. The takeover's
@@ -120,7 +121,7 @@ final class QueueBarUITests: RaceUITestCase {
     }
 
     /// Fleet lock while Settings is pushed: the page goes, the locked fleet's briefing takes the screen with its
-    /// countdown and Leave, and (until #141) its end leads home with the stand-in's notice.
+    /// countdown and Leave, and its end leads to the race it briefed (#141), not back to Settings.
     @MainActor func testFleetLockTakesOverSettingsAndShowsTheBriefing() {
         // A state every 4 s: the lock some 15 s after the join, the briefing a minute long.
         let app = launch("joinable", timescale: "0.25")
@@ -136,13 +137,11 @@ final class QueueBarUITests: RaceUITestCase {
         XCTAssertFalse(element(app, "queue-bar").exists, "the bar rides the takeover")
         XCTAssertFalse(element(app, "queue-chip").exists, "the chip rides the takeover")
 
-        // The stand-in's end: home, with Settings gone.
-        XCTAssertTrue(briefing.waitForNonExistence(timeout: 90), "the briefing never ended")
-        XCTAssertTrue(app.buttons["race-online"].waitForExistence(timeout: 15), "the briefing's end didn't lead home")
+        // Its end: the race, in the same cover, with Settings gone under it.
+        XCTAssertTrue(app.otherElements["race-viewport"].waitForExistence(timeout: 100), "the briefing didn't lead to the race")
+        XCTAssertFalse(briefing.exists, "the briefing is still up over the race")
         XCTAssertFalse(element(app, "page-settings").exists, "Settings is still pushed after the takeover")
-        let notice = element(app, "home-notice")
-        XCTAssertTrue(notice.waitForExistence(timeout: 10), "no stand-in notice")
-        XCTAssertTrue(notice.label.contains("The race starts in the next update"), "the notice reads \(notice.label)")
+        XCTAssertTrue(homeIsCovered(app), "the briefing's end led home")
     }
 
     /// Fleet lock in the middle of a practice race: the chip rode over it, the race is dropped for the briefing, and

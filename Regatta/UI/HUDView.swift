@@ -221,6 +221,10 @@ private struct LeaderboardRow: View {
                 .fill(Palette.boatColor(row.colorIndex))
                 .overlay(Circle().strokeBorder(.white.opacity(0.5), lineWidth: 1))
                 .frame(width: HUDLayout.boardSwatch, height: HUDLayout.boardSwatch)
+            if let name = row.name {
+                Text(name)
+                    .frame(width: HUDLayout.boardNameWidth, alignment: .leading)
+            }
             Text(row.gap.text)
                 .contentTransition(.identity)
                 .frame(width: HUDLayout.boardGapWidth, alignment: .trailing)
@@ -240,6 +244,8 @@ private struct LeaderboardRow: View {
 /// The HUD's top row (#114): the clock column after the pause button, the minimap at the right, and the wind centred
 /// between them in whatever width is left. Pure, so tests check it fits at every width the race gets.
 enum HUDLayout {
+    /// An online board's name column (#141).
+    static let boardNameWidth: CGFloat = 78
     /// The side margin.
     static let edge: CGFloat = 16
     /// Clear of the pause button (16-56 pt from the race rect's leading edge, `RaceView`).

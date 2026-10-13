@@ -39,6 +39,12 @@ public final class RaceClient {
     }
 
     /// What the client has done, for tests, the load client's report (#67) and the HUD's lag warning.
+    /// The server's last word on the race: `RaceClosed`, or `RaceCancelled` with its reason.
+    public enum Ending: Equatable, Sendable {
+        case closed
+        case cancelled(RaceCancelled.Reason)
+    }
+
     public struct Stats: Hashable, Sendable {
         public var heldSent = 0
         public var tapsSent = 0
@@ -62,6 +68,8 @@ public final class RaceClient {
     public private(set) var stamper: InputStamper
     public private(set) var stats = Stats()
     public private(set) var status: Status = .synchronising
+    /// How the server ended the race (#141): a close has results and a rating, a cancel neither. Nil while it runs.
+    public private(set) var ending: Ending?
     /// The client's tick: the one the race is sailed to, and after which inputs are stamped.
     public private(set) var clientTick: Int
     /// Who sails each seat now, by seat (#149): the `RaceStart`'s roster, with each `RosterChange` since applied. A
@@ -258,8 +266,12 @@ public final class RaceClient {
             clientTick = max(clientTick, predicted.tick)
             reliable = ReliableStream(next: 1)
             awaitResync()
-        case .raceClosed, .raceCancelled:
+        case .raceClosed:
             closed = true
+            ending = ending ?? .closed
+        case .raceCancelled(let cancelled):
+            closed = true
+            ending = ending ?? .cancelled(cancelled.reason)
         case .hello, .joinRace, .inputHeld, .inputTap, .ping, .requestResync, .leaveRace, .helloAck, .updateRequired:
             break
         // Service messages (#143) go over the service link, not the race transport.

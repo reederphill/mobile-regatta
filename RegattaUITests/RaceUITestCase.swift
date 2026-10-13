@@ -34,6 +34,14 @@ class RaceUITestCase: XCTestCase {
         return app
     }
 
+    /// Home's Race online can't be reached: gone, or under the race cover. The cover is presented over Home, which
+    /// stays in the window (`RaceCoverController`), and a UI test's queries still find Home's elements there, so
+    /// `exists` alone says nothing about what is on screen.
+    @MainActor func homeIsCovered(_ app: XCUIApplication) -> Bool {
+        let raceOnline = app.buttons["race-online"]
+        return !(raceOnline.exists && raceOnline.isHittable)
+    }
+
     /// Looks at `element` every `interval` until a look satisfies `seen` or `deadline` passes, and returns whether
     /// one did and the last snapshot a look got (nil if none did).
     ///

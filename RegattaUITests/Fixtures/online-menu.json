@@ -1,0 +1,9 @@
+{
+  "log" : "fleet.racelog.json",
+  "freezeTick" : 3260,
+  "camera" : "boat",
+  "vision" : "none",
+  "view" : "courseUp",
+  "hud" : { },
+  "onlineMenu" : true
+}

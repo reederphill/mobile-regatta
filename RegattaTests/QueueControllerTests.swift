@@ -26,6 +26,9 @@ import Testing
         let model: AppModel
         let services: ServiceSet
         let controller: QueueController
+        /// The race sequence the takeover hands over to (#141), on scripted links.
+        let race: OnlineRaceController
+        private(set) var links: [ScriptedRaceLink] = []
         var announced: [String] = []
         var states: [QueueState] = []
 
@@ -35,8 +38,17 @@ import Testing
             self.services = services
             let clock = FakeClock()
             self.clock = clock
+            race = OnlineRaceController(raceSession: raceSession ?? services.raceSession, makeLink: { _ in ScriptedRaceLink() },
+                                        now: { clock.date }, sleep: { _ in }, tickInterval: nil)
             controller = QueueController(queue: services.queue, raceSession: raceSession ?? services.raceSession,
-                                         now: { clock.date }, tickInterval: nil)
+                                         sequence: race, now: { clock.date }, tickInterval: nil)
+            race.queue = controller
+            race.attach(host: model)
+            race.makeLink = { [unowned self] _ in
+                let link = ScriptedRaceLink()
+                links.append(link)
+                return link
+            }
             controller.attach(host: model, haptics: haptics)
             controller.announce = { [unowned self] in self.announced.append($0) }
             controller.onState = { [unowned self] in self.states.append($0) }
@@ -164,7 +176,7 @@ import Testing
 
         await rig.controller.receive(.fleetLocked)
         #expect(rig.controller.bar == nil && rig.controller.entry == .ready)
-        #expect(rig.controller.takeover?.handOff.raceID == RaceID("fake-race"))
+        #expect(rig.race.phase == .briefing && rig.links.count == 1, "the race sequence has it from here")
         #expect(rig.model.phase == .raceSequence)
         #expect(rig.model.briefing?.isFleetLocked == true)
         #expect(rig.haptics.impacts.last == 1, "a heavy haptic at the lock")
@@ -223,16 +235,16 @@ import Testing
         #expect(rig.model.isLiveryLocked && rig.model.myBoat.isFleetLocked)
 
         // The briefing's Leave asks first; Stay keeps the seat.
-        rig.controller.askToLeave()
-        #expect(rig.controller.takeover?.isConfirmingLeave == true)
-        rig.controller.stay()
-        #expect(rig.controller.takeover?.isConfirmingLeave == false && rig.model.phase == .raceSequence)
+        rig.race.askToLeave()
+        #expect(rig.race.isConfirmingLeave)
+        rig.race.stay()
+        #expect(!rig.race.isConfirmingLeave && rig.model.phase == .raceSequence)
 
-        rig.controller.askToLeave()
-        rig.controller.leaveRace()
+        rig.race.askToLeave()
+        rig.race.leaveRace()
         #expect(rig.model.phase == .home && rig.model.race == nil)
         #expect(!rig.model.isLiveryLocked)
-        #expect(rig.controller.takeover == nil && rig.model.notice == nil)
+        #expect(rig.race.phase == .idle && rig.model.notice == nil)
         // Race online is off, wordless, until the server says where she stands: 3 s at most.
         #expect(rig.controller.entry == .settling)
         rig.clock.advance(3)
@@ -242,19 +254,19 @@ import Testing
         // Or as soon as the server says: here, the cooldown.
         let third = Rig()
         await third.lock()
-        third.controller.leaveRace()
+        third.race.leaveRace()
         await third.controller.receive(.unavailable(.cooldown(secondsRemaining: 300)))
         #expect(third.controller.entry == .ready)
         #expect(third.states.last == .unavailable(.cooldown(secondsRemaining: 300)), "Race online's line counts it down")
     }
 
-    @Test func briefingEndGoesHomeWithTheStandInNotice() async {
+    /// The briefing's own countdown ran out before the race link was up: the cover stays, joining (#141).
+    @Test func briefingEndWithoutALinkStaysInTheCoverJoining() async {
         let rig = Rig()
         await rig.lock()
-        rig.controller.briefingEnded()
-        #expect(rig.model.phase == .home && !rig.model.isLiveryLocked)
-        #expect(rig.model.notice == .raceStartsInTheNextUpdate)
-        #expect(rig.controller.takeover == nil && rig.controller.entry == .ready)
+        rig.race.briefingEnded()
+        #expect(rig.race.phase == .joining && rig.model.phase == .raceSequence && rig.model.isLiveryLocked)
+        #expect(rig.model.notice == nil && rig.controller.entry == .ready)
     }
 
     @Test func cooldownCountsDownToReady() async {
@@ -343,11 +355,13 @@ import Testing
             return Task { await work() }
         }
         rig.controller.sceneChanged(isBackground: true)
-        #expect(rig.controller.takeover != nil && rig.controller.leaving == nil && held == 0)
+        rig.race.sceneChanged(isBackground: true)
+        #expect(rig.race.phase == .briefing && rig.controller.leaving == nil && held == 0)
+        #expect(rig.links.last?.drops == 1 && rig.links.last?.leaves == 0)
         #expect(rig.model.phase == .raceSequence && rig.model.briefing?.isFleetLocked == true)
         #expect(rig.model.isLiveryLocked && rig.model.notice == nil)
         rig.controller.sceneChanged(isBackground: false)
-        #expect(rig.controller.takeover != nil)
+        #expect(rig.race.phase == .briefing)
     }
 
     @Test func connectionLostDropsTheQueueAndRegainPostsTheNotice() async {
@@ -371,15 +385,17 @@ import Testing
         let rig = Rig()
         await rig.lock()
         rig.controller.connectionChanged(isOnline: false)
+        rig.race.connectionChanged(isOnline: false)
         rig.clock.advance(1.5)
-        rig.controller.tick()
-        #expect(rig.controller.takeover?.isReconnecting == false)
+        rig.race.tick()
+        #expect(!rig.race.isReconnecting)
         rig.clock.advance(0.5)
-        rig.controller.tick()
-        #expect(rig.controller.takeover?.isReconnecting == true, "the line after 2 s")
+        rig.race.tick()
+        #expect(rig.race.isReconnecting, "the line after 2 s")
         #expect(rig.model.phase == .raceSequence && rig.model.briefing?.isFleetLocked == true)
         rig.controller.connectionChanged(isOnline: true)
-        #expect(rig.controller.takeover?.isReconnecting == false)
+        rig.race.connectionChanged(isOnline: true)
+        #expect(!rig.race.isReconnecting)
         #expect(rig.model.phase == .raceSequence && rig.model.notice == nil)
     }
 
@@ -391,15 +407,15 @@ import Testing
         await rig.queued(4, 3)
         #expect(rig.controller.bar == nil, "the bar doesn't come back")
         await rig.controller.receive(.fleetLocked)
-        #expect(rig.model.phase == .home && rig.controller.takeover == nil)
+        #expect(rig.model.phase == .home && rig.race.phase == .idle)
         #expect(rig.haptics.impacts.isEmpty)
 
         // And after leaving a locked fleet, its lock said again is no new one.
         let locked = Rig()
         await locked.lock()
-        locked.controller.leaveRace()
+        locked.race.leaveRace()
         await locked.controller.receive(.fleetLocked)
-        #expect(locked.model.phase == .home && locked.controller.takeover == nil)
+        #expect(locked.model.phase == .home && locked.race.phase == .idle)
     }
 
     @Test func raceAgainJoinsThroughTheController() async {
@@ -423,7 +439,7 @@ import Testing
         for session in [bare, ScriptedRaceSessionService(RaceSessionScenario())] {
             let rig = Rig(raceSession: session)
             await rig.lock()
-            #expect(rig.model.phase == .home && rig.controller.takeover == nil)
+            #expect(rig.model.phase == .home && rig.race.phase == .idle)
             #expect(rig.controller.bar == nil && rig.controller.entry == .ready)
             #expect(rig.model.notice == AppModel.Notice(title: "Couldn't start the race", message: "Try Race online again."))
             #expect(!rig.model.isLiveryLocked)

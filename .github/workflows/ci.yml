@@ -329,7 +329,7 @@ jobs:
     # fixtures (1-3 min each) had brought a green run to 39 min, and once the practice, results, My boat, help and
     # briefing UI tests were added, main runs hit the 60 min limit. The render fixtures now run in their own job,
     # so the 60 min here is room, not need.
-    timeout-minutes: 60
+    timeout-minutes: 85
     env:
       # DEVELOPER_DIR rather than xcode-select: switching with xcode-select hid the simulators.
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer

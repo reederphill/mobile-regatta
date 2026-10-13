@@ -229,7 +229,7 @@ final class AppModel {
 
     /// The online results' Try it (#24, #25): My boat with the earned design on.
     func tryEarnedDesign(_ design: DesignID) {
-        endRaceSequence()
+        if phase == .raceSequence { endRaceSequence() }
         openMyBoat(trying: design)
     }
 
@@ -370,7 +370,8 @@ final class AppModel {
 
     /// Shows the briefing for a practice race on `config` (on the tuning panel's files in a Debug build), resolved
     /// once so the briefing and the race it leads to sail the same files. `mode` `.online` is the online briefing's
-    /// countdown, which #141 wires to the online race; here it leads to a practice race on `config`.
+    /// countdown as a Debug harness (`-briefing online`): it leads to a practice race on `config`. A locked fleet's
+    /// briefing is `takeOver`'s, and leads to its online race (#141).
     /// Only the practice setup's races (`beginPractice`, and Restart of one) go into the practice history (#235), not
     /// `-briefing`'s.
     func startBriefing(config: RaceConfig, mode: BriefingModel.Mode) {
@@ -459,7 +460,7 @@ final class AppModel {
     }
 
     /// Out of the race sequence to the bare home screen with the livery unlocked (#140): the briefing's Leave, a
-    /// cancelled race, the stand-in's end. `notice` shows on Home.
+    /// cancelled race, and every way out of an online race (#141). `notice` shows on Home.
     func endRaceSequence(notice: Notice?) {
         endRaceSequence()
         dismissAll()
@@ -468,6 +469,55 @@ final class AppModel {
     }
 
     func postNotice(_ notice: Notice) { self.notice = notice }
+
+    // MARK: The online race sequence (#141)
+
+    /// The race link for a hand-off's seat, with the race's results stream, built with this app's settings.
+    func onlineRaceLink(_ handOff: HandOff, connector: @escaping RaceConnector, service: any RaceSessionService) -> OnlineRaceLink {
+        let results = onlineResults(service: service, raceID: handOff.raceID)
+        // `-timescale` runs the fakes' race, as it does their queue and briefing.
+        let timescale = launchOptions.fakeServices == nil ? 1 : launchOptions.timescale
+        return OnlineRaceLink(handOff: handOff, connector: connector, results: results) { [self] connect, token in
+            OnlineLaunch(connect: connect, token: token, timescale: timescale, haptics: haptics, sound: sound,
+                         controls: controls, rulesSeen: rulesSeen, hints: hintEngine, onHintRetired: logsHintRetired,
+                         results: results)
+        }
+    }
+
+    /// The briefing gives way to the race it briefed, in the same cover: no archive, no notice, the music already out.
+    func showRace(_ launch: OnlineLaunch) {
+        guard phase == .raceSequence else { return }
+        if case .online(let shown) = race, shown === launch { return }
+        race = .online(launch)
+    }
+
+    func rejoinRace(_ launch: OnlineLaunch) {
+        dismissAll()
+        isLiveryLocked = true
+        startRaceSequence(.online(launch))
+    }
+
+    func setBriefingRemaining(_ seconds: Double) {
+        guard let briefing, briefing.isFleetLocked else { return }
+        briefing.endCountdown(in: seconds)
+    }
+
+    func setLiveryLocked(_ locked: Bool) { isLiveryLocked = locked }
+
+    func keepLastRace(_ results: RaceResultViewModel) { lastRace = results }
+
+    func keepLastRace(_ report: RaceReport, rating: RatingOutcome?) {
+        let results = RaceResultViewModel(lastRace: LastRace(report: report, rating: rating.map {
+            RatingChange(raceID: report.raceID, outcome: $0)
+        }), livery: myLivery)
+        if results.keepsAsLastRace { lastRace = results }
+    }
+
+    func setLastRaceRating(_ outcome: RatingOutcome, raceID: RaceID) {
+        guard var kept = lastRace, kept.online?.raceID == raceID.rawValue else { return }
+        kept.online?.rating = .init(outcome)
+        lastRace = kept
+    }
 
     /// Home's Last race takes `results` unless you retired from that race (#132): a RET leaves the one before. Your
     /// finish in `session` goes into the practice history the rivals' skill is set from (#235), once per race.

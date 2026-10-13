@@ -41,7 +41,8 @@ struct RootView: View {
             case .livery: LiveryGalleryView()
             case .briefing(let fixture): BriefingGalleryView(fixture: fixture)
             case .briefingLocked: BriefingGalleryView(fixture: nil)
-            case .practiceSetup, .pauseMenu, .myBoat, .help, .queueBar: MenuGalleryView(gallery: fixtureGallery, model: model)
+            case .practiceSetup, .pauseMenu, .myBoat, .help, .queueBar, .rejoin, .lastRaceRating:
+                MenuGalleryView(gallery: fixtureGallery, model: model)
             case .results(let stage, let rivalSkill): ResultsGalleryView(stage: stage, rivalSkill: rivalSkill)
             }
         } else if let harnessResults, let scenario = model.launchOptions.fakeServices {
@@ -88,17 +89,29 @@ struct RootView: View {
                                  QueueChip(state: $0.state, moment: RenderFixture.QueueFixture.moment, leave: {})
                              } ?? queueChip)
                         .id(ObjectIdentifier(session))
+                case .online(let launch) where launch.isSequence && onlineStatus != nil:
+                    // The online race sequence (#141): the race the briefing led to, or a rejoined one.
+                    if let sequence = onlineStatus?.race {
+                        OnlineSequenceView(launch: launch, race: sequence, deviceSettings: Bindable(model).deviceSettings,
+                                           onTryIt: { design in
+                                               sequence.home()
+                                               model.openMyBoat(trying: design)
+                                           })
+                            .id(ObjectIdentifier(launch))
+                    }
                 case .online(let launch):
                     OnlineLaunchView(launch: launch, onRestart: startOnlineRace, onExit: model.endRaceSequence,
                                      onRaceAgain: raceAgain, onTryIt: model.tryEarnedDesign)
                         .id(ObjectIdentifier(launch))
                 case .briefing(let briefing, _):
-                    if briefing.isFleetLocked, let queue = onlineStatus?.queue {
-                        // The takeover (#140): the locked fleet's briefing, with Leave; its end is the queue's.
-                        BriefingView(model: briefing, onAdvance: queue.briefingEnded, onBack: {},
-                                     leave: BriefingLeave(isConfirming: queue.takeover?.isConfirmingLeave ?? false,
-                                                          isReconnecting: queue.takeover?.isReconnecting ?? false,
-                                                          ask: queue.askToLeave, confirm: queue.leaveRace, stay: queue.stay))
+                    if briefing.isFleetLocked, let sequence = onlineStatus?.race {
+                        // The takeover (#140): the locked fleet's briefing, with Leave; its end and its Leave are the
+                        // race sequence's (#141).
+                        BriefingView(model: briefing, onAdvance: sequence.briefingEnded, onBack: {},
+                                     leave: BriefingLeave(isConfirming: sequence.isConfirmingLeave,
+                                                          isReconnecting: sequence.isReconnecting,
+                                                          ask: sequence.askToLeave, confirm: sequence.leaveRace,
+                                                          stay: sequence.stay))
                             .id(ObjectIdentifier(briefing))
                     } else {
                         BriefingView(model: briefing, onAdvance: model.finishBriefing, onBack: model.endRaceSequence)
@@ -112,7 +125,9 @@ struct RootView: View {
                     }
                 }
             }
-            .animation(reduceMotion ? nil : .easeInOut(duration: RaceCoverController.fadeDuration), value: isTakeover)
+            // The takeover's briefing fades in over a practice race, and out into the race it briefed (#141); a cut
+            // with Reduce Motion.
+            .animation(reduceMotion ? nil : .easeInOut(duration: RaceCoverController.fadeDuration), value: coverCase)
             // UI tests swipe on it and check it stays. A full-size element behind the race, not a container
             // around it: a container folds into the race view's own single element (`race-viewport`) and takes
             // over its identifier, and the viewport UI tests look the race rect up by it.
@@ -133,6 +148,16 @@ struct RootView: View {
             #if DEBUG
             .environment(model.tuning)
             #endif
+        }
+    }
+
+    /// Which of the cover's cases shows: the cross-fade keys on it.
+    private var coverCase: Int {
+        switch model.race {
+        case .practice: 0
+        case .online(let launch): launch.isSequence ? 1 : 2
+        case .briefing(let briefing, _): briefing.isFleetLocked ? 3 : 4
+        case nil: 5
         }
     }
 
@@ -197,14 +222,46 @@ struct RootView: View {
             case .ready: model.finishBriefing()
             case .takeover:
                 let lockedBy = ContinuousClock.now + .seconds(300)
-                while onlineStatus?.queue.takeover == nil, ContinuousClock.now < lockedBy { try? await Task.sleep(for: .milliseconds(100)) }
-            case .briefingLeave: onlineStatus?.queue.askToLeave()
+                while onlineStatus?.race.phase == .idle, ContinuousClock.now < lockedBy { try? await Task.sleep(for: .milliseconds(100)) }
+            case .briefingLeave, .raceLeave: onlineStatus?.race.askToLeave()
+            case .race: await wait(for: { $0 == .sequence || $0 == .racing || $0 == .joining || $0 == .done })
+            case .gun: await wait(for: { $0 == .racing || $0 == .done })
+            case .done: await wait(for: { $0 == .done })
+            case .raceMenu: onlineStatus?.race.openMenu()
+            case .confirmLeave: onlineStatus?.race.leaveRace()
+            case .raceHome: onlineStatus?.race.home()
+            case .raceAgain: await onlineStatus?.race.raceAgain()
+            case .rejoin: await onlineStatus?.race.rejoin()
+            case .leaderboard:
+                model.deviceSettings.liveLeaderboard = true
+                if case .online(let launch) = model.race, launch.session?.isLeaderboardExpanded == false {
+                    launch.session?.toggleLeaderboard()
+                }
+            case .lastRace: model.sheet = .lastRace
+            case .raceEnded: FakeRaceDirector.current?.endQuietly()
             case .home:
                 let homeBy = ContinuousClock.now + .seconds(300)
                 while model.phase != .home, ContinuousClock.now < homeBy { try? await Task.sleep(for: .milliseconds(100)) }
-            case .connectionLost: onlineStatus?.queue.connectionChanged(isOnline: false)
-            case .connectionRegained: onlineStatus?.queue.connectionChanged(isOnline: true)
+            case .connectionLost:
+                if onlineStatus?.race.phase == .idle || onlineStatus?.race.phase == .briefing {
+                    onlineStatus?.queue.connectionChanged(isOnline: false)
+                    onlineStatus?.race.connectionChanged(isOnline: false)
+                }
+                // In the race, the race server's connection drops and nothing answers.
+                FakeRaceDirector.current?.setReachable(false, dropping: onlineStatus?.race.link)
+            case .connectionRegained:
+                onlineStatus?.queue.connectionChanged(isOnline: true)
+                onlineStatus?.race.connectionChanged(isOnline: true)
+                FakeRaceDirector.current?.setReachable(true, dropping: nil)
             }
+        }
+    }
+
+    /// Waits, five minutes at most, for the race sequence's phase to satisfy `reached`.
+    private func wait(for reached: (OnlineRaceController.Phase) -> Bool) async {
+        let by = ContinuousClock.now + .seconds(300)
+        while let race = onlineStatus?.race, !reached(race.phase), ContinuousClock.now < by {
+            try? await Task.sleep(for: .milliseconds(100))
         }
     }
     #endif

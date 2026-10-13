@@ -12,6 +12,14 @@ public struct FleetRoster: Hashable, Sendable {
         /// A practice rival (#235, `Rivals`): a bot whose skill is set from the player's recent practice results. The
         /// app shows the word "Rival" beside her name; she still shows as a bot. Never online.
         public var isRival = false
+
+        /// `sailingName`: online, the name the server's roster gives the seat, a player's nickname included (#141).
+        public init(seat: Int, isBot: Bool, sailingName: String?, isRival: Bool = false) {
+            self.seat = seat
+            self.isBot = isBot
+            self.sailingName = sailingName
+            self.isRival = isRival
+        }
     }
 
     /// Sailing names: seabirds, never offered as handles. Enough for a full fleet of bots.
@@ -36,6 +44,11 @@ public struct FleetRoster: Hashable, Sendable {
             taken[index] = true
             return Entry(seat: seat, isBot: true, sailingName: names[index], isRival: rivals.contains(seat))
         }
+    }
+
+    /// A roster as the server gives it (#141): names and bot marks by seat, which a `RosterChange` replaces.
+    public init(entries: [Entry]) {
+        self.entries = entries
     }
 
     public subscript(seat: Int) -> Entry { entries[seat] }

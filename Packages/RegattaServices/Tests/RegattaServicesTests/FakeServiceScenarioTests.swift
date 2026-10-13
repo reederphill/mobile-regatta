@@ -15,7 +15,7 @@ import Testing
             "signed-out", "underage", "communication-restricted", "multiplayer-restricted", "offline", "queued", "cancelled-race",
             "online-results", "online-results-unrated", "terms-bump", "suspended", "suspended-permanent", "cooldown", "cannot-race",
             "update-required", "terms-save-failed", "session-failed", "unreachable", "connecting", "joinable", "joinable-alone",
-            "joinable-hold",
+            "joinable-hold", "rejoinable", "race-gone",
         ])
         for scenario in FakeServiceScenario.allCases {
             let services = ServiceSet.fake(scenario)
@@ -79,7 +79,7 @@ import Testing
                 #expect(try await services.raceSession.handOff().raceID == RaceID("fake-race"))
                 #expect(try await services.raceSession.handOff().briefing == FakeServiceScenario.briefing())
             // The queue from a tap to fleet lock (#140): idle, and a join plays the wait.
-            case .joinable, .joinableAlone, .joinableHold:
+            case .joinable, .joinableAlone, .joinableHold, .rejoinable, .raceGone:
                 #expect(queue == .idle)
                 await #expect(throws: QueueError.notQueued) { try await services.queue.leave() }
                 try await services.queue.join()

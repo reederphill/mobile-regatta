@@ -240,6 +240,46 @@ extension BriefingModelTests {
         #expect(try !Self.model(mode: Self.online).isFleetLocked)
     }
 
+    /// #141: once the race link is up the briefing ends on the race clock, sooner or later than the payload's
+    /// seconds from its receipt, and still advances once. Practice has no countdown to move.
+    @Test func onlineBriefingEndsAtAnAdjustedInstant() throws {
+        let payload = FakeServiceScenario.briefing()
+        let clock = FakeClock()
+        let model = BriefingModel(payload: payload, files: try RaceFiles(resolving: payload.setup), menuMusic: SilentMenuMusic(),
+                                  now: { clock.date })
+        model.begin()
+        clock.advance(5)
+        #expect(model.displayedSeconds == 10)
+        // The race clock says 4 s are left, not 10.
+        model.endCountdown(in: 4)
+        #expect(model.displayedSeconds == 4)
+        clock.advance(3.5)
+        #expect(!model.advanceIfDue())
+        // And later says 2 more: the end moves back.
+        model.endCountdown(in: 2.5)
+        clock.advance(2)
+        #expect(!model.advanceIfDue())
+        clock.advance(0.5)
+        #expect(model.advanceIfDue())
+        #expect(!model.advanceIfDue(), "once")
+        model.endCountdown(in: 9)
+        #expect(!model.advanceIfDue(), "an ended briefing doesn't start again")
+
+        // Before it has begun (the link was up before the briefing drew), the new end still counts.
+        let early = BriefingModel(payload: payload, files: try RaceFiles(resolving: payload.setup), menuMusic: SilentMenuMusic(),
+                                  now: { clock.date })
+        early.endCountdown(in: 3)
+        #expect(early.displayedSeconds == 3)
+        clock.advance(3)
+        #expect(early.advanceIfDue())
+
+        let practice = try Self.model(clock: clock)
+        practice.begin()
+        practice.endCountdown(in: 3)
+        clock.advance(10)
+        #expect(practice.secondsLeft == nil && !practice.advanceIfDue())
+    }
+
     /// #140: it counts down the payload's seconds, once, on the injected clock.
     @Test func onlineBriefingFromPayloadCountsDownBriefingSeconds() throws {
         var payload = FakeServiceScenario.briefing()

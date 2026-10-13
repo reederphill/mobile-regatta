@@ -5,7 +5,8 @@ import SwiftUI
 /// and `{ "gallery": "pauseMenu" }` the pause menu, its toggles at the device defaults, over the race's dark chrome;
 /// `{ "gallery": "myBoat", … }` My boat on the fixture's livery (#136); `{ "gallery": "help", … }` Help or one of its
 /// topics (#135); `{ "gallery": "queueBar", … }` the queue bar above the practice setup page, as above any pushed page
-/// (#140).
+/// (#140); `{ "gallery": "rejoin" }` Home with Rejoin race and its race clock, and `{ "gallery": "lastRaceRating" }`
+/// Home with a Last race row whose rating is in (#141), both online and signed in, whatever the device is.
 ///
 /// Like the race fixture (`RaceView`), it's one `render-fixture` element whose value is the bottom safe-area inset in
 /// points: the home-indicator band the diffs leave out.
@@ -43,12 +44,26 @@ struct MenuGalleryView: View {
             }
             .queueBar(queue.state, at: RenderFixture.QueueFixture.moment)
             .tint(ChromePalette.tint)
+        case .rejoin:
+            home(.rejoin)
+        case .lastRaceRating:
+            home(.lastRaceRating)
         default:
             NavigationStack {
                 PracticeSetupView(model: model)
             }
             .tint(ChromePalette.tint)
         }
+    }
+}
+
+extension MenuGalleryView {
+    /// Home as a fixture has it (#141), online and signed in, so the rest of the page holds still.
+    fileprivate func home(_ fixture: HomeFixture) -> some View {
+        HomeView(model: model, online: HomeOnlineActions(), fixture: fixture)
+            .environment(\.isOnline, true)
+            .environment(\.lobbyStatus, LobbyStatus(isSignedIn: true, hasAcceptedTerms: true))
+            .environment(\.onlineStatus, nil)
     }
 }
 

@@ -142,6 +142,13 @@ final class BriefingModel {
         if case .online(let seconds) = mode { countdown = BriefingCountdown(duration: seconds, start: now()) }
     }
 
+    /// The online briefing ends `seconds` from now instead (#141): the race clock's word, once the race link is up.
+    func endCountdown(in seconds: Double) {
+        guard case .online = mode, !hasAdvanced else { return }
+        hasBegun = true
+        countdown = BriefingCountdown(duration: max(0, seconds), start: now())
+    }
+
     /// Seconds left of an online briefing's countdown; nil in practice or before it begins.
     var secondsLeft: Double? { countdown?.remaining(at: now()) }
     /// The whole seconds the countdown shows (`BriefingCountdown.displayed(at:)`): the full length until it begins, so

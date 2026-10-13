@@ -120,6 +120,61 @@ import RegattaCore
         #expect(!session.isLeaderboardExpanded, "closed after 5 s")
     }
 
+    /// An online race has a menu and no pause (#141): pausing does nothing, and the race sails on under whatever is
+    /// over it.
+    @Test func onlineRaceHasAMenuAndStaysRunning() throws {
+        let rig = try OnlineRig()
+        rig.run(for: 1_000_000)
+        #expect(!rig.session.driver.isPausable)
+        rig.session.setPaused(true)
+        #expect(!rig.session.isPaused)
+        rig.session.pauseForBackground()
+        #expect(!rig.session.isPaused, "the background pauses an online race")
+        let tick = rig.driver.currentFrame.tick
+        rig.run(for: 1_000_000)
+        #expect(rig.driver.currentFrame.tick >= tick + Race.tickRate - 3, "the race stopped under its menu")
+    }
+
+    /// The session's roster is the server's as it stands (#141): the seat a leaver handed to a bot is named and
+    /// marked so wherever the session labels a seat. A practice roster never changes.
+    @Test func liveRosterLabelsFollowRosterChanges() throws {
+        let rig = try OnlineRig(collisionCourse: true)
+        rig.run(for: 500_000)
+        let before = rig.session.roster
+        #expect(before.label(of: 2, playerSeat: 0) == "Seat 3")
+        rig.server.handOver(seat: 2, to: "Fulmar")
+        rig.run(for: 500_000)
+        #expect(rig.session.roster != before)
+        #expect(rig.session.roster.label(of: 2, playerSeat: 0) == "\(BotGlyph.text) Fulmar")
+        #expect(rig.session.roster.label(of: 1, playerSeat: 0) == before.label(of: 1, playerSeat: 0))
+
+        let practice = GameSession(config: Self.config)
+        let roster = practice.roster
+        _ = practice.driver.tick(1)
+        practice.refreshHUD()
+        #expect(practice.roster == roster)
+        #expect(practice.hud.leaderboard.rows.allSatisfy { $0.name == nil }, "a practice board is nameless")
+    }
+
+    /// Opening the race menu lets go of the helm (#141): the rudder centres and a finger still down steers nothing,
+    /// while the race runs on.
+    @Test func releaseControlsCentresTheRudderOnline() throws {
+        let rig = try OnlineRig()
+        rig.run(for: 1_000_000)
+        let finger = 1
+        rig.session.scene.steering.scheme = .tiller
+        rig.session.scene.steering.touchBegan(finger, at: CGPoint(x: 100, y: 300), midX: 200)
+        rig.session.scene.steering.touchMoved(finger, to: CGPoint(x: 200, y: 300))
+        #expect(rig.session.scene.steering.rudder != 0)
+        rig.session.releaseControls()
+        #expect(rig.session.scene.steering.rudder == 0, "the rudder is centred")
+        rig.session.scene.steering.touchMoved(finger, to: CGPoint(x: 0, y: 300))
+        #expect(rig.session.scene.steering.rudder == 0, "the finger still down steers nothing")
+        let tick = rig.driver.currentFrame.tick
+        rig.run(for: 500_000)
+        #expect(!rig.session.isPaused && rig.driver.currentFrame.tick > tick)
+    }
+
     @Test func pausesOnlyAPausableDriver() {
         let session = GameSession(config: Self.config)
         session.setPaused(true)

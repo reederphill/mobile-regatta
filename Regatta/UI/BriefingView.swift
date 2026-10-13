@@ -45,7 +45,10 @@ struct BriefingView: View {
             if model.mode == .practice { buttons } else if let leave { leaveBar(leave) }
         }
         .overlay {
-            if let leave, leave.isConfirming { leaveConfirm(leave) }
+            if let leave, leave.isConfirming {
+                // The race's card too (#141); the countdown runs on behind it.
+                LeaveConfirm(place: .briefing, isBeforeGun: true, leave: leave.confirm, stay: leave.stay)
+            }
         }
         .foregroundStyle(ChromePalette.text)
         .background(ChromePalette.background.ignoresSafeArea())
@@ -121,38 +124,6 @@ struct BriefingView: View {
         .frame(maxWidth: .infinity)
         .background(ChromePalette.background.ignoresSafeArea())
         .overlay(alignment: .top) { Divider().overlay(ChromePalette.text.opacity(0.15)) }
-    }
-
-    /// "Leave the race?" (#140): over the briefing, whose countdown runs on behind it.
-    private func leaveConfirm(_ leave: BriefingLeave) -> some View {
-        ZStack {
-            Color.black.opacity(0.5).ignoresSafeArea()
-            VStack(spacing: 14) {
-                // TODO-COPY (#171)
-                Text("Leave the race?").font(MenuFont.heading(.title3))
-                Text("A bot takes your seat.").font(MenuFont.body()).foregroundStyle(ChromePalette.text.opacity(0.7))
-                HStack(spacing: 12) {
-                    Button(action: leave.confirm) {
-                        Text("Leave").font(MenuFont.body()).frame(maxWidth: .infinity).padding(.vertical, 6)
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityIdentifier("briefing-leave-confirm")
-                    Button(action: leave.stay) {
-                        Text("Stay").font(MenuFont.heading(.headline)).frame(maxWidth: .infinity).padding(.vertical, 6)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .accessibilityIdentifier("briefing-leave-stay")
-                }
-                .controlSize(.large)
-            }
-            .multilineTextAlignment(.center)
-            .padding(24)
-            .frame(maxWidth: 360)
-            .background(ChromePalette.surface, in: .rect(cornerRadius: 20))
-            .padding(.horizontal, 24)
-            .accessibilityElement(children: .contain)
-            .accessibilityAddTraits(.isModal)
-        }
     }
 
     private var buttons: some View {

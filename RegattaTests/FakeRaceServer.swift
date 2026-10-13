@@ -15,6 +15,8 @@ import RegattaProtocol
 /// - Answers pings; sends a snapshot every 3rd tick with the input feedback; every event on the reliable
 ///   stream (all of them reach every seat but the notices), and wind key k at tick `windowStart(k) − 30`.
 /// - Answers `RequestResync` with a `Resync`.
+/// - `LeaveRace` releases the seat for good (#141): counted, and no join is answered after it.
+/// - `handOver(seat:to:)` gives a seat to a bot under a sailing name, as a `RosterChange` (#149).
 /// - With `collisionCourse`, sets two seats nobody helms head to head, for a foul at a known time.
 /// - With `markRoomAt`, sets the client's boat and a seat nobody helms by the windward mark at that tick, the other
 ///   boat owed mark-room by hers (#386).
@@ -54,6 +56,8 @@ nonisolated final class FakeRaceServer {
     private(set) var appliedHeld: [(tick: Int, rudder: Int8)] = []
     private(set) var resyncsSent = 0
     private(set) var joins = 0
+    /// Each `LeaveRace` the client sent from its seat.
+    private(set) var leaves = 0
 
     /// Seat 0 is the client's and the rest are bots, but with `collisionCourse` seats 1 and 2 are human seats
     /// nobody helms, set on a collision course (`setCollisionCourse`); with `markRoomAt`, seat 1 is a human seat
@@ -160,6 +164,12 @@ nonisolated final class FakeRaceServer {
 
     private(set) var closed = false
 
+    /// The player in `seat` gave it up before the gun: a bot sails it under `name` from now on (#149).
+    func handOver(seat: Int, to name: String) {
+        let entry = RosterEntry(name: name, colorIndex: race.boats[seat].colorIndex, isBot: true)
+        sendReliable(Frame(seq: reliableSeq, tick: race.tick, message: .rosterChange(RosterChange(seat: seat, entry: entry))))
+    }
+
     private func receive(_ frame: Frame) {
         switch frame.message {
         case .hello:
@@ -168,7 +178,7 @@ nonisolated final class FakeRaceServer {
             } else {
                 send(.helloAck(HelloAck(serverBuild: "fake")), tick: 0)
             }
-        case .joinRace where !closed:
+        case .joinRace where !closed && leaves == 0:
             seated = true
             joins += 1
             let start = RaceStart(yourSeat: clientSeat, setup: race.setup,
@@ -193,6 +203,9 @@ nonisolated final class FakeRaceServer {
             send(.pong(Pong(clientTime: ping.clientTime, sinceTickMicros: UInt16(clamping: since))), tick: race.tick)
         case .requestResync where seated:
             sendResync()
+        case .leaveRace where seated:
+            leaves += 1
+            seated = false
         default:
             break
         }
