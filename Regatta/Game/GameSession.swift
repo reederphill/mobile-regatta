@@ -329,6 +329,8 @@ final class GameSession {
 
     /// The bottom row's instruments' display smoothing (#457), in race time.
     @ObservationIgnored private var instrumentSmoother = InstrumentSmoother()
+    /// The speed tile's planing yellow (#492), eased in race time.
+    @ObservationIgnored private var planingTile = PlaningTile()
 
     /// The scene steps the live race for the first time (`GameScene.update`): the notice slot's clock starts again
     /// from here (#129). The steering hint is posted as the race is set up, before its clock shows, and setting up
@@ -362,6 +364,9 @@ final class GameSession {
         let name: ((Int) -> String)? = driver is OnlineDriver ? { roster.label(of: $0, playerSeat: me) } : nil
         var hud = HUDState(world: world, isBot: { roster[$0].isBot }, name: name)
         hud.shownInstruments = instrumentSmoother.step(hud.instruments, at: hud.clock)
+        let style = scene.boatStyle
+        hud.planingYellow = planingTile.step(isPlaning: hud.isPlaning, at: hud.clock, seconds: style.planingTileSeconds)
+            * style.planingTileAlpha.clamped(to: 0...1)
         hud.pressureImage = samplesPressure ? minimapField.refresh(world) : minimapField.image
         self.hud = hud
         if !driver.isFrozen {

@@ -57,5 +57,17 @@
         "fixtures": ["cues-footed"],
         "log": "cues.racelog.json", "camera": "race", "clear": [210, 110, 20],
         "leg": 0, "racing": true, "groove": "footing", "grooveDegrees": [2, 15], "markInView": false, "sailsWorkingInView": 2
+    },
+    {
+        "fixtures": ["planing", "planing-deuteranopia", "planing-greyscale", "planing-protanopia", "planing-tritanopia",
+                     "planing-washout"],
+        "log": "planing.racelog.json", "camera": "race", "clear": [210, 110, 20],
+        "leg": 2, "racing": true, "planeMargin": [1, 1], "planingSeconds": 3, "planingInView": 2
+    },
+    {
+        "fixtures": ["planing-edge", "planing-edge-deuteranopia", "planing-edge-greyscale", "planing-edge-protanopia",
+                     "planing-edge-tritanopia", "planing-edge-washout"],
+        "log": "planing.racelog.json", "camera": "race", "clear": [210, 110, 20],
+        "leg": 2, "racing": true, "planeMargin": [0.03, 0.2], "planingSeconds": 8
     }
 ]

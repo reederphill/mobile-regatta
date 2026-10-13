@@ -198,7 +198,7 @@ import RegattaCore
     private static func snapshot(_ scene: SKScene) -> (cues: [String], tiered: [String]) {
         var cues: [String] = [], tiered: [String] = []
         func visit(_ node: SKNode, path: String, isTiered: Bool) {
-            let tiered_ = isTiered || ["ripple", "sail", "wake"].contains(node.name ?? "")
+            let tiered_ = isTiered || ["ripple", "sail", "wake", "cornerWake"].contains(node.name ?? "")
             let line = "\(path) \(describe(node))"
             if tiered_ { tiered.append(line) } else { cues.append(line) }
             for (i, child) in node.children.enumerated() {

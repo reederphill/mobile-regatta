@@ -371,7 +371,7 @@ import UIKit
         // Every scene log sails the default class (#466): after a default switch `scripts/record-fixtures.sh --record`
         // re-records them all, and CI's renders of the new framing are the owner's to adopt (#354).
         #expect(log.header.setup.boatClass == RaceFiles.defaults.boatClass.ref)
-        for scene in ["rules-call", "rules-penalty", "cues", "rules-turn", "rules-turn-gybe"] {
+        for scene in ["rules-call", "rules-penalty", "cues", "rules-turn", "rules-turn-gybe", "planing"] {
             let (_, sceneLog) = try RenderFixture.load(named: scene, in: Self.fixtures)
             #expect(sceneLog.header.setup.boatClass == RaceFiles.defaults.boatClass.ref, "\(scene)")
         }
@@ -397,6 +397,72 @@ import UIKit
             expected.vision = vision
             #expect(twin == expected, "\(vision)")
         }
+    }
+
+    /// The planing cue fixtures (#492) on their own scene's log (`scripts/fixture-scenes.json`: the first run, where
+    /// once you have planed a while you run deeper until you fall off, `runDeeper`), each with the HUD and its
+    /// instruments: `planing` comfortably on the plane, your margin full, your stern-corner wakes at their longest
+    /// and another planing boat's in the picture; `planing-edge` later on the same run at the edge of it, your margin
+    /// nearly gone and the wakes near their shortest, still drawn. In both your speed tile is yellow under dark
+    /// figures and VoiceOver says so. Their twins are the same frames through each other filter.
+    @Test func planingFixturesShowThePlaningCue() throws {
+        let style = BoatStyle.standard
+        #expect(PlaneMargin.ranges(style) == BoatClass.PlaningTuning.MarginRanges.standard,
+                "the fixtures' rows read the margin at core's standard ranges (regatta-replay's planeMargin)")
+        var drawn: [String: (share: Double, reach: CGFloat, tick: Int)] = [:]
+        for (name, margins, others) in [("planing", 1.0...1.0, 1), ("planing-edge", 0.03...0.2, 0)] {
+            let (fixture, log) = try RenderFixture.load(named: name, in: Self.fixtures)
+            #expect(fixture.log == "planing.racelog.json" && fixture.cameraMode == .courseUp && fixture.hud?.instruments == true)
+            let session = try GameSession(fixture: fixture, log: log)
+            let world = session.driver.renderWorld
+            let me = world.me
+            #expect(me.isPlaning && me.status == .racing && me.legIndex == 2 && !world.frame.isJustSeated, "\(name)")
+            let margin = PlaneMargin.of(me, boatClass: world.boatClass, style: style)
+            #expect(margins.contains(margin), "\(name): margin \(margin)")
+
+            #expect(session.showsFixtureInstruments && session.hud.isPlaning, "\(name)")
+            let model = HUDModel(session.hud)
+            #expect(model.speedTileYellow == style.planingTileAlpha && model.speedTileHasDarkFigures, "\(name)")
+            #expect(model.speedAccessibilityValue.hasSuffix("knots, planing"), "\(name)")
+
+            let (scene, _) = try DrawOrderTests.scene(fixture: name)
+            let wakes = Self.cornerWakes(scene)
+            let planing = world.boats.indices.filter { world.boats[$0].isPlaning && !world.isGhost(ofSeat: $0) }
+            #expect(wakes.count == planing.count && wakes.count >= 1 + others, "\(name): \(wakes.count) of \(planing)")
+            // Yours: the pair that ends at your stern.
+            let ppm = CGFloat(GameScene.pointsPerMeter)
+            let mine = try #require(wakes.min { Self.gap($0, me, ppm) < Self.gap($1, me, ppm) })
+            #expect(Self.gap(mine, me, ppm) < CGFloat(world.boatClass.hull.length) * ppm, "\(name)")
+            let share = CornerWakes.target(margin: margin, level: 1, style: style)
+            let box = try #require(mine.path?.boundingBox)
+            drawn[name] = (share, hypot(box.width, box.height) / CGFloat(me.velocityOverGround.length), fixture.freezeTick)
+            #expect(abs(mine.alpha - CGFloat(style.cornerWakeAlpha)) < 1e-6, "\(name): at their full alpha")
+
+            for vision in VisionFilter.allCases where vision != .none {
+                let (twin, _) = try RenderFixture.load(named: "\(name)-\(vision.rawValue)", in: Self.fixtures)
+                var expected = fixture
+                expected.vision = vision
+                #expect(twin == expected, "\(name) \(vision)")
+            }
+        }
+        let full = try #require(drawn["planing"]), edge = try #require(drawn["planing-edge"])
+        #expect(full.share == 1 && edge.share < 0.45 && edge.share >= style.cornerWakeMinShare)
+        #expect(edge.tick > full.tick)
+        // A second of her track is drawn shorter at the edge, by about the shares.
+        #expect(edge.reach < full.reach * 0.6 && edge.reach > full.reach * 0.2, "\(edge.reach) against \(full.reach)")
+    }
+
+    /// The stern-corner wakes (#492) `scene` draws: every boat's that isn't hidden.
+    static func cornerWakes(_ scene: GameScene) -> [SKShapeNode] {
+        guard let effects = scene.childNode(withName: "//effects") else { return [] }
+        return effects.children.compactMap { $0 as? SKShapeNode }.filter { $0.name == "cornerWake" && !$0.isHidden }
+    }
+
+    /// How far `wake`'s box is from `boat`, points: nothing when she is in or on it.
+    private static func gap(_ wake: SKShapeNode, _ boat: Boat, _ ppm: CGFloat) -> CGFloat {
+        guard let box = wake.path?.boundingBox, !box.isNull else { return .infinity }
+        let p = CGPoint(x: CGFloat(boat.position.x) * ppm, y: CGFloat(boat.position.y) * ppm)
+        return hypot(max(box.minX - p.x, 0, p.x - box.maxX), max(box.minY - p.y, 0, p.y - box.maxY))
     }
 
     /// A row of `scripts/fixture-freeze-ticks.json`, as far as the app's camera can check it.

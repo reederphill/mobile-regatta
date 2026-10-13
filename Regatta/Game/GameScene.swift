@@ -324,7 +324,8 @@ final class GameScene: SKScene {
             boatNodes[i].hidesDecoration = drawsCuesOnly
             boatNodes[i].update(with: boat, pose: pose, style: boatStyle, wakeQuality: wakeQuality,
                                 sailDetail: sailDetail, hullsFromYou: hullsFromYou, time: world.time, dt: dt,
-                                settled: settled, backwindSail: backwind.sail, backwindSide: backwind.side)
+                                settled: settled, backwindSail: backwind.sail, backwindSide: backwind.side,
+                                justSeated: world.frame.isJustSeated)
         }
         // The sim's ribbons at the time drawn, between the last two ticks (`ribbons(of:time:)`). Not while the world
         // isn't painted (`-hideScene`): they are pure paint and most of a 16-boat frame's render (#377), so a hidden

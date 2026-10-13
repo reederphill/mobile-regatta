@@ -18,19 +18,22 @@ final class BoatEffects {
     /// space, so it bends with her turns and the current carries it (the string of #15). Its alpha is the
     /// pressure's (`WakeShape`).
     let trail = SKShapeNode()
+    /// The stern-corner wakes of a planing boat (#492): two lines either side of the wake, one path, over the newest
+    /// part of the same track. Their length is her plane margin (`CornerWakes`); hidden off the plane.
+    let cornerTrail = SKShapeNode()
 
     /// The nodes the scene adds to its effects layer.
-    var nodes: [SKNode] { [backwind, trail] }
+    var nodes: [SKNode] { [backwind, trail, cornerTrail] }
 
     /// How many nodes she draws on the water: `nodes` and their children (the `-perf` log).
     var nodeCount: Int { nodes.reduce(0) { $0 + 1 + $1.children.count } }
 
     /// The z's within a boat's effects, each boat a `DrawOrder` slot above the last by seat: the fleet's ribbons under
-    /// every backwind under every wake; the streak over its V.
+    /// every backwind under every corner wake under every wake; the streak over its V.
     enum Layer {
         /// The fleet's ribbons (`TurbulenceTrailLayer`), under every boat's slot.
         static let ribbons: CGFloat = -0.5
-        static let backwind: CGFloat = 0.1, wake: CGFloat = 0.5
+        static let backwind: CGFloat = 0.1, cornerWake: CGFloat = 0.3, wake: CGFloat = 0.5
     }
 
     private let ppm: CGFloat
@@ -42,8 +45,15 @@ final class BoatEffects {
     private(set) var shape: WakeShape?
     /// How far on the plane her wake is drawn, settling and lifting over `BoatStyle.wakePlaningSeconds` (#462).
     private(set) var planing: PlaningEase?
-    /// Where her stern has been, world points, oldest first, each with the race time it was there.
-    private var history: [(point: CGPoint, time: Double)] = []
+    /// How much of her stern-corner wakes is drawn, following her plane margin (#492), and how far on the plane the
+    /// planing cue draws her: `planing`'s twin over the plane the cue counts (`PlaningCue`), the same but while the
+    /// fleet has only just been seated.
+    private(set) var corners: CornerWakes?
+    private var cuePlaning: PlaningEase?
+    /// Where her stern has been, world points, oldest first, each with the race time it was there and her starboard
+    /// hand then (a unit vector in scene space: the corner wakes start out along it).
+    private var history: [TrackSample] = []
+    private typealias TrackSample = (point: CGPoint, time: Double, right: CGVector)
     /// The race time the history last took a sample.
     private var lastSample = -Double.infinity
     private static let sampleInterval = 0.1
@@ -66,17 +76,27 @@ final class BoatEffects {
         trail.alpha = 0
         // Named, so a test can tell what the thermal tiers change from the rest (#127).
         trail.name = "wake"
+        cornerTrail.strokeColor = CuePalette.cueWhite.uiColor
+        cornerTrail.lineWidth = CGFloat(style.cornerWakeWidth)
+        cornerTrail.lineCap = .round
+        cornerTrail.lineJoin = .round
+        cornerTrail.alpha = 0
+        cornerTrail.isHidden = true
+        // Named as the wake is: the short tier shortens them with it.
+        cornerTrail.name = "cornerWake"
 
         let slot = DrawOrder.z(seat)
         backwind.zPosition = Layer.backwind + slot
+        cornerTrail.zPosition = Layer.cornerWake + slot
         trail.zPosition = Layer.wake + slot
     }
 
     /// Draws `boat`'s effects in `pose` at race time `time`. `settled` draws the wake straight at its target, with no easing (a frozen render fixture). `backwindSail`, 0...1, her backwind level, scales her
     /// backwind's alpha and `backwindSide` (nil: her windward side now) is the side it lies on (#377,
     /// `RenderWorld.backwind(ofSeat:)`): a fading zone keeps the side it was cast on past her boom crossing.
+    /// `justSeated` (`TickFrame.isJustSeated`) draws no stern-corner wakes for the plane the race seated her on (#492).
     func update(with boat: Boat, pose: BoatPose, style: BoatStyle, quality: WakeQuality, time: Double, dt: Double,
-                settled: Bool, backwindSail: Double = 1, backwindSide: Tack? = nil) {
+                settled: Bool, backwindSail: Double = 1, backwindSide: Tack? = nil, justSeated: Bool = false) {
         // Her backwind trails her: it turns after her heading and her apparent wind, not with them, as the air she
         // disturbed does (`BoatStyle.shadowFollowSeconds`). Drawn only; core's backwind is cast at once.
         let followed = follow(heading: boat.heading, wind: boat.apparentWind.direction, dt: dt,
@@ -111,7 +131,8 @@ final class BoatEffects {
         // Her stern's track, in world space: the current bends it, as it bends the water.
         let sternPoint = CGPoint(x: stern.x * ppm, y: stern.y * ppm)
         let seconds = quality == .short ? style.wakeTrailSeconds * max(style.wakeShortShare, 0) : style.wakeTrailSeconds
-        record(sternPoint, boat: boat, time: time, seconds: seconds, ghost: pose.isGhost, settled: settled)
+        let right = CGVector(dx: boat.forward.y, dy: -boat.forward.x)
+        record(sternPoint, right: right, boat: boat, time: time, seconds: seconds, ghost: pose.isGhost, settled: settled)
 
         let path = CGMutablePath()
         if let first = history.first {
@@ -123,6 +144,61 @@ final class BoatEffects {
         trail.lineWidth = CGFloat(style.wakeTrailWidth)
         trail.alpha = CGFloat(shape.alpha) * (pose.isGhost ? CGFloat(style.ghostAlpha) : 1)
         trail.isHidden = history.isEmpty || trail.alpha < 0.005
+
+        // Her stern-corner wakes (#492): as long as her plane margin, coming and going as her wake's planing look
+        // does, over the plane the cue counts. A ghost draws hers in, as she does her wake.
+        let planes = PlaningCue.shows(boat, justSeated: justSeated) && !pose.isGhost
+        let margin = planes ? PlaneMargin.of(boat, boatClass: boatClass, style: style) : 0
+        var cuePlaning = (settled ? nil : cuePlaning) ?? PlaningEase(isPlaning: planes)
+        cuePlaning.advance(isPlaning: planes, dt: dt, seconds: style.wakePlaningSeconds)
+        self.cuePlaning = cuePlaning
+        let level = pose.isGhost ? 0 : cuePlaning.level
+        var corners = (settled ? nil : corners) ?? CornerWakes(margin: margin, isPlaning: planes, level: level, style: style)
+        corners.advance(margin: margin, isPlaning: planes, level: level, dt: dt, style: style)
+        self.corners = corners
+        let cornerSeconds = corners.seconds(wakeSeconds: seconds, style: style)
+        let offset = CGFloat(style.cornerWakeOffsetShare * boatClass.hull.beam / 2) * ppm
+        let cornerPath = CGMutablePath()
+        if cornerSeconds > 0.02 {
+            for side in [CGFloat(-1), 1] {
+                addCorner(to: cornerPath, from: time - cornerSeconds, offset: offset * side,
+                          now: (point: sternPoint, time: time, right: right))
+            }
+        }
+        cornerTrail.path = cornerPath
+        cornerTrail.lineWidth = CGFloat(style.cornerWakeWidth)
+        cornerTrail.alpha = CGFloat(corners.alpha(style: style))
+        cornerTrail.isHidden = cornerPath.isEmpty || cornerTrail.alpha < 0.005
+    }
+
+    /// Adds one stern-corner wake to `path`: her track since race time `from`, each point `offset` points out along her
+    /// starboard hand as it was there, ending at `now`. Its far end falls between two samples, so it grows and shrinks
+    /// evenly, not a sample at a time.
+    private func addCorner(to path: CGMutablePath, from: Double, offset: CGFloat, now: TrackSample) {
+        func out(_ sample: TrackSample) -> CGPoint {
+            CGPoint(x: sample.point.x + sample.right.dx * offset, y: sample.point.y + sample.right.dy * offset)
+        }
+        var before: TrackSample?
+        var started = false
+        for sample in history + [now] {
+            guard sample.time >= from else {
+                before = sample
+                continue
+            }
+            if started {
+                path.addLine(to: out(sample))
+                continue
+            }
+            started = true
+            guard let before, sample.time > before.time else {
+                path.move(to: out(sample))
+                continue
+            }
+            let t = CGFloat((from - before.time) / (sample.time - before.time))
+            let a = out(before), b = out(sample)
+            path.move(to: CGPoint(x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t))
+            path.addLine(to: b)
+        }
     }
 
     /// Moves the heading and apparent wind her shadow is drawn along `dt` race seconds towards hers (exponential, over
@@ -144,14 +220,15 @@ final class BoatEffects {
     /// `seconds`, and a ghost's string drawn in as she stops casting one. Time that runs backwards (an online
     /// re-prediction) starts it over. `settled` (a frozen fixture) lays it straight astern at her speed over the
     /// ground, as if she had always sailed that way.
-    private func record(_ point: CGPoint, boat: Boat, time: Double, seconds: Double, ghost: Bool, settled: Bool) {
+    private func record(_ point: CGPoint, right: CGVector, boat: Boat, time: Double, seconds: Double, ghost: Bool, settled: Bool) {
         if settled {
             let astern = boat.velocityOverGround * -1
             let steps = max(Int(seconds / Self.sampleInterval), 0)
             history = (1...max(steps, 1)).reversed().map { step in
                 let back = Double(step) * Self.sampleInterval
                 return (point: CGPoint(x: point.x + CGFloat(astern.x * back) * ppm,
-                                       y: point.y + CGFloat(astern.y * back) * ppm), time: time - back)
+                                       y: point.y + CGFloat(astern.y * back) * ppm), time: time - back,
+                        right: right)
             }
             lastSample = time
             return
@@ -163,7 +240,7 @@ final class BoatEffects {
             if ghost {
                 if !history.isEmpty { history.removeFirst() }
             } else {
-                history.append((point: point, time: time))
+                history.append((point: point, time: time, right: right))
             }
         }
         history.removeAll { time - $0.time > seconds }

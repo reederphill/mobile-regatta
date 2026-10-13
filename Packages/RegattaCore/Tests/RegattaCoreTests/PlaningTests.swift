@@ -590,3 +590,217 @@ enum SkiffNine {
         }
     }
 }
+
+/// #492: the plane margin (`PlaningTuning.planeMargin`), what the planing cue draws: how far a planing boat is from
+/// the nearer edge of the rule, read from the rule's own terms.
+@Suite struct PlaneMarginTests {
+    typealias Rule = BoatClass.PlaningTuning
+    static let knot = metresPerSecond(knots: 1)
+    let polar = SkiffNine.boatClass.polar
+    let rule = SkiffNine.boatClass.planing!
+    /// skiff@9's rule with only its speed share, and with only its apparent wind.
+    var speedOnly: Rule {
+        var rule = rule
+        rule.apparentWind = nil
+        return rule
+    }
+    var windOnly: Rule {
+        var rule = rule
+        rule.stayOnSpeedShare = nil
+        return rule
+    }
+
+    func margin(_ rule: Rule? = nil, on: Bool = true, twa: Double, knots: Double, tws: Double,
+                ranges: Rule.MarginRanges = .standard) -> Double {
+        (rule ?? self.rule).planeMargin(isPlaning: on, twa: deg2rad(twa), speed: knots * Self.knot, tws: tws * Self.knot,
+                                        polar: polar, ranges: ranges)
+    }
+
+    func polarKnots(twa: Double, tws: Double) -> Double { polar.speed(twa: deg2rad(twa), tws: tws * Self.knot) / Self.knot }
+
+    func apparentKnots(twa: Double, knots: Double, tws: Double) -> Double {
+        Rule.apparentWindSpeed(twa: deg2rad(twa), speed: knots * Self.knot, tws: tws * Self.knot) / Self.knot
+    }
+
+    func apparentDegrees(twa: Double, knots: Double, tws: Double) -> Double {
+        rad2deg(acos(Rule.apparentWindCosine(twa: deg2rad(twa), speed: knots * Self.knot, tws: tws * Self.knot)))
+    }
+
+    /// Off the plane it is 0, whatever she is doing; and a class without the rule (every skiff before skiff@9, and
+    /// skiff@9 with the two values taken out) reads 1 while she planes, on 20,000 random inputs each.
+    @Test func zeroOffThePlaneAndOneOnItWithoutTheRule() throws {
+        var rules = try (1...8).map { try #require(try BoatClassFile.bundled(id: "skiff", version: $0).content.planing) }
+        var stripped = rule
+        stripped.stayOnSpeedShare = nil
+        stripped.apparentWind = nil
+        rules.append(stripped)
+        var random = SplitMix64(seed: 492)
+        for (index, older) in rules.enumerated() {
+            for _ in 0..<20_000 {
+                let twa = random.range(0, .pi), speed = random.range(0, 12), tws = random.range(0, 14)
+                #expect(older.planeMargin(isPlaning: true, twa: twa, speed: speed, tws: tws, polar: polar) == 1, "rule \(index + 1)")
+                #expect(older.planeMargin(isPlaning: false, twa: twa, speed: speed, tws: tws, polar: polar) == 0)
+                #expect(rule.planeMargin(isPlaning: false, twa: twa, speed: speed, tws: tws, polar: polar) == 0)
+            }
+        }
+    }
+
+    /// The speed edge, with the apparent wind aft of the beam (170° in 18 kn, where she is slower than the wind behind her even at the polar's speed): 0 at the class's
+    /// stay-on share of the polar and below, 1 at 0.85 of the polar's speed and above, straight between, so never
+    /// falling as she speeds up; and a narrower range reads 1 sooner, a wider one later.
+    @Test func speedEdgeRunsFromTheStayOnShareToThePolar() {
+        let full = polarKnots(twa: 170, tws: 18)
+        #expect(apparentDegrees(twa: 170, knots: 1.2 * full, tws: 18) > 90 && apparentDegrees(twa: 170, knots: 0.5 * full, tws: 18) > 90)
+        #expect(margin(speedOnly, twa: 170, knots: 0.7 * full, tws: 18) < 1e-9)
+        #expect(margin(speedOnly, twa: 170, knots: 0.6 * full, tws: 18) == 0)
+        #expect(Rule.MarginRanges.standard.fullSpeedShare == 0.85)
+        #expect(abs(margin(speedOnly, twa: 170, knots: 0.775 * full, tws: 18) - 0.5) < 1e-9)
+        #expect(abs(margin(speedOnly, twa: 170, knots: 0.7375 * full, tws: 18) - 0.25) < 1e-9)
+        #expect(margin(speedOnly, twa: 170, knots: 0.85 * full, tws: 18) > 1 - 1e-9 && margin(speedOnly, twa: 170, knots: 1.2 * full, tws: 18) == 1)
+        let wide = Rule.MarginRanges(fullSpeedShare: 1)
+        #expect(abs(margin(speedOnly, twa: 170, knots: 0.85 * full, tws: 18, ranges: wide) - 0.5) < 1e-9)
+        var last = 0.0
+        for share in stride(from: 0.5, through: 1.2, by: 0.01) {
+            let next = margin(speedOnly, twa: 170, knots: share * full, tws: 18)
+            #expect(next >= last && (0...1).contains(next))
+            last = next
+        }
+        let narrow = Rule.MarginRanges(fullSpeedShare: 0.8)
+        #expect(abs(margin(speedOnly, twa: 170, knots: 0.75 * full, tws: 18, ranges: narrow) - 0.5) < 1e-9)
+        // No range at all: on or off at the share.
+        let none = Rule.MarginRanges(fullSpeedShare: 0.7)
+        #expect(margin(speedOnly, twa: 170, knots: 0.71 * full, tws: 18, ranges: none) == 1)
+        #expect(margin(speedOnly, twa: 170, knots: 0.69 * full, tws: 18, ranges: none) == 0)
+    }
+
+    /// The apparent wind edge: 0 at the floor (4.0 kn) and under it, 1 from 3 kn over it, straight between; in very
+    /// light wind from the tapered floor (3.6 kn at 6 kn of wind); whatever the rudder, which it is not asked.
+    @Test func apparentWindEdgeRunsUpFromTheFloor() throws {
+        // 170° in 10 kn at 9 kn: under 2 kn of apparent wind. 150° at 8.21 kn: 4.2 kn; slower she has more.
+        #expect(margin(windOnly, twa: 170, knots: 9, tws: 10) == 0)
+        for (twa, knots, tws) in [(150.0, 8.21, 8.0), (150, 7, 8), (140, 9, 10), (120, 12, 10), (160, 9, 14), (150, 6.5, 6)] {
+            let floor = min(4.0, 0.6 * tws)
+            let expected = ((apparentKnots(twa: twa, knots: knots, tws: tws) - floor) / 3).clamped(to: 0...1)
+            #expect(abs(margin(windOnly, twa: twa, knots: knots, tws: tws) - expected) < 1e-9, "\(twa)° \(knots) kn in \(tws) kn")
+        }
+        #expect(abs(margin(windOnly, twa: 150, knots: 8.21, tws: 8) - 0.2 / 3) < 0.02)
+        #expect(margin(windOnly, twa: 120, knots: 12, tws: 10) == 1)
+        // The taper: 3.9 kn of apparent wind is under the floor at 8 kn of wind and over it at 6.
+        let slow = try #require(stride(from: 5.0, through: 9, by: 0.01).first { abs(apparentKnots(twa: 150, knots: $0, tws: 6) - 3.9) < 0.01 })
+        #expect(abs(margin(windOnly, twa: 150, knots: slow, tws: 6) - 0.1) < 0.01)
+        #expect(margin(windOnly, twa: 155, knots: 9.19, tws: 8) == 0)
+        // A wider range reads less of the same wind.
+        let wide = Rule.MarginRanges(apparentRange: 6 * Self.knot)
+        let narrow = margin(windOnly, twa: 140, knots: 7, tws: 8)
+        #expect(narrow > 0.1 && narrow < 1 && abs(margin(windOnly, twa: 140, knots: 7, tws: 8, ranges: wide) * 2 - narrow) < 1e-9)
+    }
+
+    /// With both values it is the nearer edge: the lesser of the two on 50,000 random inputs, always 0...1.
+    @Test func itIsTheNearerEdge() {
+        var random = SplitMix64(seed: 4920)
+        var speedNearer = 0, windNearer = 0
+        for _ in 0..<50_000 {
+            let twa = rad2deg(random.range(deg2rad(55), .pi)), tws = random.range(5, 22)
+            let knots = random.range(0.5, 1.15) * polarKnots(twa: twa, tws: tws)
+            let both = margin(twa: twa, knots: knots, tws: tws)
+            let speed = margin(speedOnly, twa: twa, knots: knots, tws: tws), wind = margin(windOnly, twa: twa, knots: knots, tws: tws)
+            #expect(both == min(speed, wind) && (0...1).contains(both))
+            if speed < wind { speedNearer += 1 } else if wind < speed { windNearer += 1 }
+        }
+        #expect(speedNearer > 1000 && windNearer > 1000)
+    }
+
+    /// It reads the rule: wherever the rule drops a planing boat on either of the two edges with the rudder centred, the
+    /// margin is 0, and wherever the margin is above 0 the rule keeps her on, on 200,000 random inputs past the two
+    /// older edges (6 kn, 55°), which the margin leaves out. The other way, the rudder over: the rule may keep her on
+    /// where the margin is 0 (the gate it ignores).
+    @Test func zeroWhereverTheRuleDropsHer() {
+        var random = SplitMix64(seed: 49200)
+        var dropped = 0, kept = 0, gated = 0
+        for _ in 0..<200_000 {
+            let twa = random.range(rule.offBelowTWA, .pi), tws = random.range(4, 22) * Self.knot
+            let speed = max(random.range(0.4, 1.2) * polar.speed(twa: twa, tws: tws), rule.offSpeed)
+            let margin = rule.planeMargin(isPlaning: true, twa: twa, speed: speed, tws: tws, polar: polar)
+            let stays = rule.isPlaning(was: true, twa: twa, speed: speed, tws: tws, rudder: 0, polar: polar)
+            if stays { kept += 1 } else { dropped += 1 }
+            #expect(stays || margin == 0, "dropped at margin \(margin): \(rad2deg(twa))° \(speed / Self.knot) kn in \(tws / Self.knot) kn")
+            if margin == 0, rule.isPlaning(was: true, twa: twa, speed: speed, tws: tws, rudder: 1, polar: polar) { gated += 1 }
+            // And 0 only at an edge: a margin of 0 that the rule sails on from is within a hair of one.
+            if stays && margin == 0 {
+                let nudged = rule.isPlaning(was: true, twa: twa, speed: speed * 0.999, tws: tws * 0.999, rudder: 0, polar: polar)
+                    && rule.isPlaning(was: true, twa: twa, speed: speed * 1.001, tws: tws, rudder: 0, polar: polar)
+                #expect(!nudged, "0 away from the edge: \(rad2deg(twa))° \(speed / Self.knot) kn in \(tws / Self.knot) kn")
+            }
+        }
+        #expect(dropped > 10_000 && kept > 10_000 && gated > 100)
+    }
+
+    /// No backwards moment (#485's finding): a boat just on the plane, still slow, bears away and her apparent wind
+    /// crosses the beam, where the rule starts asking for her speed. The margin comes down over the band forward of
+    /// it and never steps: bearing away 0.02° at a time it moves under 0.02 a step, at every speed and wind. With no
+    /// band it is the prototype's margin, and steps from 1 to near nothing in one.
+    @Test func continuousAsTheApparentWindCrossesTheBeam() {
+        var crossings = 0, steepest = 0.0, prototypeJump = 0.0
+        for tws in [8.0, 10, 14, 18] {
+            for share in [0.6, 0.7, 0.8, 0.9, 0.95] {
+                // Her speed held, a share of the wind's, as she bears away from a reach to a run: slower than the wind,
+                // so her apparent wind comes aft of the beam on the way.
+                var last: (margin: Double, flat: Double, apparent: Double)?
+                for step in 0...4000 {
+                    let twa = 90 + Double(step) * 0.02
+                    let knots = share * tws
+                    let apparent = apparentDegrees(twa: twa, knots: knots, tws: tws)
+                    let next = (margin: margin(twa: twa, knots: knots, tws: tws),
+                                flat: margin(twa: twa, knots: knots, tws: tws, ranges: .init(angleBand: 0)), apparent: apparent)
+                    if let last {
+                        steepest = max(steepest, abs(next.margin - last.margin))
+                        #expect(abs(next.margin - last.margin) < 0.02, "\(tws) kn, \(share): \(last.margin) to \(next.margin) at \(twa)°")
+                        if last.apparent <= 90 && apparent > 90 {
+                            crossings += 1
+                            prototypeJump = max(prototypeJump, last.flat - next.flat)
+                            // Aft of the beam the band is done: the rule's speed edge and nothing else.
+                            #expect(next.margin == next.flat)
+                        }
+                        // The band only ever adds to the prototype's speed edge forward of the beam, never aft.
+                        #expect(apparent > 90 ? next.margin == next.flat : next.margin <= next.flat)
+                    }
+                    last = next
+                }
+            }
+        }
+        #expect(crossings == 20)
+        #expect(prototypeJump > 0.5, "with no band the margin steps at the beam: \(prototypeJump)")
+        #expect(steepest > 0)
+    }
+
+    /// The same along the other two ways she moves: slowing or speeding up, and the wind rising or falling, a
+    /// hundredth of a knot at a time, the margin moves under 0.02 a step.
+    @Test func continuousInSpeedAndWind() {
+        for twa in stride(from: 60.0, through: 178, by: 2) {
+            for tws in [6.0, 6.67, 8, 10, 14, 18] {
+                var last: Double?
+                for knots in stride(from: 6.0, through: 20, by: 0.01) {
+                    let next = margin(twa: twa, knots: knots, tws: tws)
+                    if let last { #expect(abs(next - last) < 0.02, "\(twa)° in \(tws) kn at \(knots) kn: \(last) to \(next)") }
+                    last = next
+                }
+            }
+            for knots in [7.0, 9, 11, 13, 16] {
+                var last: Double?
+                for tws in stride(from: 4.0, through: 22, by: 0.01) {
+                    let next = margin(twa: twa, knots: knots, tws: tws)
+                    if let last { #expect(abs(next - last) < 0.02, "\(twa)° at \(knots) kn in \(tws) kn: \(last) to \(next)") }
+                    last = next
+                }
+            }
+        }
+    }
+
+    /// Forward of the band the speed edge is out of it, as it is out of the rule: at 110° in 10 kn at 8.5 kn (0.69 of
+    /// the polar, the apparent wind well forward of the beam) she reads full, where the same share aft of the beam is 0.
+    @Test func slowWithTheApparentWindForwardSheReadsFull() {
+        #expect(apparentDegrees(twa: 110, knots: 8.5, tws: 10) < 75)
+        #expect(margin(twa: 110, knots: 8.5, tws: 10) == 1)
+        #expect(margin(speedOnly, twa: 150, knots: 0.69 * polarKnots(twa: 150, tws: 10), tws: 10) == 0)
+    }
+}

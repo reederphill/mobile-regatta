@@ -397,6 +397,18 @@ enum TuningCatalog {
                     boat("wakePlaningBoost", "Planing wake", \.wakePlaningBoost, 1...2.5, 0.05),
                     // #462: on and off the plane her wake lifts and settles, never snaps.
                     boat("wakePlaningSeconds", "Planing wake comes and goes over", \.wakePlaningSeconds, 0...4, 0.1, unit: " s"),
+                    // #492: the planing cue. An alpha of 0 switches either half off.
+                    boat("cornerWakeLengthShare", "Corner wake length (of the middle wake)", \.cornerWakeLengthShare, 0.1...1, 0.05),
+                    boat("cornerWakeMinShare", "Corner wake shortest on the plane (of its length)", \.cornerWakeMinShare, 0...1, 0.05),
+                    boat("cornerWakeWidth", "Corner wake width", \.cornerWakeWidth, 0.5...4, 0.25, unit: " pt"),
+                    boat("cornerWakeAlpha", "Corner wake alpha", \.cornerWakeAlpha, 0...1, 0.02),
+                    boat("cornerWakeOffsetShare", "Corner wake offset (of half the beam)", \.cornerWakeOffsetShare, 0...2, 0.05),
+                    boat("cornerWakeEaseRate", "Corner wake length follows at", \.cornerWakeEaseRate, 0.5...12, 0.5, unit: " /s"),
+                    boat("planeMarginFullSpeedShare", "Plane margin: full at speed share", \.planeMarginFullSpeedShare, 0.75...1.2, 0.01),
+                    boat("planeMarginApparentKnots", "Plane margin: full at apparent wind over the floor", \.planeMarginApparentKnots, 0.5...8, 0.25, unit: " kn"),
+                    boat("planeMarginAngleBandDegrees", "Plane margin: speed edge comes in over", \.planeMarginAngleBandDegrees, 0...45, 1, unit: "°"),
+                    boat("planingTileAlpha", "Planing speed tile yellow", \.planingTileAlpha, 0...1, 0.05),
+                    boat("planingTileSeconds", "Planing speed tile comes and goes over", \.planingTileSeconds, 0...3, 0.1, unit: " s"),
                     boat("coneAlpha", "Cone hatch", \.coneAlpha, 0...0.4, 0.01),
                     boat("backwindShare", "Backwind hatch", \.backwindShare, 0...6, 0.1),
                     boat("backwindFeather", "Backwind edge softness", \.backwindFeather, 0...8, 0.5, unit: " pt"),
