@@ -13,8 +13,9 @@
 # the second person with `regatta-loadclient --queue-player` (for a Mac two simulators are too much for).
 #
 #   DEMO_HOST     the server, host:port (default 127.0.0.1:8080; the simulators share the Mac's loopback)
-#   DEMO_DEVICES  two simulators, comma-separated, each a name or a UDID (default "iPhone 17 Pro,iPhone 17"; a name is
-#                 the available one on the newest runtime)
+#   DEMO_DEVICES  two simulators, comma-separated, each a name or a UDID (default "iPhone 17 Pro,iPhone 17e"; a name is
+#                 the available one on the newest runtime). Not the iPhone 17: the test runs' simulator, which a
+#                 test in another worktree reinstalls its own app on.
 #   DEMO_PLAYERS  two dev player numbers (default "1 2": "Dev 1" and "Dev 2")
 #
 # The build holds check.sh's build lock (scripts/heavy.sh): don't run this script under heavy.sh.
@@ -24,7 +25,7 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
 host="${DEMO_HOST:-127.0.0.1:8080}"
-IFS=',' read -r device_a device_b <<< "${DEMO_DEVICES:-iPhone 17 Pro,iPhone 17}"
+IFS=',' read -r device_a device_b <<< "${DEMO_DEVICES:-iPhone 17 Pro,iPhone 17e}"
 read -r player_a player_b <<< "${DEMO_PLAYERS:-1 2}"
 bundle=com.phillreeder.regatta
 derived="$root/.build/check/DerivedData"
@@ -71,11 +72,24 @@ sys.exit("demo-online.sh: no available simulator " + wanted)
 ' "$1"
 }
 
-# Boots the simulator $1 (a UDID) if it isn't, and installs the app.
+# Boots the simulator $1 (a UDID) if it isn't, and installs the app. A simulator this boots is cold: sets cold.
+cold=0
 prepare() {
-    xcrun simctl boot "$1" > /dev/null 2>&1 || true
+    if xcrun simctl boot "$1" > /dev/null 2>&1; then cold=1; fi
     xcrun simctl bootstatus "$1" > /dev/null
     xcrun simctl install "$1" "$app"
+}
+
+# The app's first launch on a simulator that has just booted takes longer than a short QUEUE_LOCK_SECONDS, and the
+# fleet would lock on one of the two alone: --auto launches it there once beforehand, not queueing.
+warm_up() {
+    (( auto && cold )) || return 0
+    echo "== a first launch on the simulators just booted (25 s)"
+    local device
+    for device in "$@"; do
+        xcrun simctl launch "$device" "$bundle" -onlineHost "$host" > /dev/null
+    done
+    sleep 25
 }
 
 # Launches the app on the simulator $1 as the dev player $2.
@@ -93,6 +107,7 @@ open -a Simulator
 # Both installed before either launches, so the two queue close together.
 prepare "$device_a"
 if (( headless )); then
+    warm_up "$device_a"
     launch "$device_a" "$player_a"
     port="${host##*:}"
     echo "== the second person, headless: Dev $player_b"
@@ -100,6 +115,7 @@ if (( headless )); then
 else
     device_b="$(udid_of "$device_b")"
     prepare "$device_b"
+    warm_up "$device_a" "$device_b"
     launch "$device_a" "$player_a"
     launch "$device_b" "$player_b"
     if (( auto )); then

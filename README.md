@@ -404,7 +404,9 @@ scripts/demo-online.sh
 ```
 
 The simulators share the Mac's loopback. In each, tap Race online and agree to the terms once (`--auto` taps both for
-you). Both must join within `QUEUE_LOCK_SECONDS` of the first. The briefing lists "Dev 1" and "Dev 2" as people among
+you, after a first launch on a simulator it had to boot, whose slow start would miss the lock). Both must join within
+`QUEUE_LOCK_SECONDS` of the first. The simulators are the iPhone 17 Pro and the iPhone 17e (`DEMO_DEVICES`), not the
+iPhone 17 the test runs use. The briefing lists "Dev 1" and "Dev 2" as people among
 the bots, the gun is 75 s after the lock, each sees the other on the leaderboard, and the race closes 90 s after the gun
 with results and a rating; Race again queues. `--headless-second` launches one simulator and plays the second person
 with `regatta-loadclient --queue-player 2`. Two phones on your Wi-Fi can race the same server (`HOST=0.0.0.0`, its LAN
