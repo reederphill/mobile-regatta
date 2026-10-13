@@ -24,9 +24,9 @@ public struct BotSuiteOptions: Hashable, Sendable {
     public var jobs: Int?
     /// Where to write the JSON report; `-` for stdout (the text report then goes to stderr).
     public var jsonPath: String?
-    /// `--diagnose` (#471): also watch every race for why boats start late, what their penalty turns cost and why they
-    /// don't finish (`RaceObserver`), and add the tables to the report (`BotSuiteReport.diagnose`). The races, and the
-    /// rest of the report, are the same with it or without.
+    /// `--diagnose` (#471): also watch every race for why boats start late, what their penalty turns cost, why they
+    /// don't finish and how wide they round the marks (`RaceObserver`), and add the tables to the report
+    /// (`BotSuiteReport.diagnose`). The races, and the rest of the report, are the same with it or without.
     public var diagnose = false
     public var help = false
 
@@ -47,8 +47,8 @@ public struct BotSuiteOptions: Hashable, Sendable {
           --laps <n>             laps per race instead of the matrix's
           --json <path|->        write the JSON report there (- for stdout)
           --diagnose             also print, and write under the JSON's "diagnose" key, why boats start late,
-                                 what their penalty turns cost and why they don't finish; the races and the
-                                 rest of the report are the same with it or without
+                                 what their penalty turns cost, why they don't finish and how wide they round
+                                 the marks; the races and the rest of the report are the same with it or without
           --jobs <n>             races sailed at once (default: the performance cores; 1 = one after another).
                                  The report is the same for any n but for the tick times
         Exits 1 when the run misses the thresholds, 2 on a usage or setup error.
