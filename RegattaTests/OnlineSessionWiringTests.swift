@@ -547,6 +547,28 @@ extension OnlineSessionWiringTests {
     }
 }
 
+/// Settings' Dev player field (#162): a phone's way to a dev identity without launch arguments.
+extension OnlineSessionWiringTests {
+    @Test func theDevPlayerIsTheArgumentOrTheSettingsField() throws {
+        let name = "OnlineSessionWiringTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        func number(_ arguments: [String] = []) -> Int? {
+            DevIdentity.number(launchOptions: LaunchOptions(arguments: ["Regatta"] + arguments), defaults: defaults)
+        }
+        #expect(number() == nil)
+        #expect(number(["-devIdentity", "7"]) == 7)
+        defaults.set("12", forKey: DevIdentity.defaultsKey)
+        #expect(number() == 12)
+        #expect(number(["-devIdentity", "7"]) == 7, "the argument wins")
+        #expect(number(["-uitesting"]) == nil, "a UI test never picks up the field")
+        for junk in ["", "abc", "-3"] {
+            defaults.set(junk, forKey: DevIdentity.defaultsKey)
+            #expect(number() == nil, "\(junk)")
+        }
+    }
+}
+
 /// The race link's address (#162).
 @MainActor @Suite struct RaceConnectorTests {
     @Test func theConnectorOpensTheServiceHostsRaceURL() throws {

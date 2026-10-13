@@ -55,7 +55,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
             device = GameKitDeviceIdentity(gameKit: identity)
         }
         #if DEBUG
-        if let number = launchOptions.devIdentity, launchOptions.fakeServices == nil {
+        if let number = DevIdentity.number(launchOptions: launchOptions, defaults: .standard), launchOptions.fakeServices == nil {
             device = DevIdentity.device(number, restrictions: launchOptions.devRestrictions)
         }
         #endif
