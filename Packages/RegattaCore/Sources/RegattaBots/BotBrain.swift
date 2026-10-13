@@ -357,8 +357,11 @@ struct BotBrain: Sendable {
             // to her groove (anywhere else she luffs to it as before): from a broad reach on port that drove her at the
             // line beside the committee boat with 19 s to go, over early, and running back swept her into it; luffing
             // again, across the starboard boats (#388, seed 1 of `aBotTakingOverBeforeTheGunStarts`).
+            // Near a mark of her leg a reach refused is held as the closest course to it on her own tack instead: the
+            // mirror reaches her away from it (`refusedTurnAim`, #509).
             var own = aim
             own.tack = boat.tack
+            if let held = refusedTurnAim(aim, boat, view) { own = held }
             if boat.status == .prestart || boat.status == .ocs {
                 let running = sailingAngle(boat) >= .pi / 2
                 let groove = Aim.groove(.upwind, tack: boat.tack, angle: grooveAngle(.upwind, boat, view))
@@ -1003,7 +1006,7 @@ struct BotBrain: Sendable {
     /// more: slower, the tap leaves her head to wind. A gybe keeps her sails full, so it needs none.
     static let tackingSpeed = 0.75
     /// That share for a tack she steers by hand within `PlaningTable.markRange` of a mark or gate of her course
-    /// (`tacksFromLowerSpeed`, #508): slow out of a rounding or a layline tack and refused the next one, she sailed
+    /// (`isNearMarkOfHerLeg`, #508): slow out of a rounding or a layline tack and refused the next one, she sailed
     /// her groove away from the mark at speed until she had the 0.75. A tap's tack keeps `tackingSpeed`: slower, the
     /// tap leaves her head to wind. Before her start and on the finish leg she keeps it too: there `isNearHerMark`
     /// is a point of her start or the line, and from 0.55 she turned into a penalty before the gun (#471).
@@ -1046,12 +1049,13 @@ struct BotBrain: Sendable {
         guard view.time - lastTapTime >= Self.tapInterval, isClearToTurn(b, view) else { return false }
         guard abs(sailingAngle(b)) < .pi / 2 else { return hasGybeRoom(b, view) }
         let closeHauled = view.boatClass.polar.bestUpwind(tws: b.polarWindSpeed).speed * b.speedShadow
-        return b.speed >= closeHauled * (byHand && tacksFromLowerSpeed(b, view) ? Self.nearMarkTackingSpeed : Self.tackingSpeed)
+        return b.speed >= closeHauled * (byHand && isNearMarkOfHerLeg(b, view) ? Self.nearMarkTackingSpeed : Self.tackingSpeed)
     }
 
-    /// Whether a tack by hand goes from `nearMarkTackingSpeed`: racing, near a mark or gate she rounds. Not before
-    /// her start or returning to it, and not on the finish leg, where `isNearHerMark` is no mark of her course.
-    func tacksFromLowerSpeed(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+    /// Whether she is racing near a mark or gate she rounds: there a tack by hand goes from `nearMarkTackingSpeed`
+    /// (#508), and a turn refused holds the closest course to her mark (`refusedTurnAim`, #509). Not before her start
+    /// or returning to it, and not on the finish leg, where `isNearHerMark` is no mark of her course.
+    func isNearMarkOfHerLeg(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
         guard isNearHerMark, b.status == .racing, view.course.legs.indices.contains(b.legIndex),
               case .round = view.course.legs[b.legIndex] else { return false }
         return true

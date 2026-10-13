@@ -28,12 +28,13 @@ import Testing
     /// class has the new planing rule", skiff@9's `stayOnSpeedShare` and `apparentWind`): all-bot races through the
     /// start and the first beat, and through two laps with their runs, pinned on #462's core tip before any bot code
     /// changed (re-pinned there on fleet-rules@6, #490's default, and on #508: the windward final approach and the lower
-    /// tacking speed by hand near her mark are every class's).
+    /// tacking speed by hand near her mark are every class's; the two laps again on #509, whose hold of a turn refused
+    /// near her mark is every class's too: the start and the first beat have none and kept their digest).
     @Test func skiffEightBotsAreBitIdentical() throws {
         let short = try Self.digest(seed: 459, boatClass: Self.skiffEight)
         let long = try Self.digest(seed: 462, boatClass: Self.skiffEight, seconds: 700)
         #expect(hex64(short) == "0x2f226740a8699d03")
-        #expect(hex64(long) == "0xc80a7d2307b70922")
+        #expect(hex64(long) == "0xd70ad36f891de8fa")
     }
 
     // MARK: - skiff@8: tacks and gybes by hand

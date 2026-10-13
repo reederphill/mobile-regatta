@@ -564,4 +564,236 @@ import RegattaCore
         _ = decides.decide(view)
         #expect(decides.plannedTack == .starboard)
     }
+
+    // MARK: - A turn refused near her mark (#509)
+
+    /// Seat 0 posed on the reach to the offset mark with the mark on the other side of the wind, and a bot for her helm.
+    struct RefusedTurn {
+        let race: Race
+        var brain: BotBrain
+        let mark: Vec2
+        var view: SeatView { race.seatView(for: 0) }
+
+        /// Her aim at the mark itself: what `navigate` makes of it, noting how near she is (`isNearHerMark`).
+        mutating func aim() -> Aim {
+            let view = view
+            return brain.navigate(view.own, to: mark, view)
+        }
+    }
+
+    /// Seat 0 on the offset mark's leg on starboard, `metres` from the offset mark, which bears `reach` radians off the
+    /// wind on its port side: hers only after a tack or gybe. She sails halfway between that reach mirrored onto
+    /// starboard and the end of her own tack's range that points nearest the mark (her upwind groove when she `luffs`
+    /// for it, her downwind one when not), so the two ask for opposite rudder; at `speedShare` of her close-hauled
+    /// speed. Seat 1 far off, or as `other` places her from seat 0's pose. The baseline bot on the water's class.
+    static func refusedTurn(reach: Double, luffs: Bool, metres: Double = 40, speedShare: Double = 1, seed: UInt64 = 3,
+                            other: ((BotConductTests.Placement, BotConductTests.Water) -> BotConductTests.Placement)? = nil,
+                            edit: @escaping (inout WorldSnapshot) -> Void = { _ in }) throws -> RefusedTurn {
+        let water = BotConductTests.Water(seed: seed)
+        let course = water.race.course
+        let mark = course.elements[CourseLayout.offsetIndex].marks[0].position
+        var brain = BotBrain(style: BotConductTests.skill1, profile: .baseline, seed: 1)
+        brain.tactics.headerThreshold = nil
+        brain.tactics.downwindShiftThreshold = nil
+        brain.tactics.corridor = 100
+        brain.laylineError = (1, 0)
+        var wind = water.race.groundWind(at: mark).direction
+        var up = water.up.twa
+        var down = water.down.twa
+        var posed: RefusedTurn?
+        // The wind bends over the water, so she is placed by the wind where she is, as `finalApproach` is.
+        for _ in 0..<3 {
+            let position = mark - Vec2.heading(wind + reach) * metres
+            let own = BotConductTests.Placement(position: position, heading: wind - (reach + (luffs ? up : down)) / 2,
+                                                speed: water.up.speed * speedShare, legIndex: 1)
+            let far = BotConductTests.Placement(position: mark - course.upwind * 300 + course.right * 150,
+                                                heading: water.beat(.starboard), speed: water.up.speed)
+            let race = try BotConductTests.place(water, [own, other?(own, water) ?? far]) { snapshot in
+                snapshot.seats[0].boat.penaltyTurnsOwed = 0
+                snapshot.seats[0].boat.penaltyProgress = 0
+                snapshot.seats[0].boat.penaltyClockTick = nil
+                edit(&snapshot)
+            }
+            let turn = RefusedTurn(race: race, brain: brain, mark: mark)
+            let view = turn.view
+            wind = view.own.windDirection
+            up = brain.grooveAngle(.upwind, view.own, view)
+            down = brain.grooveAngle(.downwind, view.own, view)
+            posed = turn
+        }
+        let turn = try #require(posed)
+        try #require(turn.view.own.tack == .starboard)
+        return turn
+    }
+
+    /// #509 acceptance: refused the tack or gybe onto a reach back at her mark within `PlaningTable.markRange` of it,
+    /// she holds the end of her own tack's range that points nearest the mark (her upwind groove for a close reach, her
+    /// downwind one for a broad one) rather than the reach mirrored onto her tack, which sailed her away from it
+    /// (#464: 143 of 276 tail roundings); whatever refused it, by hand and by the tap.
+    @Test func refusedTurnNearHerMarkReachesBackTowardsIt() throws {
+        let classes = [("by hand, skiff@8", BotHandTackTests.skiffEight.ref), ("by the tap, skiff@6", try BotHelmTests.autohelmOn().ref)]
+        for (name, boatClass) in classes {
+            try BotConductTests.$waterClass.withValue(boatClass) {
+                // A close reach back at it (65° off the wind) is nearest through the wind; a broad one, through dead downwind.
+                for (reach, luffs) in [(deg2rad(65), true), (deg2rad(125), false)] {
+                    let label = "\(name), mark \(Int(rad2deg(reach).rounded()))° off the wind"
+                    var turn = try Self.refusedTurn(reach: reach, luffs: luffs)
+                    let view = turn.view
+                    let own = view.own
+                    let aim = turn.aim()
+                    try #require(aim.tack == .port && aim.groove == nil && turn.brain.isNearHerMark, "\(label): \(aim)")
+                    try #require(abs(aim.angle - reach) < deg2rad(1), "\(label)")
+                    let up = turn.brain.grooveAngle(.upwind, own, view)
+                    let down = turn.brain.grooveAngle(.downwind, own, view)
+
+                    let held = try #require(turn.brain.refusedTurnAim(aim, own, view), "\(label)")
+                    #expect(held.tack == own.tack && held.groove == nil && held.tolerance == aim.tolerance, "\(label)")
+                    #expect(held.angle == (luffs ? up : down), "\(label): holds \(rad2deg(held.angle))°")
+                    // Nearer the mark's bearing than the mirror, and than her tack's other end.
+                    let bearing = aim.heading(wind: own.windDirection)
+                    func off(_ angle: Double) -> Double { abs(wrapAngle(own.windDirection - angle - bearing)) }
+                    #expect(off(held.angle) < off(aim.angle) - deg2rad(5), "\(label): \(rad2deg(off(held.angle)))° off against the mirror's \(rad2deg(off(aim.angle)))°")
+                    #expect(off(held.angle) <= off(luffs ? down : up), "\(label)")
+
+                    // Posed between the two, the hold and the mirror ask for opposite rudder.
+                    let towards = wrapAngle(held.heading(wind: own.windDirection) - own.heading)
+                    let mirrored = wrapAngle(own.windDirection - aim.angle - own.heading)
+                    try #require(towards * mirrored < 0 && abs(towards) > deg2rad(3), "\(label)")
+
+                    // Free to turn, she turns for the mark.
+                    var free = turn.brain
+                    let turned = free.decide(view)
+                    #expect(turned.tap == .tackGybe || free.handTurn != nil, "\(label): free to turn she did not, groove \(rad2deg(up))° to \(rad2deg(down))°, \(turned.input)")
+
+                    // A turn just made (`tapInterval`).
+                    var waiting = turn.brain
+                    waiting.lastTapTime = view.time
+                    try #require(!waiting.canTap(own, view, byHand: BotBrain.turnsByHand(view)), "\(label)")
+                    let decision = waiting.decide(view)
+                    #expect(decision.tap == nil && waiting.handTurn == nil, "\(label)")
+                    #expect(decision.input.rudderValue * towards > 0,
+                            "\(label): rudder \(decision.input.rudderValue), the hold is \(rad2deg(towards))° off her bow")
+
+                    // A boat where the turn would take her (`tapIsClear`): refused, and the hold is the same.
+                    var crossed = try Self.refusedTurn(reach: reach, luffs: luffs, other: { own, water in
+                        let after = 2 * water.wind - own.heading
+                        return .init(position: own.position + Vec2.heading(after) * (water.length * 2), heading: own.heading,
+                                     speed: 0, legIndex: 1)
+                    })
+                    let crossing = crossed.view
+                    let reaching = crossed.aim()
+                    #expect(!crossed.brain.tapIsClear(crossing.own, crossing), "\(label)")
+                    #expect(!crossed.brain.canTap(crossing.own, crossing, byHand: BotBrain.turnsByHand(crossing)), "\(label)")
+                    #expect(crossed.brain.refusedTurnAim(reaching, crossing.own, crossing)?.angle == held.angle, "\(label)")
+
+                    // Too slow to tack: half her close-hauled speed.
+                    guard luffs else { continue }
+                    var slow = try Self.refusedTurn(reach: reach, luffs: luffs, speedShare: 0.5)
+                    let slowView = slow.view
+                    let slowAim = slow.aim()
+                    try #require(!slow.brain.canTap(slowView.own, slowView, byHand: BotBrain.turnsByHand(slowView)), "\(label)")
+                    let slowHeld = try #require(slow.brain.refusedTurnAim(slowAim, slowView.own, slowView), "\(label)")
+                    let slowDecision = slow.brain.decide(slowView)
+                    #expect(slowDecision.tap == nil && slow.brain.handTurn == nil, "\(label)")
+                    #expect(slowDecision.input.rudderValue * wrapAngle(slowHeld.heading(wind: slowView.own.windDirection) - slowView.own.heading) > 0,
+                            "\(label): slow, rudder \(slowDecision.input.rudderValue)")
+                }
+            }
+        }
+    }
+
+    /// #509: held on her downwind end, the hold is a downwind aim like any other and keeps the planing floor
+    /// (`downwindAim`, `floorAim`): on skiff@9, on the plane but slow for her angle just round a mark, she is held no
+    /// deeper than keeps her planing, not on the bare groove; off the plane, where there is no floor to keep, the groove.
+    @Test func refusedTurnHeldDownwindKeepsThePlaningFloor() throws {
+        try BotConductTests.$waterClass.withValue(BotPlaningTests.skiffNine.ref) {
+            var floored = 0
+            for seed in UInt64(1)...6 {
+                var turn = try Self.refusedTurn(reach: deg2rad(125), luffs: false, speedShare: 0.6, seed: seed)
+                turn.brain.senses.planing = true
+                let view = turn.view
+                let own = view.own
+                let aim = turn.aim()
+                try #require(aim.tack == .port && aim.groove == nil && turn.brain.isNearHerMark, "seed \(seed): \(aim)")
+                let down = turn.brain.grooveAngle(.downwind, own, view)
+                let kept = turn.brain.floorAim(own, view, aim: Aim(angle: down, tack: own.tack, tolerance: aim.tolerance, ease: aim.ease))
+                let held = try #require(turn.brain.refusedTurnAim(aim, own, view), "seed \(seed)")
+                #expect(held.tack == own.tack && held.angle == kept.angle,
+                        "seed \(seed): holds \(rad2deg(held.angle))°, the floor is \(rad2deg(kept.angle))° and her groove \(rad2deg(down))°")
+                if held.angle < down - deg2rad(1) { floored += 1 }
+
+                turn.brain.senses.planing = false
+                let off = turn.aim()
+                #expect(turn.brain.refusedTurnAim(off, own, view)?.angle == down, "seed \(seed): off the plane")
+            }
+            #expect(floored >= 3, "held above her groove in \(floored) waters of 6")
+        }
+    }
+
+    /// #509: away from her marks, and where `isNearHerMark` is no mark of her course (before her start, returning to
+    /// it, on the finish leg), a refused turn is sailed as before, the plan's angle on her own tack; and a refused tack
+    /// on the beat is her own groove, near her mark too.
+    @Test func refusedTurnAwayFromMarksStillSailsHerGroove() throws {
+        let classes = [("by hand, skiff@8", BotHandTackTests.skiffEight.ref), ("by the tap, skiff@6", try BotHelmTests.autohelmOn().ref)]
+        for (name, boatClass) in classes {
+            try BotConductTests.$waterClass.withValue(boatClass) {
+                // 90 m out: the same reach, the same refusals, the mirror.
+                for speedShare in [1, 0.5] {
+                    var far = try Self.refusedTurn(reach: deg2rad(55), luffs: true, metres: 90, speedShare: speedShare)
+                    let view = far.view
+                    let aim = far.aim()
+                    try #require(aim.tack == .port && aim.groove == nil && !far.brain.isNearHerMark, "\(name)")
+                    far.brain.lastTapTime = view.time
+                    #expect(far.brain.refusedTurnAim(aim, view.own, view) == nil, "\(name), 90 m out at \(speedShare)")
+                }
+
+                // Near a point that is no mark of her course.
+                let finishLeg = try #require(BotConductTests.Water(seed: 3).race.course.legs.lastIndex { if case .finish = $0 { true } else { false } })
+                let elsewhere: [(String, (inout WorldSnapshot) -> Void)] = [
+                    ("before her start", { $0.seats[0].boat.status = .prestart }),
+                    ("returning to her start", { $0.seats[0].boat.status = .ocs }),
+                    ("on the finish leg", { $0.seats[0].boat.legIndex = finishLeg }),
+                ]
+                for (place, pose) in elsewhere {
+                    var near = try Self.refusedTurn(reach: deg2rad(55), luffs: true, edit: pose)
+                    let view = near.view
+                    let aim = near.aim()
+                    try #require(aim.tack == .port && aim.groove == nil && near.brain.isNearHerMark, "\(name) \(place)")
+                    #expect(near.brain.refusedTurnAim(aim, view.own, view) == nil, "\(name) \(place)")
+                }
+
+                // Near her mark: a groove on the other tack is her own groove, and an aim on her own tack is hers.
+                var near = try Self.refusedTurn(reach: deg2rad(55), luffs: true)
+                let nearView = near.view
+                let reach = near.aim()
+                try #require(near.brain.refusedTurnAim(reach, nearView.own, nearView) != nil)
+                for groove in [Autohelm.Groove.upwind, .downwind] {
+                    let other = Aim.groove(groove, tack: .port, angle: near.brain.grooveAngle(groove, nearView.own, nearView))
+                    #expect(near.brain.refusedTurnAim(other, nearView.own, nearView) == nil, "\(name) \(groove)")
+                }
+                #expect(near.brain.refusedTurnAim(Aim(angle: reach.angle, tack: .starboard), nearView.own, nearView) == nil, "\(name)")
+
+                // At the helm: on port on the windward mark's final approach, too slow for the tack her plan wants, she
+                // steers her own tack's upwind groove.
+                let beat = try Self.finalApproach(tack: .port, over: 4, speedShare: 0.5)
+                let view = beat.view
+                var brain = beat.brain
+                let decision = brain.decide(view)
+                #expect(brain.plannedTack == .starboard && brain.isNearHerMark && decision.tap == nil && brain.handTurn == nil, "\(name)")
+                let groove = Aim.groove(.upwind, tack: .port, angle: brain.grooveAngle(.upwind, view.own, view))
+                #expect(decision.input == brain.helm(view.own, to: groove, view), "\(name): \(decision.input)")
+                // Off her groove she steers back to it, not on to anything else.
+                let footed = try Self.finalApproach(tack: .port, over: 4, speedShare: 0.5) {
+                    $0.seats[0].boat.heading += deg2rad(8)
+                    $0.seats[0].boat.autohelm = Autohelm(target: .angle(beat.view.own.relativeWind.magnitude + deg2rad(8)))
+                }
+                let footedView = footed.view
+                brain = footed.brain
+                let luffing = brain.decide(footedView)
+                #expect(brain.plannedTack == .starboard && luffing.tap == nil && brain.handTurn == nil, "\(name)")
+                // On port a luff turns her to port: rudder negative.
+                #expect(luffing.input.rudderValue < 0, "\(name): footed 8°, rudder \(luffing.input.rudderValue)")
+            }
+        }
+    }
 }
