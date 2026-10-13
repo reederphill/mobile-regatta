@@ -213,6 +213,8 @@ struct BotBrain: Sendable {
     var limitsProperCourse = true
     /// PROBE (#464): what she decided and why, for the rounding probe.
     var probe = BotProbeTrace()
+    /// VARIANT R: she is sailing back above the gate's line, having passed below it outside a mark.
+    var gateRecovering = false
 
     /// The stream of her seed her own draws come from.
     static let brainStream: UInt64 = 0x6272_6169_6e64_7277 // "braindrw"
@@ -1225,15 +1227,19 @@ struct BotBrain: Sendable {
             case .gate(let left, let right):
                 let centre = c.targetPosition(for: leg)
                 if BotVariant.on("R"), b.roundingStage == 0 {
-                    // VARIANT R: below the line and not through it, she sails back above it round the nearer end.
+                    // VARIANT R: below the line and not through it, she sails back above it round the nearer end, and
+                    // keeps at it until she is well above the line (a latch: at the line itself the centre aim below it
+                    // bore her away again, and she worked along the line's end at 2 m/s).
                     var normal = (right.position - left.position).normalized.rightPerp
                     if normal.dot(c.upwind) < 0 { normal = -normal }
-                    if normal.dot(b.position - left.position) < -1 {
+                    let above = normal.dot(b.position - left.position)
+                    if above < -1 { gateRecovering = true } else if above > 10 { gateRecovering = false }
+                    if gateRecovering {
                         let near = (left.position - b.position).length <= (right.position - b.position).length ? left : right
                         probe.waypoint = "gate-recover"
-                        return near.position + (near.position - centre).normalized * 8 + c.upwind * 14
+                        return near.position + (near.position - centre).normalized * 8 + c.upwind * 20
                     }
-                }
+                } else { gateRecovering = false }
                 if BotVariant.on("G") {
                     if b.roundingStage == 0 { probe.waypoint = "gate-landing"; return gateCrossing(left, right, b, view) }
                     let nearLeft = Self.roundsLeftGateMark(left, right, from: b)
