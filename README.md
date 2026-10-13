@@ -278,6 +278,8 @@ with it, the signature is checked against Apple's chain. It reads:
 | `REGATTA_APPLE_ROOT_PEM` | none | PEM file with Apple's root and the intermediate that issues Game Center's key (Game Center serves the leaf only); self-signed certificates are the anchors, the rest chain links; required outside dev (ADR 0010) |
 | `REGATTA_DATABASE_URL` | none | Postgres (migrations run at start, orphaned races cancelled); unset in dev keeps accounts in memory |
 | `QUEUE_LOCK_SECONDS` | `60` | seconds from the oldest queued player's join to fleet lock (#146); the contract runner's server uses a few |
+| `QUEUE_RACE_SECONDS` | none | `ENV=dev` only: a queue race is closed this many seconds after its gun (5 to 3600) with results as it stands, boats still racing placed by distance; for the local demo and the e2e run (#162). Unset, a race sails to its end |
+| `ALL_GONE_GRACE_SECONDS` | `30` | `ENV=dev` only: how long a race every person has left waits for one to come back before it closes (G3), so the e2e run's one player can drop and rejoin (#162) |
 | `CATCH_FINISHERS` | on | `off`: the queue never holds its lock for a running race's finishers (G2, #147); the contract runner's server sets it |
 | `CATCH_FINISHERS_OFFSET_SECONDS` | `15` | a held lock comes this long after the running race's expected close (G2, #147) |
 | `CATCH_FINISHERS_MAX_HOLD_SECONDS` | `180` | the oldest queued player waits at most this long, join to lock, for a hold (G2, #147) |
@@ -382,12 +384,43 @@ build the menu has **Race online (dev)**: it asks the dev server at the menu's `
 predicted fleet, shows rule calls, OCS, penalties and finishes only from the server's events, rejoins with a
 `Resync` when the connection drops, and raises a lag signal after about 5 s of round trips over 250 ms.
 
-`scripts/e2e.sh` runs the end-to-end check: it builds `RegattaServer`, starts Postgres (Homebrew's
-`postgresql@17`, in a temporary directory) and the server on it with `ENV=dev` on a free port, and runs
-`OnlineRaceUITests` (a short instant race with bots, raced to the close) and `OnlineAccountUITests` (#161: a dev
-player signs in, accepts the terms, relaunches, meets a suspension and the cooldown) on the simulator against it. It
-then restarts the server with `TERMS_VERSION=2` on the same database for the test of a terms bump, and stops both.
-The regular UI test run skips those tests, saying why, since it has no server.
+With a server address and a player, Race online is the real thing (#162): the online session (#161) carries the
+queue, the race session and the profile, Race online joins the queue, fleet lock takes the app over into the briefing,
+and the race is sailed on `/race` of the same host with the token the hand-off gave. A race the app dropped out of is
+offered again as Rejoin race, on a cold launch too; a race the server no longer has ends on Home with "The race was
+cancelled". Your livery follows you: the server's copy replaces the device's when the session opens, a livery saved in
+My boat is stored on the server, and one saved before the first sign-in, or while offline, is uploaded first. The
+address is `-onlineHost host:port` or the Settings page's field in a Debug build, and Info.plist's `RegattaServiceURL`
+otherwise (empty until #167: a build with no address still answers Race online with "Online racing is on its way"). A
+Debug build signs in as a dev player with `-devIdentity <n>`, or the number in Settings' **Dev player** field.
+
+#### Two people in one race, on this Mac
+
+```bash
+# terminal 1: the dev server (accounts in memory), a short queue and a short race: the demo takes about 3 minutes
+cd Packages/RegattaServer && ENV=dev QUEUE_LOCK_SECONDS=10 QUEUE_RACE_SECONDS=90 CATCH_FINISHERS=off swift run RegattaServer
+# terminal 2: builds the Debug app, boots two iPhone simulators, installs it and launches it on each as its own dev player
+scripts/demo-online.sh
+```
+
+The simulators share the Mac's loopback. In each, tap Race online and agree to the terms once (`--auto` taps both for
+you, after a first launch on a simulator it had to boot, whose slow start would miss the lock). Both must join within
+`QUEUE_LOCK_SECONDS` of the first. The simulators are the iPhone 17 Pro and the iPhone 17e (`DEMO_DEVICES`), not the
+iPhone 17 the test runs use. The briefing lists "Dev 1" and "Dev 2" as people among
+the bots, the gun is 75 s after the lock, each sees the other on the leaderboard, and the race closes 90 s after the gun
+with results and a rating; Race again queues. `--headless-second` launches one simulator and plays the second person
+with `regatta-loadclient --queue-player 2`. Two phones on your Wi-Fi can race the same server (`HOST=0.0.0.0`, its LAN
+address and a different **Dev player** number in each phone's Settings, then relaunch): not verified.
+
+`scripts/e2e.sh` runs the end-to-end check: it builds `RegattaServer` and `regatta-loadclient`, starts Postgres
+(Homebrew's `postgresql@17`, in a temporary directory) and the server on it with `ENV=dev` on a free port, and runs the
+online UI tests on the simulator against it, in phases, each a server of its own settings on the same database:
+`OnlineRaceUITests` (a short instant race with bots, raced to the close) and `OnlineAccountUITests` (#161: a dev player
+signs in, accepts the terms, joins the queue and leaves it, relaunches, meets a suspension and the cooldown); a terms
+bump (`TERMS_VERSION=2`); then `OnlineQueueRaceUITests` (#162) on a 4 s queue and a 12 s race (queue to the close, Leave
+in the briefing, Rejoin race after a drop, Leave race after the gun, the livery back from the server), with a headless
+second person in the fleet (`regatta-loadclient --queue-player 7001`), and with the server killed under a race and
+started again. The regular UI test run skips those tests, saying why, since it has no server.
 
 ```bash
 scripts/e2e.sh

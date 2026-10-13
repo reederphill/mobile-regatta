@@ -49,7 +49,9 @@ import RegattaServices
 ///   no server: `practice` waits for Ready, `online` counts down 15 s (at `-timescale`) and advances itself.
 /// - `-devIdentity <n>` (Debug builds, with `-onlineHost`) signs in to the dev server as the dev player `n` in place
 ///   of Game Center, with `-devRestrictions underage,communication,multiplayer` as her restrictions; `-termsVersion
-///   <n>` is the bundled Terms of Use text's version (#161).
+///   <n>` is the bundled Terms of Use text's version (#161). With both, Race online joins the server's queue (#162);
+///   `-onlineHost` alone is still the dev instant race. Settings' Dev player field is `-devIdentity` for a launch
+///   without it (not under `-uitesting`), as its host field is `-onlineHost`.
 /// - `-fakeServices <scenario>` runs the online services on a scenario's scripted fakes, for UI tests (#242):
 ///   `signed-out`, `underage`, `communication-restricted`, `multiplayer-restricted`, `offline`, `queued`,
 ///   `cancelled-race`, `online-results`, `online-results-unrated`, `terms-bump`, and #161's `suspended`,

@@ -87,20 +87,40 @@ public struct ContractLinks: Sendable {
 public struct ContractServices: Sendable {
     public var identity: @Sendable (IdentityServiceContract.Situation) async throws -> any IdentityService
     public var terms: @Sendable (TermsServiceContract.Situation) async throws -> any TermsService
+    /// The queue, the race session and the profile on the session (#162); nil: not provided.
+    public var queue: (@Sendable (QueueServiceContract.Situation) async throws -> any QueueService)?
+    public var raceSession: (@Sendable (RaceSessionServiceContract.Situation) async throws -> any RaceSessionService)?
+    public var profile: (@Sendable (ProfileServiceContract.Situation) async throws -> any ProfileService)?
 
     public init(identity: @escaping @Sendable (IdentityServiceContract.Situation) async throws -> any IdentityService,
-                terms: @escaping @Sendable (TermsServiceContract.Situation) async throws -> any TermsService) {
+                terms: @escaping @Sendable (TermsServiceContract.Situation) async throws -> any TermsService,
+                queue: (@Sendable (QueueServiceContract.Situation) async throws -> any QueueService)? = nil,
+                raceSession: (@Sendable (RaceSessionServiceContract.Situation) async throws -> any RaceSessionService)? = nil,
+                profile: (@Sendable (ProfileServiceContract.Situation) async throws -> any ProfileService)? = nil) {
         self.identity = identity
         self.terms = terms
+        self.queue = queue
+        self.raceSession = raceSession
+        self.profile = profile
     }
 }
 
 public enum ContractRunner {
-    /// Runs `suite` on services the caller made. Identity and terms only: `ContractRunnerError.notProvided` for the rest.
+    /// Runs `suite` on services the caller made: identity and terms, and the queue, the race session and the profile
+    /// when given (#162). `ContractRunnerError.notProvided` for the rest.
     public static func run(_ suite: ContractSuiteID, services: ContractServices) async throws {
         switch suite {
         case .identity: try await IdentityServiceContract().run(services.identity)
         case .terms: try await TermsServiceContract().run(services.terms)
+        case .queue:
+            guard let queue = services.queue else { throw ContractRunnerError.notProvided(suite) }
+            try await QueueServiceContract().run(queue)
+        case .raceSession:
+            guard let raceSession = services.raceSession else { throw ContractRunnerError.notProvided(suite) }
+            try await RaceSessionServiceContract().run(raceSession)
+        case .profile:
+            guard let profile = services.profile else { throw ContractRunnerError.notProvided(suite) }
+            try await ProfileServiceContract().run(profile)
         default: throw ContractRunnerError.notProvided(suite)
         }
     }

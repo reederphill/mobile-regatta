@@ -11,6 +11,17 @@ nonisolated enum DevIdentity {
         case underage, communication, multiplayer
     }
 
+    /// Settings' Dev player field (#162): the dev player a launch without `-devIdentity` signs in as, so a phone can
+    /// race a dev server without launch arguments. Read at launch.
+    static let defaultsKey = "devPlayer"
+
+    /// The dev player this launch signs in as: `-devIdentity`, else the number in Settings' field, else none.
+    static func number(launchOptions: LaunchOptions, defaults: UserDefaults) -> Int? {
+        if let number = launchOptions.devIdentity { return number }
+        guard !launchOptions.uiTesting, let text = defaults.string(forKey: defaultsKey), let number = Int(text), number >= 0 else { return nil }
+        return number
+    }
+
     static func player(_ number: Int, restrictions: Set<Restriction> = []) -> DevicePlayer {
         DevicePlayer(teamPlayerID: "T:dev-\(number)", player: GameCenterPlayer(
             gamePlayerID: GamePlayerID("G:dev-\(number)"), alias: "Dev \(number)", isUnderage: restrictions.contains(.underage),

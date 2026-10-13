@@ -61,8 +61,8 @@ struct RootView: View {
                 // The takeover cross-fades in over whatever was up (0.25 s), where a race you chose slides in.
                 .raceCover(isPresented: model.phase == .raceSequence && model.race != nil,
                            fadesIn: isTakeover && !reduceMotion) { raceCover }
-                // A stub past Race online's gate while the queue has no service to join (#162); Debug builds on the real
-                // services join the dev server's instant race instead (#68). On the fakes, the queue (#140).
+                // A stub past Race online's gate in a build with no server address (Release until #167); with a session,
+                // or on the fakes, the queue (#140, #162).
                 .alert("Online racing is on its way", isPresented: $showsOnlineStub) {
                     Button("OK", role: .cancel) {}
                 } message: {
@@ -329,18 +329,17 @@ struct RootView: View {
         if races { enterQueue() }
     }
 
-    /// Past the gate: the queue (#140), whose bar shows the wait. The queue's service can't be joined until #162, so
-    /// off the fakes it is still the stub alert, and a Debug build on the real services joins the dev server's instant
-    /// race instead (#68).
+    /// Past the gate: the queue (#140, #162), whose bar shows the wait, on the session or the fakes. A build with no
+    /// server address still says so (Release until #167), and a Debug build without a session joins the dev server's
+    /// instant race instead (#68).
     private func enterQueue() {
-        guard model.launchOptions.fakeServices != nil, let queue = onlineStatus?.queue else {
-            #if DEBUG
-            if model.launchOptions.fakeServices == nil, !model.launchOptions.uiTesting { return startOnlineRace() }
-            #endif
-            showsOnlineStub = true
-            return
+        switch QueueEntry(launchOptions: model.launchOptions, hasSession: onlineStatus?.hasSession == true) {
+        case .queue:
+            guard let queue = onlineStatus?.queue else { return showsOnlineStub = true }
+            Task { await queue.join() }
+        case .devInstantRace: startOnlineRace()
+        case .stubAlert: showsOnlineStub = true
         }
-        Task { await queue.join() }
     }
 
     /// The online results' Race again (#24, #133): home, with the queue joining.

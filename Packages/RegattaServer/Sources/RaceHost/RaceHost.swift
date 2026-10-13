@@ -756,6 +756,16 @@ public actor RaceHost {
         return outcome
     }
 
+    /// Dev only (`QUEUE_RACE_SECONDS`, #162): closes the race now with results as it stands, finishers by their finish
+    /// and every boat still racing by distance, where `close()` alone would leave a race that isn't over with none (and
+    /// the lifecycle would call it cancelled). It is the all-gone close with nobody listed as gone (`Race.closeAllGone`):
+    /// the log records it, and a replay closes the same way. After this tick's step, like the all-gone close.
+    @discardableResult
+    public func closeScoredNow() -> RaceOutcome {
+        if !isEnded { race.closeAllGone(atTick: race.tick, leaveOrder: []) }
+        return close()
+    }
+
     /// Cancels the race (#30, #148): it never steps again, has no results, and every attached seat is sent
     /// `RaceCancelled` and closed. Nothing if it has already closed or been cancelled.
     public func cancel(_ reason: RaceCancelled.Reason) {

@@ -119,6 +119,8 @@ let package = Package(
             dependencies: [
                 "RegattaDevAPI",
                 .product(name: "RegattaClient", package: "RegattaClient"),
+                // The queue player (#162) is the client's own online session over the real WebSocket.
+                .product(name: "RegattaServices", package: "RegattaServices"),
                 .product(name: "RegattaServiceClient", package: "RegattaServices"),
                 .product(name: "RegattaCore", package: "RegattaCore"),
                 .product(name: "RegattaProtocol", package: "RegattaProtocol"),

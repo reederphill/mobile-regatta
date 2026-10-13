@@ -141,11 +141,16 @@ final class OnlineRaceController: OnlineSequence {
     static let serverGoneAfter: TimeInterval = 60
     /// How long the Last race row waits for its rating.
     static let ratingWait: TimeInterval = 600
+    /// A token ask the service didn't answer is tried again after this long, not every tick (#162).
+    static let tokenRetryAfter: TimeInterval = 2
 
     @ObservationIgnored weak var queue: QueueController?
     @ObservationIgnored private weak var host: (any FleetLockHost)?
     @ObservationIgnored private let raceSession: any RaceSessionService
     @ObservationIgnored var makeLink: (HandOff) -> any RaceLinking
+    /// Whether the race session may be asked now (#162, `OnlineStatus.mayAskService`): never for a player who isn't
+    /// through the gate, whose connection the server would close for it.
+    @ObservationIgnored var mayAskService: () -> Bool = { true }
     @ObservationIgnored private let now: () -> Date
     @ObservationIgnored private let sleep: (Duration) async -> Void
     @ObservationIgnored private let tickInterval: Duration?
@@ -159,6 +164,7 @@ final class OnlineRaceController: OnlineSequence {
     @ObservationIgnored private var lostAt: Date?
     @ObservationIgnored private var askedWhetherGone = false
     @ObservationIgnored private var fetchingToken = false
+    @ObservationIgnored private var tokenRetryAt: Date?
     @ObservationIgnored private var askingRejoin = false
     @ObservationIgnored private var ticker: Task<Void, Never>?
     @ObservationIgnored private var rating: Task<Void, Never>?
@@ -274,11 +280,11 @@ final class OnlineRaceController: OnlineSequence {
         let since = lostAt ?? now
         lostAt = since
         if now >= since.addingTimeInterval(Self.reconnectingAfter) { isReconnecting = true }
-        if link.wantsToken, !fetchingToken {
+        if link.wantsToken, !fetchingToken, now >= tokenRetryAt ?? .distantPast {
             fetchingToken = true
             Task { await fetchToken() }
         }
-        if isOnline, !askedWhetherGone, now >= since.addingTimeInterval(Self.serverGoneAfter) {
+        if isOnline, !askedWhetherGone, now >= since.addingTimeInterval(Self.serverGoneAfter), mayAskService() {
             askedWhetherGone = true
             Task { await askWhetherGone() }
         }
@@ -287,12 +293,18 @@ final class OnlineRaceController: OnlineSequence {
     /// After the gun every reconnect asks the service first: a fresh token, or the word that the race is over.
     private func fetchToken() async {
         defer { fetchingToken = false }
+        guard mayAskService() else { return tokenRetryAt = now().addingTimeInterval(Self.tokenRetryAfter) }
         do {
             let offer = try await raceSession.rejoin()
+            tokenRetryAt = nil
             link?.provide(offer.handOff.token)
         } catch RaceSessionError.noRace {
+            tokenRetryAt = nil
             await raceIsOver()
-        } catch {}
+        } catch {
+            // No answer (the session is down, or the call timed out): not "no race". Again in a moment.
+            tokenRetryAt = now().addingTimeInterval(Self.tokenRetryAfter)
+        }
     }
 
     private func askWhetherGone() async {
@@ -301,16 +313,35 @@ final class OnlineRaceController: OnlineSequence {
             link?.provide(offer.handOff.token)
         } catch RaceSessionError.noRace {
             // Before the gun there is nothing to rejoin yet: the hand-off says whether the race stands.
-            if isBeforeGun, (try? await raceSession.handOff()) != nil { return }
+            if isBeforeGun {
+                do {
+                    _ = try await raceSession.handOff()
+                    return
+                } catch RaceSessionError.noRace {
+                } catch {
+                    return askedWhetherGone = false
+                }
+            }
             await raceIsOver()
-        } catch {}
+        } catch {
+            // No answer: asked again while the link stays down.
+            askedWhetherGone = false
+        }
     }
 
     /// The service knows no race of hers any more: it closed while she was away (Home, with the Last race row) or was
     /// cancelled (Home, with the notice).
     private func raceIsOver() async {
         guard phase != .idle, let raceID = handOff?.raceID else { return }
-        let last = try? await raceSession.lastRace()
+        let last: LastRace?
+        do {
+            last = try await raceSession.lastRace()
+        } catch {
+            // No answer says nothing of the race: the next ask finds out.
+            tokenRetryAt = now().addingTimeInterval(Self.tokenRetryAfter)
+            askedWhetherGone = false
+            return
+        }
         guard phase != .idle else { return }
         if let last, last.report.raceID == raceID {
             host?.keepLastRace(last.report, rating: last.rating?.outcome)
@@ -402,8 +433,12 @@ final class OnlineRaceController: OnlineSequence {
 
     func fleetLockedWhileIdle() { ask(orTakeOver: true) }
 
+    /// The online session opened for a player through the gate (#162): a race she dropped out of may still run, which a
+    /// cold launch learns here, before any scene change.
+    func sessionOpened() { ask(orTakeOver: true) }
+
     private func ask(orTakeOver: Bool) {
-        guard phase == .idle, !askingRejoin else { return }
+        guard phase == .idle, !askingRejoin, mayAskService() else { return }
         askingRejoin = true
         Task {
             await askForRejoin(orTakeOver: orTakeOver)
@@ -422,10 +457,12 @@ final class OnlineRaceController: OnlineSequence {
             handOff = offer.handOff
             rejoinEntry = RejoinEntry(tick: offer.clock.tick, readAt: now(), timescale: timescale)
             host?.setLiveryLocked(true)
-        } catch {
+        } catch RaceSessionError.noRace {
             // Nothing to rejoin: before the gun, or stale (a `.fleetLocked` after a leave).
             clearOffer()
-            if orTakeOver, case RaceSessionError.noRace = error { await takeOverAgain() }
+            if orTakeOver { await takeOverAgain() }
+        } catch {
+            // No answer (#162): what Home shows stays as it was.
         }
     }
 
@@ -443,7 +480,7 @@ final class OnlineRaceController: OnlineSequence {
         clearOffer()
         // The race closed while she was away: its results are Home's Last race, with no notice.
         Task {
-            guard let raceID, let last = try? await raceSession.lastRace(), last.report.raceID == raceID else { return }
+            guard let raceID, mayAskService(), let last = try? await raceSession.lastRace(), last.report.raceID == raceID else { return }
             host?.keepLastRace(last.report, rating: last.rating?.outcome)
             if last.rating == nil { awaitRating(raceID) }
         }
@@ -451,7 +488,7 @@ final class OnlineRaceController: OnlineSequence {
 
     /// Home's Rejoin race: straight to the water, on a fresh token, with no briefing.
     func rejoin() async {
-        guard phase == .idle, rejoinEntry != nil, let host else { return }
+        guard phase == .idle, rejoinEntry != nil, let host, mayAskService() else { return }
         do {
             let offer = try await raceSession.rejoin()
             guard phase == .idle else { return }
@@ -460,9 +497,11 @@ final class OnlineRaceController: OnlineSequence {
             start(offer.handOff)
             queue?.sequenceBegan()
             if let launch = link?.launch { host.rejoinRace(launch) }
-        } catch {
+        } catch RaceSessionError.noRace {
             clearOffer()
             host.postNotice(.raceEnded)
+        } catch {
+            // No answer (#162): the row stays for another tap.
         }
     }
 

@@ -40,6 +40,10 @@ public struct RaceLifecycleSettings: Sendable, Equatable {
     /// A finish the cautious bot sailed for a dropped player counts for her rating if she dropped less than this many
     /// race ticks before it; otherwise she is rated as retired (#150, `CoveredFinish`). `COVERED_FINISH_GRACE_SECONDS`.
     public var coveredFinishGraceTicks = CoveredFinish.defaultGraceTicks
+    /// Dev only (`QUEUE_RACE_SECONDS`, #162): a queue race is closed at this tick with results as it stands (finishers
+    /// by finish, the rest by distance: `RaceHost.closeScoredNow`), so a local demo or an e2e run sails a race in a
+    /// minute or two and still gets results and a rating. Nil: the race sails to its end.
+    public var queueRaceCloseAtTick: Int?
 
     public init() {
         allGone = AllGoneConfig()
@@ -166,7 +170,8 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
     public nonisolated func launcher(clock: any HostClock = SystemClock()) -> RaceLauncher {
         { fleet, closed in
             let session = self.session(id: fleet.raceID, setup: fleet.setup, windSeed: fleet.windSeed,
-                                       names: fleet.humans.map(\.alias), clock: clock, onBriefingLeave: fleet.onBriefingLeave,
+                                       names: fleet.humans.map(\.alias), closeAtTick: self.settings.queueRaceCloseAtTick,
+                                       clock: clock, onBriefingLeave: fleet.onBriefingLeave,
                                        fleet: fleet.fill, onLeftAfterGun: fleet.onLeftAfterGun, onGun: fleet.onGun)
             try await self.launch(session, players: fleet.humans.map(\.teamPlayerID), venue: fleet.drawn.pairing.venue.content.displayName,
                                   announces: true, then: closed)
@@ -178,13 +183,15 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
     /// `fleet`: the level its bots sail at (the locked fleet's; a fleet at the provisional rating otherwise).
     /// `onBriefingLeave` (the queue's, #147) hears its humans who leave before the gun and `onLeftAfterGun` (#149)
     /// those who leave for good after it; a dev-arranged race has neither.
-    public nonisolated func session(id: UUID, setup: RaceSetup, windSeed: WindSeed, names: [String], clock: any HostClock = SystemClock(),
+    public nonisolated func session(id: UUID, setup: RaceSetup, windSeed: WindSeed, names: [String], closeAtTick: Int? = nil,
+                                    clock: any HostClock = SystemClock(),
                                     options: RaceHostOptions? = nil,
                                     onBriefingLeave: (@Sendable (BriefingLeave) -> Void)? = nil,
                                     fleet: FleetFill? = nil,
                                     onLeftAfterGun: (@Sendable (_ seat: Int) -> Void)? = nil,
                                     onGun: (@Sendable (_ humansAtGun: Int) -> Void)? = nil) -> RaceSession {
-        RaceSession(id: id, setup: setup, windSeed: windSeed, clock: clock, options: options ?? settings.hostOptions,
+        RaceSession(id: id, setup: setup, windSeed: windSeed, closeAtTick: closeAtTick, scoresDevClose: closeAtTick != nil, clock: clock,
+                    options: options ?? settings.hostOptions,
                     roster: LockedFleet.roster(setup: setup, humans: names),
                     onProgress: { [weak self] in
                         guard let self else { return }

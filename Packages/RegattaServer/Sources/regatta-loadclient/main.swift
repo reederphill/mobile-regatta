@@ -11,15 +11,21 @@ import RegattaLoadClient
 //
 //   regatta-loadclient [--host H] [--port P] [--clients N] [--race-seconds S] [--start-seconds S]
 //                      [--seed X] [--frame-rate HZ] [--timeout S] [--token BASE64] [--json] [--check-bandwidth]
+//   regatta-loadclient [--host H] [--port P] --queue-player N [--join-after S]
 //
 // Without --token it creates a dev instant race (the server must run with ENV=dev) with N clients and
 // sails every seat at once. With --token it sails that one seat. Exit status 0 if every client sailed the
 // race to its close, received no wind key early nor the wind seed (#95), and, with --check-bandwidth,
 // stayed within #27's budget; 1 otherwise, 2 for bad usage.
+//
+// --queue-player N (#162) is a headless second human: the dev player N ("Dev N", the app's -devIdentity N) signs in
+// over /service, joins the queue (after --join-after seconds), and sails the race her fleet locks into to its close.
+// It prints her alias and result; exit status 0 if the race closed.
 
 let usage = """
     usage: regatta-loadclient [--host H] [--port P] [--clients N] [--race-seconds S] [--start-seconds S]
                               [--seed X] [--frame-rate HZ] [--timeout S] [--token BASE64] [--json] [--check-bandwidth]
+           regatta-loadclient [--host H] [--port P] --queue-player N [--join-after S]
     """
 
 func fail(_ message: String, status: Int32) -> Never {
@@ -32,6 +38,8 @@ var request = InstantRaceRequest(clients: 1)
 var token: [UInt8]?
 var json = false
 var checkBandwidth = false
+var queuePlayer: Int?
+var joinAfter = 0
 
 var arguments = CommandLine.arguments.dropFirst().makeIterator()
 @MainActor func value(_ flag: String) -> String {
@@ -58,11 +66,31 @@ while let argument = arguments.next() {
         guard let data = Data(base64Encoded: value(argument)) else { fail("--token isn't base64", status: 2) }
         token = [UInt8](data)
     case "--json": json = true
+    case "--queue-player": queuePlayer = int(argument)
+    case "--join-after": joinAfter = int(argument)
     case "--check-bandwidth": checkBandwidth = true
     case "-h", "--help":
         print(usage)
         exit(0)
     default: fail("unknown argument \(argument)\n\(usage)", status: 2)
+    }
+}
+
+if let queuePlayer {
+    var player = QueuePlayer.Options()
+    player.load = options
+    player.joinAfter = .seconds(joinAfter)
+    do {
+        let outcome = try await QueuePlayer.play(number: queuePlayer, options: player)
+        let closed = outcome.load?.completed == true
+        var line = "\(outcome.alias): race \(outcome.handOff.raceID.rawValue), seat \(outcome.load?.seat ?? -1), \(closed ? "closed" : "not closed")"
+        if let report = outcome.closed, let row = report.results.rows.first(where: { $0.seat == report.seat }) {
+            line += ", place \(row.place) of \(report.roster.count) (\(row.code))"
+        }
+        print(line)
+        exit(closed ? 0 : 1)
+    } catch {
+        fail("queue player \(queuePlayer): \(error)", status: 1)
     }
 }
 

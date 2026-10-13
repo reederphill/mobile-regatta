@@ -138,6 +138,8 @@ final class RootHostingController: UIHostingController<AppRoot> {
         let connector = AppDelegate.current?.raceConnector ?? { _ in UnansweredRaceConnection() }
         let raceSession = onlineStatus.services.raceSession
         onlineStatus.race.attach(host: model)
+        // My boat's livery follows the server's, and its saves go there (#162).
+        onlineStatus.livery.attach(model)
         onlineStatus.race.makeLink = { [model] handOff in
             model.onlineRaceLink(handOff, connector: connector, service: raceSession)
         }

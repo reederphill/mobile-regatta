@@ -104,7 +104,7 @@ import Testing
         await rig.session.setOnline(true)
         #expect(await rig.session.phase == .updateRequired)
         #expect(rig.server.connects == 1)
-        var queue = rig.session.queueStatus.stateUpdates().makeAsyncIterator()
+        var queue = rig.session.queue.stateUpdates().makeAsyncIterator()
         #expect(await queue.next() == .unavailable(.updateRequired))
     }
 
@@ -194,7 +194,7 @@ import Testing
     @Test func streamsSurviveAReconnect() async {
         let rig = SessionRig()
         await rig.opened()
-        var queue = rig.session.queueStatus.stateUpdates().makeAsyncIterator()
+        var queue = rig.session.queue.stateUpdates().makeAsyncIterator()
         var identity = rig.session.identity.stateUpdates().makeAsyncIterator()
         #expect(await queue.next() == .idle)
         #expect(await identity.next() == .signedIn(SessionRig.wren.player))
@@ -210,8 +210,6 @@ import Testing
         #expect(await queue.next() == .unavailable(.cooldown(secondsRemaining: 252)))
         rig.server.push(.idle)
         #expect(await queue.next() == .idle)
-        // The queue itself is #162's.
-        await #expect(throws: OnlineSessionError.notAvailable) { try await rig.session.queueStatus.join() }
     }
 
     @Test func aTapWaitsForTheTryItStarts() async {

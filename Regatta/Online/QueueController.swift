@@ -111,6 +111,8 @@ final class QueueController {
     @ObservationIgnored private weak var host: (any FleetLockHost)?
     @ObservationIgnored private var haptics: any Haptics = SilentHaptics()
     @ObservationIgnored private var isOnline: Bool
+    /// The online session is open, where there is one (#162): her place in the queue lives on its connection.
+    @ObservationIgnored private var isSessionOpen = true
     @ObservationIgnored private var lockSoonLatched = false
     /// The stream's last state: what a join that finds her already queued adopts.
     @ObservationIgnored private var lastState: QueueState?
@@ -230,9 +232,25 @@ final class QueueController {
     }
 
     func connectionChanged(isOnline: Bool) {
-        guard isOnline != self.isOnline else { return }
+        let was = isReachable
         self.isOnline = isOnline
-        if isOnline {
+        reachabilityChanged(from: was)
+    }
+
+    /// The online session opened, or is open no longer (#162). Queued, a session that goes is a lost connection, as the
+    /// device's path going is: the server dropped her place with it.
+    func sessionChanged(isOpen: Bool) {
+        let was = isReachable
+        isSessionOpen = isOpen
+        reachabilityChanged(from: was)
+    }
+
+    private var isReachable: Bool { isOnline && isSessionOpen }
+
+    private func reachabilityChanged(from was: Bool) {
+        let isReachable = isReachable
+        guard isReachable != was else { return }
+        if isReachable {
             if stage == .connectionLost {
                 stage = .idle
                 host?.postNotice(.leftQueueOnDrop)
@@ -374,7 +392,7 @@ final class QueueController {
         reader = nil
         readerEnded = true
         guard isWaiting else { return }
-        if isOnline {
+        if isReachable {
             // Only the stream went: her place went with it. The next join opens it again.
             stage = .idle
             host?.postNotice(.leftQueueOnDrop)

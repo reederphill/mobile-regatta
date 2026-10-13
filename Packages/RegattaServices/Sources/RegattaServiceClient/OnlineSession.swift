@@ -1,3 +1,4 @@
+import RegattaCore
 import RegattaProtocol
 import RegattaServices
 import Synchronization
@@ -51,10 +52,10 @@ public enum SessionFailure: String, Equatable, Sendable {
 }
 
 public enum OnlineSessionError: Error, Equatable, Sendable {
-    /// No session is open.
+    /// No session is open, and none opened within `Settings.openWait`.
     case notConnected
-    /// The call isn't the session's to make yet (the queue's join and leave, #162).
-    case notAvailable
+    /// The server didn't answer within `Settings.callTimeout`. Not an answer: never "no race".
+    case timedOut
 }
 
 public actor OnlineSession {
@@ -69,6 +70,12 @@ public actor OnlineSession {
         /// How long the device gets to make a signature (Game Center asks its own servers).
         public var signatureDeadline = Duration.seconds(10)
         public var backoff = Backoff()
+        /// A call made with no session open waits this long for one, then throws `notConnected` (#162).
+        public var openWait = Duration.seconds(5)
+        /// A request the server hasn't answered after this long throws `timedOut`.
+        public var callTimeout = Duration.seconds(10)
+        /// The queue's leave is best effort: the server drops her place with the connection anyway.
+        public var leaveTimeout = Duration.seconds(3)
 
         public init() {}
     }
@@ -120,6 +127,9 @@ public actor OnlineSession {
     private let phases = Broadcast<SessionPhase>(.idle)
     private let identityStates = Broadcast<GameCenterState>(.signedOut)
     private let queueStates = Broadcast<QueueState>(nil)
+    /// Counts the connections opened: what the services' calls and streams wait on (#162).
+    private let opens = Broadcast<Int>(nil)
+    private var opened = 0
 
     private var isOnline: Bool
     private var isActive: Bool
@@ -134,6 +144,8 @@ public actor OnlineSession {
     /// The runner is between tries.
     private var waitingToRetry = false
     private var live: Live?
+    /// Reads the open connection's queue stream into `queueStates`.
+    private var queueReader: Task<Void, Never>?
     private var updateRequired = false
     /// Players the server refused for good (ADR 0010's first claimant keeps the `gamePlayerID`).
     private var conflicted: Set<String> = []
@@ -220,8 +232,71 @@ public actor OnlineSession {
     public nonisolated var identity: any IdentityService { SessionIdentityService(session: self) }
     /// The terms as the server keeps them.
     public nonisolated var terms: any TermsService { SessionTermsService(session: self) }
-    /// The queue's state stream, through reconnects. Its `join` and `leave` aren't here yet (#162).
-    public nonisolated var queueStatus: any QueueService { SessionQueueStatus(states: queueStates) }
+    /// The queue (#162): its state stream through reconnects, `join` and `leave` on whichever connection is open.
+    /// The server answers a player who isn't through the gate in the stream and in `join`'s refusal.
+    public nonisolated var queue: any QueueService { SessionQueueService(session: self, states: queueStates) }
+    /// The player's race around the race transport (#162). The server closes the connection on these from a player who
+    /// isn't through the gate: ask only for one who has accepted the terms and may race online.
+    public nonisolated var raceSession: any RaceSessionService { SessionRaceSessionService(session: self) }
+    /// The profile and the stored livery (#162). Gated like `raceSession`.
+    public nonisolated var profile: any ProfileService { SessionProfileService(session: self) }
+
+    /// Whether the device has a Game Center player: with none there is no session to wait for, and the services answer
+    /// as the server would a signed-out caller.
+    fileprivate var hasPlayer: Bool { device != nil }
+
+    /// `body` on the open connection, waiting up to `openWait` for one (`notConnected`) and `limit`, or `callTimeout`,
+    /// for its answer (`timedOut`).
+    fileprivate nonisolated func call<Answer: Sendable>(
+        within limit: Duration? = nil, _ body: @escaping @Sendable (ServiceConnection) async throws -> Answer
+    ) async throws -> Answer {
+        let connection = try await openConnection()
+        return try await withDeadline(limit ?? settings.callTimeout, sleep: dependencies.sleep) { try await body(connection) }
+    }
+
+    /// As `call`, but with no wait for a connection: with none open the server has let her place go already, and she is
+    /// not queued.
+    fileprivate func leaveQueue() async throws {
+        guard let connection = live?.connection else { throw QueueError.notQueued }
+        try await withDeadline(settings.leaveTimeout, sleep: dependencies.sleep) { try await RemoteQueueService(connection).leave() }
+    }
+
+    private nonisolated func openConnection() async throws -> ServiceConnection {
+        if let connection = await connection() { return connection }
+        let (session, opens) = (self, opens)
+        do {
+            return try await withDeadline(settings.openWait, sleep: dependencies.sleep) {
+                for await _ in opens.subscribe() {
+                    if let connection = await session.connection() { return connection }
+                }
+                throw OnlineSessionError.notConnected
+            }
+        } catch OnlineSessionError.timedOut {
+            throw OnlineSessionError.notConnected
+        }
+    }
+
+    /// A stream that outlives connections: `open` is opened again on each new one while the reader holds it (the
+    /// server primes it), and it finishes after an item `isLast` (#162).
+    fileprivate nonisolated func resilient<Element: Sendable>(
+        _ open: @escaping @Sendable (ServiceConnection) -> AsyncStream<Element>,
+        isLast: @escaping @Sendable (Element) -> Bool = { _ in false }
+    ) -> AsyncStream<Element> {
+        let (session, opens) = (self, opens)
+        return AsyncStream { continuation in
+            let reader = Task {
+                for await _ in opens.subscribe() {
+                    guard let connection = await session.connection() else { continue }
+                    for await element in open(connection) {
+                        continuation.yield(element)
+                        if isLast(element) { return continuation.finish() }
+                    }
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in reader.cancel() }
+        }
+    }
 
     fileprivate func identityState() async -> GameCenterState {
         guard let live else { return .signedOut }
@@ -243,6 +318,27 @@ public actor OnlineSession {
         return RemoteTermsService(live.connection)
     }
 
+    /// Accepts the terms on the open connection. To a player who hadn't, the server's queue stream said so and ended
+    /// (its gate, #34): once she has, it is read again, or a join would never hear where it stands (#162).
+    fileprivate func acceptTerms(_ version: TermsVersion) async throws -> TermsStatus {
+        let connection = try remoteTerms().connection
+        let status = try await RemoteTermsService(connection).accept(version)
+        if status.isAccepted, live?.connection === connection { readQueue(on: connection) }
+        return status
+    }
+
+    /// Feeds the queue's state on `connection` to `queueStates`, in place of whichever stream was read before.
+    private func readQueue(on connection: ServiceConnection) {
+        queueReader?.cancel()
+        let states = queueStates
+        queueReader = Task {
+            for await state in RemoteQueueService(connection).stateUpdates() {
+                guard !Task.isCancelled else { return }
+                states.send(state)
+            }
+        }
+    }
+
     // MARK: - Running
 
     private var target: DevicePlayer? {
@@ -255,7 +351,11 @@ public actor OnlineSession {
         let target = target
         // Already so: running or halted for her, or idle with nobody to connect for.
         let settled = target == nil ? (phase == .idle || updateRequired) : (runner != nil || halted)
-        if serving == target, settled { return }
+        if serving == target, settled {
+            // Nobody signed in on the device from the start: the queue's stream says so, as after a sign-out.
+            if device == nil { queueStates.send(.unavailable(.notSignedIn)) }
+            return
+        }
         stop()
         guard let target else {
             if !updateRequired { show(.idle) }
@@ -345,10 +445,11 @@ public actor OnlineSession {
                 dependencies.log(.opened(resumed: resumed))
                 show(.open(live.session.player))
                 settle()
-                let states = queueStates
-                let queue = Task { for await state in RemoteQueueService(live.connection).stateUpdates() { states.send(state) } }
+                opened += 1
+                opens.send(opened)
+                readQueue(on: live.connection)
                 await untilDead(live.link)
-                queue.cancel()
+                queueReader?.cancel()
                 guard epoch == self.epoch, !Task.isCancelled else { return }
                 self.live = nil
                 live.link.close()
@@ -536,16 +637,77 @@ struct SessionTermsService: TermsService {
     let session: OnlineSession
 
     func status() async throws -> TermsStatus { try await session.remoteTerms().status() }
-    func accept(_ version: TermsVersion) async throws -> TermsStatus { try await session.remoteTerms().accept(version) }
+    func accept(_ version: TermsVersion) async throws -> TermsStatus { try await session.acceptTerms(version) }
 }
 
-/// The queue's state only (#161): cooldown and suspension reach the player before #162 gives her the queue itself.
-struct SessionQueueStatus: QueueService {
+/// The queue on the session (#162): one state stream through every reconnect, and its calls on the open connection.
+struct SessionQueueService: QueueService {
+    let session: OnlineSession
     let states: Broadcast<QueueState>
 
     func stateUpdates() -> AsyncStream<QueueState> { states.subscribe() }
-    func join() async throws { throw OnlineSessionError.notAvailable }
-    func leave() async throws { throw OnlineSessionError.notAvailable }
+    func join() async throws {
+        guard await session.hasPlayer else { throw QueueError.refused(.notSignedIn) }
+        try await session.call { try await RemoteQueueService($0).join() }
+    }
+    func leave() async throws { try await session.leaveQueue() }
+}
+
+/// The race session on the session (#162). `results()` and `ratingChanges()` are opened again on each new connection:
+/// the server primes the first with the current report and replays rating changes she hasn't read.
+struct SessionRaceSessionService: RaceSessionService {
+    let session: OnlineSession
+
+    func handOff() async throws -> HandOff { try await session.call { try await RemoteRaceSessionService($0).handOff() } }
+    func rejoin() async throws -> RejoinOffer { try await session.call { try await RemoteRaceSessionService($0).rejoin() } }
+    func lastRace() async throws -> LastRace? { try await session.call { try await RemoteRaceSessionService($0).lastRace() } }
+
+    func results() -> AsyncStream<RaceUpdate> {
+        session.resilient({ RemoteRaceSessionService($0).results() }, isLast: { update in
+            switch update {
+            case .report(let report): report.isClosed
+            case .cancelled: true
+            }
+        })
+    }
+
+    func ratingChanges() -> AsyncStream<RatingChange> { session.resilient { RemoteRaceSessionService($0).ratingChanges() } }
+}
+
+/// The profile on the session (#162): what the livery sync needs of it.
+struct SessionProfileService: ProfileService {
+    let session: OnlineSession
+
+    func profile() async throws -> Profile {
+        guard await session.hasPlayer else { throw ProfileError.notSignedIn }
+        return try await session.call { try await RemoteProfileService($0).profile() }
+    }
+
+    func saveLivery(_ livery: Livery) async throws -> Livery {
+        guard await session.hasPlayer else { throw ProfileError.notSignedIn }
+        return try await session.call { try await RemoteProfileService($0).saveLivery(livery) }
+    }
+}
+
+private enum Raced<Answer: Sendable>: Sendable {
+    case answer(Answer)
+    case late
+}
+
+/// `body`'s answer, or `OnlineSessionError.timedOut` when it takes longer than `limit`. `body` is cancelled then.
+func withDeadline<Answer: Sendable>(
+    _ limit: Duration, sleep: @escaping @Sendable (Duration) async throws -> Void, _ body: @escaping @Sendable () async throws -> Answer
+) async throws -> Answer {
+    try await withThrowingTaskGroup(of: Raced<Answer>.self) { group in
+        group.addTask { .answer(try await body()) }
+        group.addTask {
+            try await sleep(limit)
+            return .late
+        }
+        defer { group.cancelAll() }
+        guard case .answer(let answer)? = try await group.next() else { throw OnlineSessionError.timedOut }
+        return answer
+    }
 }
 
 /// The latest value to every subscriber, each change once. A stream from here never finishes on its own: it

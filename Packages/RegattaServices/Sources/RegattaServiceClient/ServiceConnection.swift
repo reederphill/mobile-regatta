@@ -41,6 +41,8 @@ public final class ServiceConnection: Sendable {
         var nextID: UInt32 = 1
         var seq: UInt32 = 0
         var pending: [UInt32: CheckedContinuation<Message, any Error>] = [:]
+        /// Requests whose caller was cancelled: a reply to one is dropped.
+        var abandoned: Set<UInt32> = []
         var failure: ServiceLinkError?
     }
 
@@ -61,14 +63,33 @@ public final class ServiceConnection: Sendable {
 
     deinit { link.close() }
 
-    /// Sends the request `make` builds with a fresh id, and returns the reply to it.
+    /// Sends the request `make` builds with a fresh id, and returns the reply to it. A caller that is cancelled
+    /// stops waiting (`CancellationError`); the reply, if it still comes, is dropped (#162).
     public func request(_ make: (UInt32) -> Message) async throws -> Message {
-        try await withCheckedThrowingContinuation { continuation in
-            switch frame(make, pending: continuation) {
-            case .success(let bytes): link.send(bytes)
-            case .failure(let error): continuation.resume(throwing: error)
+        let asked = Asked()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                switch frame({ id in asked.note(id); return make(id) }, pending: continuation) {
+                case .success(let bytes):
+                    link.send(bytes)
+                    // Cancelled before the request had its id.
+                    if let id = asked.idIfCancelled { abandon(id) }
+                case .failure(let error): continuation.resume(throwing: error)
+                }
             }
+        } onCancel: {
+            if let id = asked.cancel() { abandon(id) }
         }
+    }
+
+    /// Stops waiting for the reply to request `id`.
+    private func abandon(_ id: UInt32) {
+        let continuation = state.withLock { state -> CheckedContinuation<Message, any Error>? in
+            guard let continuation = state.pending.removeValue(forKey: id) else { return nil }
+            state.abandoned.insert(id)
+            return continuation
+        }
+        continuation?.resume(throwing: CancellationError())
     }
 
     /// Sends a message that has no reply (a stream's opening or closing), at once, and returns the id it used.
@@ -125,7 +146,9 @@ public final class ServiceConnection: Sendable {
         guard message.type.direction == .serverToClient, let id = message.replyID else {
             return fail(.protocolViolation("\(message.type) from the server"))
         }
-        guard let continuation = state.withLock({ $0.pending.removeValue(forKey: id) }) else {
+        let (continuation, abandoned) = state.withLock { ($0.pending.removeValue(forKey: id), $0.abandoned.remove(id) != nil) }
+        guard let continuation else {
+            if abandoned { return }
             return fail(.protocolViolation("a reply to request \(id), which isn't in flight"))
         }
         continuation.resume(returning: message)
@@ -140,6 +163,22 @@ public final class ServiceConnection: Sendable {
         }
         for continuation in pending { continuation.resume(throwing: error) }
         link.close()
+    }
+}
+
+/// One request's id and whether its caller was cancelled, whichever comes first.
+private final class Asked: Sendable {
+    private let state = Mutex<(id: UInt32?, cancelled: Bool)>((nil, false))
+
+    func note(_ id: UInt32) { state.withLock { $0.id = id } }
+    var idIfCancelled: UInt32? { state.withLock { $0.cancelled ? $0.id : nil } }
+
+    /// Marks the caller cancelled, and gives the request's id if it has one yet.
+    func cancel() -> UInt32? {
+        state.withLock { state in
+            state.cancelled = true
+            return state.id
+        }
     }
 }
 

@@ -165,10 +165,12 @@ private struct PlaceholderPage<Extra: View>: View {
 }
 
 #if DEBUG
-/// The dev race server Race online joins in a Debug build (#68), `host:port`. `-onlineHost` overrides it. On the
-/// Settings page.
+/// The dev race server Race online joins in a Debug build (#68), `host:port`, and the dev player it signs in as there
+/// in place of Game Center (#162: a number; empty for Game Center, or the dev instant race). `-onlineHost` and
+/// `-devIdentity` override them. Both are read at launch. On the Settings page.
 struct DevRaceServerField: View {
     @AppStorage(RaceServer.addressDefaultsKey) private var host = RaceServer.defaultAddress
+    @AppStorage(DevIdentity.defaultsKey) private var player = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -178,6 +180,12 @@ struct DevRaceServerField: View {
                 .autocorrectionDisabled()
                 .keyboardType(.URL)
                 .textFieldStyle(.roundedBorder)
+            Text("Dev player").font(MenuFont.heading(.headline)).padding(.top, 8)
+            TextField("number", text: $player)
+                .keyboardType(.numberPad)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("settings-dev-player")
+            Text("Both apply at the next launch.").font(MenuFont.body(.footnote)).foregroundStyle(.secondary)
         }
         .padding(.top, 24)
     }
