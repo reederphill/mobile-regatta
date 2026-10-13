@@ -38,7 +38,9 @@ struct FixtureScene: Decodable {
     /// nearest other boat, for up to `scriptSeconds` (default 6) or until the turn is served; then your bot takes you
     /// back. A turn in the thick of it draws the 21.2 call the rules-call scene shows, where a bot's turn waits for
     /// clear water. "headUpAfterFirstFinish": once a ghost is in your view, you head up to close-hauled and hold there
-    /// (`YourScript.headUp`).
+    /// (`YourScript.headUp`). "runDeeper": on the first run, once you have planed for `scriptSeconds` on end, you bear
+    /// away a degree and a half a second, the rudder barely over, until you fall off the plane, and your bot takes you
+    /// back: the planing cue's countdown (#492), her margin running from full to nothing (`YourScript.runDeeper`).
     var yourScript: String?
     var scriptSeconds: Double?
     /// With "penaltyTurnAtOnce": the way you turn, in place of towards the nearest other boat. "luff": towards the
@@ -193,7 +195,7 @@ enum RecordFixture {
 
     /// Your seat's script (`FixtureScene.yourScript`): seat 0, the setup's human seat.
     struct YourScript {
-        enum Kind { case penaltyTurnAtOnce, headUpAfterFirstFinish }
+        enum Kind { case penaltyTurnAtOnce, headUpAfterFirstFinish, runDeeper }
         /// Which way a scripted penalty turn goes (`FixtureScene.turnWay`).
         enum Way { case towardsNearest, luff, bearAway }
         let kind: Kind
@@ -203,11 +205,17 @@ enum RecordFixture {
         /// While a penalty turn is scripted: the rudder held and the tick a bot takes you back.
         var turn: (rudder: Double, until: Int)?
         var headingUp = false
+        /// While running deeper: the tick you got on the plane you are on, and once you bear away, the tick and the
+        /// wind angle (degrees) you began at; done once you have fallen.
+        var planingSince: Int?
+        var deeper: (from: Int, twa: Double)?
+        var hasRunDeeper = false
 
         init?(_ scene: FixtureScene) {
             switch scene.yourScript {
             case "penaltyTurnAtOnce": kind = .penaltyTurnAtOnce
             case "headUpAfterFirstFinish": kind = .headUpAfterFirstFinish
+            case "runDeeper": kind = .runDeeper
             default: return nil
             }
             switch scene.turnWay {
@@ -222,6 +230,40 @@ enum RecordFixture {
             switch kind {
             case .penaltyTurnAtOnce: turnAtOnce(race, &controllers, calls: calls, you: you)
             case .headUpAfterFirstFinish: headUp(race, &controllers)
+            case .runDeeper: runDeeper(race, &controllers, you: you)
+            }
+        }
+
+        /// The fastest you bear away running deeper, degrees a second, the deepest you go, and the most rudder you
+        /// hold: inside the planing rule's rudder gate (`ApparentWind.rudderWithin`, 0.2 on skiff@9), so the rule
+        /// drops you when your apparent wind runs out and not later.
+        static let deeperRate = 1.5, deepest = 178.0, deeperRudder = 0.18
+        /// The first run: after the beat and the reach from the windward mark to its offset mark.
+        static let runLeg = 2
+
+        /// Once, on the first run: after `ticks` on the plane without a break you bear away steadily until you fall off
+        /// it (or leave the leg, or finish), then your bot takes you back.
+        mutating func runDeeper(_ race: Race, _ controllers: inout SeatControllers, you: BotDriver) {
+            let me = 0
+            let boat = race.boats[me]
+            guard !hasRunDeeper else { return }
+            planingSince = boat.isPlaning ? planingSince ?? race.tick : nil
+            if let held = deeper {
+                guard boat.isPlaning, boat.legIndex == Self.runLeg, !boat.isGhost else {
+                    deeper = nil
+                    hasRunDeeper = true
+                    controllers[me] = .bot(you.takingOver())
+                    return
+                }
+                let seconds = Double(race.tick - held.from) / Double(Race.tickRate)
+                let target = min(held.twa + Self.deeperRate * seconds, Self.deepest)
+                // Wind over the starboard side (relative > 0) is clockwise of the bow: bearing away turns anticlockwise.
+                let away: Double = boat.relativeWind >= 0 ? -1 : 1
+                let rudder = (away * (target - rad2deg(boat.twa)) * 0.05).clamped(to: -Self.deeperRudder...Self.deeperRudder)
+                _ = race.apply(BoatInput(rudder: rudder), seat: me, atTick: race.tick + 1)
+            } else if boat.legIndex == Self.runLeg, boat.status == .racing, let since = planingSince, race.tick - since >= ticks {
+                deeper = (race.tick, rad2deg(boat.twa))
+                controllers[me] = .human
             }
         }
 

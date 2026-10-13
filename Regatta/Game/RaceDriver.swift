@@ -118,9 +118,20 @@ struct TickFrame {
     /// crossing. 1 and nil (her windward side now) where the race gives none.
     let backwindSails: [Double]
     let backwindSides: [Tack?]
+    /// The tick the race seated its fleet on the start row (`Race.init`: the start of its sequence), nil where the
+    /// frame is no race's (the help legend's): what `isJustSeated` counts from.
+    let seatedTick: Int?
 
     /// Race clock in seconds.
     var time: Double { Double(tick) / Double(Race.tickRate) }
+
+    /// Whether the fleet has only just been seated (#492): within `PlaningCue.seatedSeconds` of `seatedTick`. The
+    /// race seats every boat reaching at speed, so the rule calls her planing from her first tick until she has
+    /// headed up, a plane nobody sailed onto; the planing cue shows none of it. Drawing's alone: the race is as it is.
+    var isJustSeated: Bool {
+        guard let seatedTick else { return false }
+        return Double(tick - seatedTick) < PlaningCue.seatedSeconds * Double(Race.tickRate)
+    }
 
     /// `race` after its tick, with the right-of-way glows `keepClearOf` that seat sees (none when nil).
     init(race: Race, keepClearOf seat: Int? = nil) {
@@ -144,14 +155,15 @@ struct TickFrame {
         wake = race.wake
         backwindSails = race.boats.indices.map { race.backwindSail(ofSeat: $0) }
         backwindSides = race.boats.indices.map { race.backwindSide(ofSeat: $0) }
+        seatedTick = -race.setup.startSequenceTicks
     }
 
     /// `heldInputs` nil holds every seat neutral; `gaps` nil gives every seat none; `backwindSails` nil casts every
-    /// seat's backwind in full on her windward side now.
+    /// seat's backwind in full on her windward side now; `seatedTick` nil is a fleet never just seated.
     init(tick: Int, boats: [Boat], standings: [Int], wind: WindField, isOver: Bool, heldInputs: [BoatInput]? = nil,
          closeTick: Int? = nil, gaps: [Double?]? = nil, keepClear: [RightOfWay?]? = nil, owed: [OwedPenalty?]? = nil,
          penalty: RulesConfig.Penalty? = nil, wake: TurbulenceRibbons? = nil, backwindSails: [Double]? = nil,
-         backwindSides: [Tack?]? = nil) {
+         backwindSides: [Tack?]? = nil, seatedTick: Int? = nil) {
         self.tick = tick
         self.boats = boats
         self.standings = standings
@@ -166,6 +178,7 @@ struct TickFrame {
         self.wake = wake
         self.backwindSails = backwindSails ?? Array(repeating: 1, count: boats.count)
         self.backwindSides = backwindSides ?? Array(repeating: nil, count: boats.count)
+        self.seatedTick = seatedTick
     }
 
     /// This frame a tick earlier, each boat moved back along its velocity: what the renderer draws from
@@ -178,7 +191,7 @@ struct TickFrame {
         }
         return TickFrame(tick: tick - 1, boats: moved, standings: standings, wind: wind, isOver: isOver, heldInputs: heldInputs,
                          closeTick: closeTick, gaps: gaps, keepClear: keepClear, owed: owed, penalty: penalty, wake: wake,
-                         backwindSails: backwindSails, backwindSides: backwindSides)
+                         backwindSails: backwindSails, backwindSides: backwindSides, seatedTick: seatedTick)
     }
 
     /// Where `seat` stands in the fleet, from 1.

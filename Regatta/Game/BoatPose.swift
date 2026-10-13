@@ -251,6 +251,33 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
     /// Falling off the plane or getting back on (#462), that look goes or comes over this many race seconds
     /// (`PlaningEase`): she settles and lifts, and never flickers on the edge. A debug slider; 0 is at once.
     var wakePlaningSeconds = 1.0
+
+    // MARK: The planing cue (#492): debug sliders, every one
+
+    /// While a boat planes she trails two more wake lines, one from each stern corner (`CornerWakes`). Their longest
+    /// (her plane margin at 1), a share of the middle wake's seconds of track; their shortest while she planes (her
+    /// margin at 0), a share of that longest, so the last stretch before a fall still reads and they are gone only
+    /// when she is off; their width, points, and alpha (`CuePalette.cueWhite`); and how far out from her centreline
+    /// they start, a share of half her beam.
+    var cornerWakeLengthShare = 0.6
+    var cornerWakeMinShare = 0.3
+    var cornerWakeWidth = 1.25
+    var cornerWakeAlpha = 0.4
+    var cornerWakeOffsetShare = 1.0
+    /// How fast their length follows her margin, per race second (exponential): it never jumps.
+    var cornerWakeEaseRate = 3.0
+    /// What the plane margin counts as comfortable (`BoatClass.PlaningTuning.MarginRanges`): the share of her polar
+    /// speed at which the speed edge reads full (from the class's stay-on share, where it reads nothing), the knots of
+    /// apparent wind over the class's floor at which the wind edge does, and the degrees of apparent wind angle
+    /// forward of the class's limit over which the speed edge comes in. The first is under 1, so the corner wakes are
+    /// full length in ordinary planing: a breezy run is sailed at 0.8 to 0.9 of the polar.
+    var planeMarginFullSpeedShare = 0.85
+    var planeMarginApparentKnots = 3.0
+    var planeMarginAngleBandDegrees = 15.0
+    /// Your speed tile turns yellow on the plane (`PlaningTile`): the yellow's alpha over the tile's face, and the
+    /// race seconds it comes and goes over.
+    var planingTileAlpha = 0.85
+    var planingTileSeconds = 0.4
     /// The centre streak: its length, a share of the V's, its width, metres, and its alpha, a share of the V's.
     var wakeStreakShare = 0.6
     var wakeStreakWidth = 0.18
@@ -367,6 +394,13 @@ nonisolated extension BoatStyle {
             (.wakeSpreadDegrees, \.wakeSpreadDegrees), (.wakePressureFan, \.wakePressureFan),
             (.wakeAlpha, \.wakeAlpha), (.wakePlaningBoost, \.wakePlaningBoost),
             (.wakePlaningSeconds, \.wakePlaningSeconds),
+            (.cornerWakeLengthShare, \.cornerWakeLengthShare), (.cornerWakeMinShare, \.cornerWakeMinShare),
+            (.cornerWakeWidth, \.cornerWakeWidth), (.cornerWakeAlpha, \.cornerWakeAlpha),
+            (.cornerWakeOffsetShare, \.cornerWakeOffsetShare), (.cornerWakeEaseRate, \.cornerWakeEaseRate),
+            (.planeMarginFullSpeedShare, \.planeMarginFullSpeedShare),
+            (.planeMarginApparentKnots, \.planeMarginApparentKnots),
+            (.planeMarginAngleBandDegrees, \.planeMarginAngleBandDegrees),
+            (.planingTileAlpha, \.planingTileAlpha), (.planingTileSeconds, \.planingTileSeconds),
             (.wakeTrailSeconds, \.wakeTrailSeconds), (.wakeTrailWidth, \.wakeTrailWidth),
             (.wakeStreakShare, \.wakeStreakShare), (.wakeStreakWidth, \.wakeStreakWidth),
             (.wakeStreakAlpha, \.wakeStreakAlpha), (.wakeEaseRate, \.wakeEaseRate),

@@ -61,6 +61,16 @@ final class RenderFixtureFilterUITests: RenderFixtureTestCase {
         try assertAllMatchReferences(Self.filtered("cues"))
     }
 
+    /// The planing cue (#492) through every filter, on the plane and at the edge of it: the yellow speed tile, whose
+    /// dark figures on a light face read without the hue, and the stern-corner wakes.
+    @MainActor func testPlaningCueUnderFiltersMatchesReferences() throws {
+        try assertAllMatchReferences(Self.filtered("planing"))
+    }
+
+    @MainActor func testPlaningEdgeCueUnderFiltersMatchesReferences() throws {
+        try assertAllMatchReferences(Self.filtered("planing-edge"))
+    }
+
     /// The rule calls' cues (#123) through every filter: the orange dashed lines, badges and red glows.
     @MainActor func testRuleCallCuesUnderFiltersMatchReferences() throws {
         try assertAllMatchReferences(Self.filtered("rules-call"))

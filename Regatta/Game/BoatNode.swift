@@ -118,10 +118,10 @@ final class BoatNode: SKNode {
     /// `wakeQuality` is the wake's tier and `sailDetail` the sail's (#127): at `.farReduced` a boat more than
     /// `style.farBoatHulls` from yours (`hullsFromYou`; yours passes 0) draws no sail animation detail.
     /// `backwindSail` scales her backwind stripes and `backwindSide` (nil: her windward side now) places them
-    /// (`RenderWorld.backwind(ofSeat:)`, #377).
+    /// (`RenderWorld.backwind(ofSeat:)`, #377). `justSeated` (`TickFrame.isJustSeated`) draws her no planing cue (#492).
     func update(with boat: Boat, pose: BoatPose, style: BoatStyle, wakeQuality: WakeQuality = .full,
                 sailDetail: SailDetail = .full, hullsFromYou: Double = 0, time: Double, dt: Double,
-                settled: Bool = false, backwindSail: Double = 1, backwindSide: Tack? = nil) {
+                settled: Bool = false, backwindSail: Double = 1, backwindSide: Tack? = nil, justSeated: Bool = false) {
         position = CGPoint(x: boat.position.x * ppm, y: boat.position.y * ppm)
         body.zRotation = CGFloat(-boat.heading)
 
@@ -133,9 +133,12 @@ final class BoatNode: SKNode {
         updateHeel(pose, style: style)
         updateSail(pose, style: style, detail: Double(sailDetailShare), time: time, dt: dt, settled: settled)
         effects.update(with: boat, pose: pose, style: style, quality: wakeQuality, time: time, dt: dt,
-                       settled: settled, backwindSail: backwindSail, backwindSide: backwindSide)
+                       settled: settled, backwindSail: backwindSail, backwindSide: backwindSide, justSeated: justSeated)
         sail.isHidden = hidesDecoration
-        if hidesDecoration { effects.trail.isHidden = true }
+        if hidesDecoration {
+            effects.trail.isHidden = true
+            effects.cornerTrail.isHidden = true
+        }
 
         glow?.alpha = CGFloat(style.glowAlpha)
         fade.shouldEnableEffects = pose.isGhost

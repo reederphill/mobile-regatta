@@ -25,9 +25,11 @@ import Testing
             // and your glow (the roll ring went with the Tack button, #460).
             #expect(boats > 1, "\(name)")
             // The wake and sail are named for the render-quality ladder (#127), so they read as layers of their own here.
-            let effects = drawn.filter { ["effects", "wake"].contains($0.layer) }
+            let effects = drawn.filter { ["effects", "wake", "cornerWake"].contains($0.layer) }
             let fleet = drawn.filter { ["fleet", "sail"].contains($0.layer) }
-            #expect(effects.count == 2 * boats, "\(name)")
+            // And her stern-corner wakes (#492), one node a boat, under her wake.
+            #expect(effects.count == 3 * boats, "\(name)")
+            #expect(drawn.filter { $0.layer == "cornerWake" }.count == boats, "\(name)")
             #expect(drawn.filter { $0.layer == "wake" }.count == boats, "\(name)")
             #expect(drawn.filter { $0.layer == "sail" }.count == boats, "\(name)")
             let ribbons = drawn.filter { $0.layer == "turbulenceTrails" }

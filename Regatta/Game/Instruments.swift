@@ -58,3 +58,25 @@ struct InstrumentSmoother {
         return shown
     }
 }
+
+/// The speed tile's planing look (#492): the tile turns yellow while your boat is on the plane, coming and going over
+/// `seconds` of race time (`PlaningEase`), so a boat on the edge of the plane never flashes it. Nothing moves while
+/// race time doesn't (paused, a frozen fixture); the first reading, or one after a jump in race time (a restart), is
+/// shown as she is.
+struct PlaningTile {
+    private var ease: PlaningEase?
+    private var time: Double?
+
+    /// How far yellow the tile is at race time `time`, 0...1.
+    mutating func step(isPlaning: Bool, at time: Double, seconds: Double) -> Double {
+        defer { self.time = time }
+        guard var ease, let last = self.time, time >= last, time - last <= InstrumentSmoother.jumpSeconds else {
+            let ease = PlaningEase(isPlaning: isPlaning)
+            self.ease = ease
+            return ease.level
+        }
+        ease.advance(isPlaning: isPlaning, dt: time - last, seconds: seconds)
+        self.ease = ease
+        return ease.level
+    }
+}

@@ -35,6 +35,7 @@ Sources: #22 (art direction), #29 (safe palette), G7 (#37), #53 (values). Consum
 | `orange` | `#E69F00` | 0.75 / 0.158 / 77 | active leg: current marks, zone, rounding arrow, next-mark edge arrow, rule-call line, penalty arc |
 | `chevronBlue` | `#3F51E0` | 0.51 / 0.216 / 271 | none now (the give-way chevron is gone); stays reserved |
 | `yellow` | `#F0E442` | 0.90 / 0.172 / 105 | laylines; HUD start clock (#111) |
+| `planingYellow` | `#FFE31A` | 0.91 / 0.186 / 100 | HUD speed tile while your boat planes (#492), at 0.85 over the tile's dark face with dark figures; `yellow`'s family (5° off), 23° from `orange`; not reserved |
 | `giveWayRed` | `#FF4D4D` | 0.67 / 0.215 / 25 | right-of-way glow round a boat you must keep clear of; not reserved |
 | `hasRightGreen` | `#3DDC84` | 0.79 / 0.180 / 154 | right-of-way glow round a boat that must keep clear of you; not reserved |
 | `inactiveGrey` | `#9AA0A6` | 0.70 / 0.011 / — | inactive marks |

@@ -96,6 +96,14 @@ struct FreezeTickRow: Decodable {
     /// too (the no-go angle and `SailTrim`'s margin, 13° inside a 45° groove), where her sail doesn't draw and no luff
     /// lifts: the cues row's 10.
     var grooveDegrees: [Double]?
+    /// You are on the plane with your plane margin inside these bounds, both included (#492): what the planing cue
+    /// draws, `PlaningTuning.planeMargin` over its standard ranges (the app's defaults). [1, 1] is comfortably on it,
+    /// your stern-corner wakes at full length; a low pair is the edge of it, their shortest.
+    var planeMargin: [Double]?
+    /// You have been on the plane this many seconds without a break: sailing on it, not just getting on.
+    var planingSeconds: Double?
+    /// At least this many boats on the plane in view, you among them: each trails her stern-corner wakes.
+    var planingInView: Int?
 
     static let callSeconds = 8
     static let callFadeSeconds = 1.5
@@ -214,6 +222,8 @@ enum FreezeTicks {
         private(set) var found: [Int?]
         private(set) var calls: [RuleCall] = []
         private var firstFinish = false
+        /// By seat, the tick she got on the plane she is on; nil off it.
+        private var planingSince: [Int?] = []
 
         init(_ rows: [FreezeTickRow], setup: RaceSetup) {
             self.rows = rows
@@ -232,9 +242,13 @@ enum FreezeTicks {
                 default: break
                 }
             }
+            if planingSince.count != race.boats.count { planingSince = race.boats.map { _ in nil } }
+            for (seat, boat) in race.boats.enumerated() {
+                planingSince[seat] = boat.isPlaning ? planingSince[seat] ?? race.tick : nil
+            }
             for (index, row) in rows.enumerated() where found[index] == nil && race.tick % (row.step ?? 10) == 0 {
                 if FreezeTicks.meets(row, race, me: seats[index], view: row.view ?? FreezeTickRow.defaultView, calls: calls,
-                                     firstFinish: firstFinish) {
+                                     firstFinish: firstFinish, planingSince: planingSince[seats[index]]) {
                     found[index] = race.tick
                 }
             }
@@ -253,7 +267,7 @@ enum FreezeTicks {
     }
 
     static func meets(_ row: FreezeTickRow, _ race: Race, me: Int, view: [Double], calls: [RuleCall],
-                      firstFinish: Bool) -> Bool {
+                      firstFinish: Bool, planingSince: Int? = nil) -> Bool {
         let boat = race.boats[me]
         if let leg = row.leg, boat.legIndex != leg { return false }
         if let racing = row.racing, (boat.status == .racing) != racing { return false }
@@ -281,6 +295,15 @@ enum FreezeTicks {
         }
         if let bounds = row.place, bounds.count == 2, !(bounds[0]...bounds[1]).contains(race.place(of: me)) { return false }
         if let n = row.sailsWorkingInView, inView.filter({ wedgePresence(race, seat: $0) >= 0.5 }).count < n { return false }
+        if let n = row.planingInView, inView.filter({ race.boats[$0].isPlaning && !race.boats[$0].isGhost }).count < n {
+            return false
+        }
+        if let bounds = row.planeMargin, bounds.count == 2 {
+            guard let margin = planeMargin(boat, in: race.boatClass), (bounds[0]...bounds[1]).contains(margin) else { return false }
+        }
+        if let seconds = row.planingSeconds {
+            guard let since = planingSince, Double(race.tick - since) >= seconds * Double(Race.tickRate) else { return false }
+        }
         if let kinds = row.glows {
             guard !boat.isGhost else { return false }
             let relations = race.keepClearRelations(of: me)
@@ -341,6 +364,14 @@ enum FreezeTicks {
             }
         }
         return true
+    }
+
+    /// Her plane margin as the planing cue draws it (#492, the app's `PlaneMargin` at its default ranges): nil off the
+    /// plane, as a ghost, and for a class that never planes.
+    static func planeMargin(_ boat: Boat, in boatClass: BoatClass) -> Double? {
+        guard boat.isPlaning, !boat.isGhost, let rule = boatClass.planing else { return nil }
+        return rule.planeMargin(isPlaning: true, twa: boat.twa, speed: boat.speed, tws: boat.polarWindSpeed(in: boatClass),
+                                polar: boatClass.polar)
     }
 
     /// The strength of `seat`'s backwind wedge as the app draws it (`BoatEffects`), 0...1: none for a ghost.
