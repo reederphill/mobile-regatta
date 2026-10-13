@@ -188,6 +188,14 @@ struct BotBrain: Sendable {
     var isNearHerMark = false
     /// Whether that course was to her point through a gate from within `PlaningTable.gateRange` of it (`navigate`).
     var isAtHerGate = false
+    /// The gate mark she has picked to round (#518, `gateAim`): the leg, and whether it is the left one looking
+    /// downwind. Another leg's is none.
+    var gatePick: (leg: Int, left: Bool)?
+    /// The gate mark whose point she has sailed straight for on the gybe that rounds it (`gateAim`), likewise: she is
+    /// no longer far and deep of it.
+    var gateCommitted: (leg: Int, left: Bool)?
+    /// Whether she is sailing back above a gate's line she fell below without going through it (`gateAim`).
+    var gateRecovering = false
     /// What she knows of a stall in irons (#459, `centresStalled`): only on a class she turns by hand.
     var stall = Stall()
     /// What she has made of the boats around her (#234, `observeFleet`): each one's tack, when she saw it tack, and
@@ -1153,6 +1161,8 @@ struct BotBrain: Sendable {
             if case .finish = c.legs[b.legIndex] { return finishAim(b, view) }
             // The windward mark's last 60 m are sailed by her board, not the corridor (#508).
             if let aim = windwardFinalAim(b, view) { return aim }
+            // The leg to the gate, from her pick of its marks to its line, is sailed for her point inside her mark (#518).
+            if let aim = gateAim(b, view) { return aim }
             return navigate(b, to: waypoint(b, view), view)
         case .finished, .dsq:
             return Aim(heading: b.heading, b, tolerance: .pi)
