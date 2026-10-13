@@ -104,6 +104,8 @@ public struct BotDriver: Sendable {
 
     /// Whether she is the cautious bot that sails a dropped player's boat (#104, `cautious(seat:raceSeed:)`).
     public var isCautious: Bool { brain.caution != nil }
+    /// PROBE (#464): what her brain last decided and why.
+    public var probe: BotProbeTrace { brain.probe }
 
     /// This driver taking a seat over at any tick (#19, #104): mid-race, mid-tack, mid-penalty, OCS, in irons, on the
     /// race area's edge, or before the gun. Her first decision rebuilds her plan from what the seat sees and nothing
