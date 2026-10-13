@@ -7,6 +7,7 @@ import RegattaCore
 // tick's events. It reads no bot and changes nothing a bot sees or does, so a race sails the same with it or without
 // it (`BotSuiteDiagnoseTests.observingLeavesTheRaceBitIdentical`). This file is what one race gives: one
 // `BoatDiagnosis` a boat, and the rules that name a cause from it. `DiagnoseReport.swift` pools them into the tables.
+// Her mark roundings against the ideal path (#511) are scored in `Roundings.swift`.
 
 /// Why a boat started late: one primary cause a boat, the first that holds in this order (`LateCause.of`), as
 /// #471's re-trace ranked them. A boat with two causes counts under the first.
@@ -393,6 +394,8 @@ public struct BoatDiagnosis: Hashable, Sendable {
     public var legs: [LegObservation] = []
     public var start: StartObservation
     public var planing = PlaningObservation()
+    /// The mark roundings she sailed to their leg's end, in order (#511).
+    public var roundings: [RoundingObservation] = []
     public var episodes: [PenaltyEpisode] = []
     /// The penalty turns she was given in the race: her rule calls that cost one, and her mark touches.
     public var turnsOwed = 0
@@ -506,6 +509,8 @@ public struct RaceObserver {
     }
     private var legLog: [[LegLog]]
     private let legKinds: [LegKind]
+    /// Each seat's mark roundings against the ideal path (#511).
+    private var roundings: [RoundingScorer]
 
     public init(race: Race) {
         let count = race.boats.count
@@ -540,6 +545,7 @@ public struct RaceObserver {
         gybeTicks = Array(repeating: [], count: count)
         legLog = Array(repeating: [], count: count)
         legKinds = LegKind.kinds(of: race.course)
+        roundings = Array(repeating: RoundingScorer(course: race.course, polar: race.boatClass.polar), count: count)
     }
 
     /// One tick of a boat's legs: her first begins at her start, each next as she rounds onto it, the last ends at her
@@ -599,6 +605,11 @@ public struct RaceObserver {
             }
             recordRecovery(seat, boat, race)
             recordPlaning(seat, boat, race)
+            if boat.status == .racing {
+                roundings[seat].record(RoundingSample(tick: tick, position: boat.position, windDirection: boat.windDirection,
+                                                      tws: boat.polarWindSpeed(in: race.boatClass), leg: boat.legIndex,
+                                                      stage: boat.roundingStage))
+            }
             if tick.isMultiple(of: rate) {
                 let slot = samples[seat] % (Self.finishWindowSeconds + 1)
                 metresToGo[seat][slot] = race.distanceToFinish(of: boat)
@@ -825,6 +836,7 @@ public struct RaceObserver {
             var diagnosis = BoatDiagnosis(tier: tiers[seat], start: start, finish: finish)
             diagnosis.episodes = episodes[seat]
             diagnosis.planing = planing[seat]
+            diagnosis.roundings = roundings[seat].observations()
             if let fell = fallTick[seat], seconds(race.tick - fell) >= Self.backOnSeconds { diagnosis.planing.fallsWatched += 1 }
             let window = Self.gybeFallWindow
             func isGybes(_ fall: Int, _ gybe: Int) -> Bool {

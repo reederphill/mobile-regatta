@@ -1,4 +1,4 @@
-import BotSuite
+@testable import BotSuite
 import Foundation
 import RegattaBots
 import RegattaCore
@@ -362,11 +362,11 @@ import Testing
         #expect(untimed(diagnosed.lines) == untimed(plain.lines) + summary.lines)
         #expect(summary.lines.first?.hasPrefix("diagnose: 4 races") == true)
 
-        // The JSON's shape: the nine keys, each table's rows in their fixed order.
+        // The JSON's shape: the ten keys, each table's rows in their fixed order.
         let json = try #require(JSONSerialization.jsonObject(with: diagnosed.jsonData()) as? [String: Any])
         let diagnose = try #require(json["diagnose"] as? [String: Any])
         #expect(Set(diagnose.keys) == ["races", "starts", "lateStarters", "penaltyEpisodes", "penaltiesOwed", "preStartCalls",
-                                       "nonFinishers", "planing", "legs"])
+                                       "nonFinishers", "planing", "legs", "roundings"])
         let boats = diagnosed.races.flatMap(\.seats)
         let tiers = [DiagnoseSummary.all] + BotTier.allCases.filter { tier in boats.contains { $0.tier == tier } }.map(\.rawValue)
         #expect(tiers.count >= 2)
@@ -400,6 +400,15 @@ import Testing
         let sailedIn = legs(.lastRun).map { (Double($0.legs) * $0.completedShare).rounded() }.reduce(0, +)
         #expect(Int(sailedIn) == live.filter(\.finished).count)
         #expect(summary.lines.contains { $0.hasPrefix("legs by tactics skill and handling") })
+        // The roundings table (#511): every tier by every mark, and nothing at the gate of a one-lap course.
+        let marks = [DiagnoseSummary.all] + RoundingMark.allCases.map(\.rawValue)
+        #expect(summary.roundings.map(\.tier) == tiers.flatMap { Array(repeating: $0, count: marks.count) })
+        #expect(summary.roundings.map(\.mark) == Array(repeating: marks, count: tiers.count).flatMap { $0 })
+        #expect((summary.roundings.first?.roundings ?? 0) > 0)
+        for row in summary.roundings where row.mark == RoundingMark.gate.rawValue {
+            #expect(row.roundings == 0 && row.extraMean == nil && row.extra == nil && row.overshoots == nil, "\(row)")
+        }
+        #expect(summary.lines.contains { $0.hasPrefix("roundings by tier and mark") })
         let episodeRow = try #require((diagnose["penaltyEpisodes"] as? [[String: Any]])?.first)
         #expect(Set(episodeRow.keys).isSuperset(of: ["tier", "phase", "episodes", "served", "disqualified", "open", "oneTurnEpisodes",
                                                      "resetsPerEpisode", "resetsPerEpisodeByCause", "stackedShare", "turnsServed",
@@ -433,6 +442,217 @@ import Testing
         #expect(episodes.episodes == outcomes)
         let byPhase: Int = summary.penaltyEpisodes.filter { $0.tier == DiagnoseSummary.all }.dropFirst().map(\.episodes).reduce(0, +)
         #expect(byPhase == episodes.episodes)
+    }
+
+    // MARK: - Roundings (#511)
+
+    /// A hand-posed track for the scorer, in a steady wind down the course's axis.
+    struct Track {
+        var wind: Double
+        var samples: [RoundingSample] = []
+
+        /// One sample at `point`.
+        mutating func jump(_ point: Vec2, leg: Int, stage: Int = 0) {
+            samples.append(RoundingSample(tick: samples.count, position: point, windDirection: wind, tws: 6, leg: leg, stage: stage))
+        }
+
+        /// `ticks` samples along the straight line from the last one to `point`; the one at `point` is on `end`'s leg
+        /// and stage where given.
+        mutating func sail(_ point: Vec2, ticks: Int, leg: Int, stage: Int = 0, end: (leg: Int, stage: Int)? = nil) {
+            let from = samples[samples.count - 1].position
+            for tick in 1...ticks {
+                let last = tick == ticks
+                jump(from + (point - from) * (Double(tick) / Double(ticks)), leg: last ? end?.leg ?? leg : leg,
+                     stage: last ? end?.stage ?? stage : stage)
+            }
+        }
+    }
+
+    /// The scorer against the ideal path on hand-posed tracks, the table on hand-built roundings, and one real race.
+    @Test func roundingsTableScoresAgainstTheIdealPath() throws {
+        // (a) The scorer. A two-lap course: leg 0 the windward mark, 1 the offset mark, 2 the gate.
+        let lapped = BotMatrix(seeds: [5], fleetSizes: [4], tierMixes: [.national], laps: 2, capSecondsAfterGun: 900).cells[0]
+        let setup = try BotRaceHarness.raceSetup(for: lapped)
+        let race = try Race(setup: setup, files: RaceFiles(resolving: setup),
+                            mode: .authoritative(windSeed: BotRaceHarness.windSeed(for: lapped.seed)))
+        let course = race.course, polar = race.boatClass.polar
+        guard case .round(CourseLayout.gateIndex) = course.legs[2],
+              case .gate(let left, let right) = course.elements[CourseLayout.gateIndex] else {
+            Issue.record("leg 2 of a two-lap course is the gate")
+            return
+        }
+        func score(_ track: Track) -> [RoundingObservation] {
+            var scorer = RoundingScorer(course: course, polar: polar)
+            for sample in track.samples { scorer.record(sample) }
+            return scorer.observations()
+        }
+        let u = course.upwind, r = u.rightPerp
+        let windward = course.elements[CourseLayout.windwardIndex].marks[0].position
+        let beta = polar.bestUpwind(tws: 6).twa
+        // From 70 m below the mark, a tack out and a tack in on the polar's best angle land 3 m to its right: the ideal.
+        let entry = windward - u * 70, target = windward + r * 3
+        let out = (70 / cos(beta) + 3 / sin(beta)) / 2
+        let corner = entry + Vec2.heading(course.axis + beta) * out
+        let done = target + u * 24, exit = done - r * 60
+        /// A windward rounding: the approach by `approach` from the entry (two samples out of range before it), then
+        /// the rounding and the exit straight, or each through a corner.
+        func rounding(approach: [Vec2], detour: Bool = false, apex: Bool = false, dogleg: Bool = false, exitTicks: Int? = 450,
+                      sailsOn: Bool = true) -> Track {
+            var track = Track(wind: course.axis)
+            track.jump(windward - u * 85, leg: 0)
+            track.jump(windward - u * 80.5, leg: 0)
+            track.jump(entry, leg: 0)
+            if detour {
+                track.sail(entry + r * 20, ticks: 40, leg: 0)
+                track.sail(entry, ticks: 40, leg: 0)
+            }
+            for point in approach { track.sail(point, ticks: 200, leg: 0) }
+            track.sail(target, ticks: 200, leg: 0, end: (0, 1))
+            guard sailsOn else { return track }
+            if apex { track.sail(target + u * 12 - r * 5, ticks: 20, leg: 0, stage: 1) }
+            track.sail(done, ticks: 20, leg: 0, stage: 1, end: (1, 0))
+            guard let exitTicks else { return track }
+            if dogleg { track.sail(done - r * 30 + u * 40, ticks: exitTicks / 2, leg: 1) }
+            track.sail(exit, ticks: exitTicks / 2, leg: 1)
+            return track
+        }
+        let ideal = try #require(score(rounding(approach: [corner])).first)
+        #expect(score(rounding(approach: [corner])).count == 1, "the offset mark's rounding was never crossed")
+        #expect(ideal.mark == .windward && !ideal.wrongSide && ideal.overshootTicks == 0 && !ideal.overshoots)
+        #expect(abs(ideal.approachExtra) < 1e-6 && abs(ideal.roundExtra) < 1e-6 && abs(ideal.exitExtra) < 1e-6, "\(ideal)")
+        // A 20 m detour out and back, the rounding over a 5-12-13 corner, the exit over a 3-4-5 one.
+        let wide = try #require(score(rounding(approach: [corner], detour: true, apex: true, dogleg: true)).first)
+        #expect(abs(wide.approachExtra - 40) < 1e-6 && abs(wide.roundExtra - 2) < 1e-6 && abs(wide.exitExtra - 40) < 1e-6, "\(wide)")
+        #expect(abs(wide.extraMetres - 82) < 1e-6)
+        // Straight at the mark inside the laylines is shorter than the tacking cone.
+        let straight = try #require(score(rounding(approach: [])).first)
+        #expect(abs(straight.approachExtra - ((target - entry).length - 70 / cos(beta))) < 1e-6 && straight.approachExtra < 0)
+        // Above the mark on its left before rounding it is the wrong side; on its right is not.
+        #expect(score(rounding(approach: [windward - r * 8 + u * 2])).first?.wrongSide == true)
+        #expect(score(rounding(approach: [windward + r * 8 + u * 2])).first?.wrongSide == false)
+        // Not sailed to the leg's end: no rounding. An exit the track cuts short counts what it saw.
+        #expect(score(rounding(approach: [corner], sailsOn: false)).isEmpty)
+        #expect(score(rounding(approach: [corner], exitTicks: nil)).first?.exitExtra == 0)
+        let cut = try #require(score(rounding(approach: [corner], dogleg: true, exitTicks: 100)).first)
+        #expect(abs(cut.exitExtra - 40) < 1e-6 && abs(cut.approachExtra) < 1e-6)
+
+        // The gate: 3 s below its line before crossing it is an overshoot, a tick less is not.
+        let centre = course.targetPosition(for: course.legs[2])
+        for held in [89, 90] {
+            var track = Track(wind: course.axis)
+            track.jump(centre + u * 50, leg: 2)
+            for _ in 0..<held { track.jump(centre - u * 2, leg: 2) }
+            track.jump(centre + u * 5, leg: 2)
+            track.jump(centre, leg: 2, stage: 1)
+            track.jump(centre - u * 10, leg: 3)
+            let seen = score(track)
+            #expect(seen.count == 1 && seen.first?.mark == .gate && seen.first?.wrongSide == false, "\(seen)")
+            #expect(seen.first?.overshootTicks == held && seen.first?.overshoots == (held == 90), "\(seen)")
+        }
+        // A straight run down onto the gate's end is shorter than the gybing cone.
+        let end = left.position + (right.position - left.position).normalized * 4
+        var run = Track(wind: course.axis)
+        run.jump(end + u * 60, leg: 2)
+        run.sail(end, ticks: 300, leg: 2, end: (2, 1))
+        run.jump(end - u * 5, leg: 3)
+        let ran = try #require(score(run).first)
+        let cone = 60 / cos(.pi - polar.bestDownwind(tws: 6).twa)
+        #expect(abs(ran.approachExtra - (60 - cone)) < 1e-6 && ran.approachExtra < 0 && ran.overshootTicks == 0, "\(ran)")
+
+        // (b) The table. National: four windward roundings (one on the wrong side) and an offset one (on the wrong
+        // side too, which the table doesn't say); Club: two at the gate, one an overshoot by a tick.
+        func boat(_ tier: BotTier, _ roundings: [RoundingObservation]) -> BoatDiagnosis {
+            var boat = BoatDiagnosis(tier: tier, start: StartObservation(startSeconds: 1), finish: FinishObservation(status: .finished))
+            boat.roundings = roundings
+            return boat
+        }
+        func rounded(_ mark: RoundingMark, _ extra: Double, wrongSide: Bool = false, ticks: Int = 0) -> RoundingObservation {
+            RoundingObservation(mark: mark, approachExtra: extra, roundExtra: 0, exitExtra: 0, wrongSide: wrongSide, overshootTicks: ticks)
+        }
+        let national = [rounded(.windward, 0), rounded(.windward, 10), rounded(.offset, 49.9, wrongSide: true)]
+        let nationalToo = [rounded(.windward, 30, wrongSide: true), rounded(.windward, 29.9)]
+        let club = [rounded(.gate, 50, ticks: 90), rounded(.gate, 120, ticks: 89)]
+        let summary = DiagnoseSummary([RaceDiagnosis(cell: Self.cell(), boats: [boat(.national, national), boat(.club, club)]),
+                                       RaceDiagnosis(cell: Self.cell(seed: 6), boats: [boat(.national, nationalToo)])], seats: [])
+        let marks = [DiagnoseSummary.all, "windward", "offset", "gate"]
+        #expect(summary.roundings.map(\.tier) == [DiagnoseSummary.all, "club", "national"].flatMap { Array(repeating: $0, count: 4) })
+        #expect(summary.roundings.map(\.mark) == marks + marks + marks)
+        func row(_ tier: String, _ mark: String) throws -> DiagnoseSummary.RoundingRow {
+            try #require(summary.roundings.first { $0.tier == tier && $0.mark == mark })
+        }
+        func near(_ value: Double?, _ expected: Double) -> Bool { value.map { abs($0 - expected) < 1e-9 } ?? false }
+        let every = try row("all", "all")
+        #expect(every.roundings == 7 && near(every.extraMean, 289.8 / 7) && every.extra?.median == 30 && every.extra?.p90 == 120)
+        #expect(near(every.over30Share, 4.0 / 7) && near(every.over50Share, 2.0 / 7), "30 m and 50 m count")
+        #expect(every.wrongSide == nil && every.overshoots == nil)
+        let upwind = try row("all", "windward")
+        #expect(upwind.roundings == 4 && near(upwind.extraMean, 69.9 / 4) && near(upwind.extra?.median, 19.95) && upwind.extra?.p90 == 30)
+        #expect(upwind.over30Share == 0.25 && upwind.over50Share == 0 && upwind.wrongSide == 1 && upwind.overshoots == nil)
+        let reach = try row("all", "offset")
+        #expect(reach.roundings == 1 && reach.extraMean == 49.9 && reach.over30Share == 1 && reach.over50Share == 0)
+        #expect(reach.wrongSide == nil && reach.overshoots == nil)
+        let gate = try row("all", "gate")
+        #expect(gate.roundings == 2 && gate.extraMean == 85 && gate.extra?.median == 85 && gate.extra?.p90 == 120)
+        #expect(gate.over30Share == 1 && gate.over50Share == 1 && gate.wrongSide == nil && gate.overshoots == 1)
+        #expect(try every.roundings == marks.dropFirst().map { try row("all", $0).roundings }.reduce(0, +))
+        var clubGate = gate
+        clubGate.tier = "club"
+        #expect(try row("club", "gate") == clubGate)
+        var clubAll = clubGate
+        clubAll.mark = DiagnoseSummary.all
+        clubAll.overshoots = nil
+        #expect(try row("club", "all") == clubAll)
+        let none = try row("club", "windward")
+        #expect(none.roundings == 0 && none.extraMean == nil && none.extra == nil && none.over30Share == 0 && none.over50Share == 0)
+        #expect(none.wrongSide == nil && none.overshoots == nil)
+        #expect(try row("national", "gate").overshoots == nil && row("national", "gate").roundings == 0)
+        var nationalWindward = upwind
+        nationalWindward.tier = "national"
+        #expect(try row("national", "windward") == nationalWindward)
+        let allNational = try row("national", "all")
+        #expect(allNational.roundings == 5 && near(allNational.extraMean, 119.8 / 5) && allNational.extra?.median == 29.9)
+        #expect(allNational.extra?.p90 == 49.9 && allNational.over30Share == 0.4 && allNational.over50Share == 0)
+        // Absent from the JSON where it says nothing.
+        let json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(summary)) as? [String: Any])
+        let rows = try #require(json["roundings"] as? [[String: Any]])
+        #expect(Set(rows[0].keys) == ["tier", "mark", "roundings", "extraMean", "extra", "over30Share", "over50Share"])
+        #expect(Set(rows[5].keys) == ["tier", "mark", "roundings", "over30Share", "over50Share"], "club at the windward mark")
+        #expect(rows[1]["wrongSide"] as? Int == 1 && rows[3]["overshoots"] as? Int == 1)
+        // The text: the heading, its columns, a line a row.
+        let lines = summary.lines
+        let heading = try #require(lines.firstIndex { $0.hasPrefix("roundings by tier and mark: extra metres a rounding") })
+        #expect(lines.count == heading + 14, "the last table")
+        func cells(_ line: String) -> [String] {
+            line.components(separatedBy: "  ").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        }
+        #expect(cells(lines[heading + 1]) == ["tier", "mark", "roundings", "mean m", "median / p90 m", ">= 30 m", ">= 50 m", "wrong side", "overshoot"])
+        #expect(cells(lines[heading + 2]) == ["all", "all", "7", "41.4", "30.0 / 120.0", "0.571", "0.286", "-", "-"])
+        #expect(cells(lines[heading + 3]).suffix(4) == ["0.250", "0.000", "1 (25.0%)", "-"])
+        #expect(cells(lines[heading + 5]) == ["all", "gate", "2", "85.0", "85.0 / 120.0", "1.000", "1.000", "-", "1 (50.0%)"])
+        #expect(cells(lines[heading + 7]) == ["club", "windward", "0", "-", "-", "0.000", "0.000", "-", "-"])
+        // No rounding, no table.
+        let bare = DiagnoseSummary([RaceDiagnosis(cell: Self.cell(), boats: [boat(.national, [])])], seats: [])
+        #expect(bare.roundings.isEmpty && !bare.lines.contains { $0.hasPrefix("roundings") })
+
+        // (c) A real race of two laps: a finisher rounded the windward and the offset mark twice and the gate once.
+        let (result, diagnosis) = try BotRaceHarness.runDiagnosed(lapped)
+        #expect(result.seats.contains { $0.finished })
+        let order: [RoundingMark] = [.windward, .offset, .gate, .windward, .offset]
+        for (seat, boat) in zip(result.seats, diagnosis.boats) {
+            if seat.finished { #expect(boat.roundings.map(\.mark) == order, "\(boat.roundings)") }
+            #expect(boat.roundings.count <= order.count && boat.roundings.map(\.mark) == Array(order.prefix(boat.roundings.count)))
+            for rounding in boat.roundings {
+                #expect(rounding.extraMetres.isFinite && (-60...2000).contains(rounding.extraMetres), "\(rounding)")
+                #expect(rounding.mark != .gate || !rounding.wrongSide)
+                #expect(rounding.mark == .gate || rounding.overshootTicks == 0)
+            }
+        }
+        let table = DiagnoseSummary([diagnosis], seats: result.seats).roundings
+        #expect(table.map(\.mark) == marks + marks, "all and national")
+        for row in table {
+            #expect((row.wrongSide != nil) == (row.mark == "windward" && row.roundings > 0), "\(row)")
+            #expect((row.overshoots != nil) == (row.mark == "gate" && row.roundings > 0), "\(row)")
+        }
     }
 
     /// The harness's diagnosed run is its plain run, seat for seat, and the observer's starts are the tally's.
@@ -471,7 +691,7 @@ import Testing
         let tables = try #require(lines.firstIndex { $0.hasPrefix("diagnose:") })
         #expect(tables > gate)
         for heading in ["late starters, more than 5 s", "late starters, more than 10 s", "penalty episodes", "pre-start calls a boat by rule",
-                        "non-finishers by cause"] {
+                        "non-finishers by cause", "roundings by tier and mark"] {
             #expect(lines.contains { $0.hasPrefix(heading) }, "\(heading)")
         }
     }

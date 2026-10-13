@@ -27,6 +27,27 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
     /// Where the live bots lose their time (#462), by tactics skill, handling skill and kind of leg; empty when no live
     /// bot sailed.
     public var legs: [LegRow]
+    /// Mark roundings against the ideal path (#511), by tier and mark; empty when no boat sailed a rounding to its leg's
+    /// end.
+    public var roundings: [RoundingRow]
+
+    /// `tier`'s roundings of `mark` (`RoundingMark.rawValue`, or `all`): how many metres over the ideal path they were
+    /// (`RoundingObservation.extraMetres`; negative for a boat that sailed straight inside the tacking or gybing cone).
+    /// A row of no roundings has its counts and shares at 0 and nothing else.
+    public struct RoundingRow: Codable, Hashable, Sendable {
+        public var tier: String
+        public var mark: String
+        public var roundings: Int
+        public var extraMean: Double?
+        public var extra: Spread?
+        /// The share `RoundingObservation.wideMetres` or more over: 30 m, 50 m.
+        public var over30Share: Double
+        public var over50Share: Double
+        /// Those that passed the mark on its wrong side before rounding it; the windward row's only.
+        public var wrongSide: Int?
+        /// Those that overshot the gate's line (`RoundingObservation.overshoots`); the gate row's only.
+        public var overshoots: Int?
+    }
 
     /// The legs of one kind (`LegKind.rawValue`) begun by the live bots of one tactics skill and one handling skill
     /// (tiers, as `AxesSummary`'s buckets).
@@ -314,6 +335,20 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
                               secondsOff: Spread(seen.flatMap(\.secondsOff)),
                               backOnShare: share(total(\.fallsBackOn), of: total(\.fallsWatched)))
         }
+        let wide = RoundingObservation.wideMetres
+        roundings = boats.allSatisfy(\.roundings.isEmpty) ? [] : groups.flatMap { group in
+            let seen = group.boats.flatMap(\.roundings)
+            return ([nil] + RoundingMark.allCases.map { $0 }).map { (mark: RoundingMark?) in
+                let rounded = seen.filter { mark == nil || $0.mark == mark }
+                let extras = rounded.map(\.extraMetres)
+                return RoundingRow(tier: group.name, mark: mark?.rawValue ?? Self.all, roundings: rounded.count,
+                                   extraMean: mean(extras), extra: Spread(extras),
+                                   over30Share: share(extras.filter { $0 >= wide[0] }.count, of: extras.count),
+                                   over50Share: share(extras.filter { $0 >= wide[1] }.count, of: extras.count),
+                                   wrongSide: mark == .windward && !rounded.isEmpty ? rounded.filter(\.wrongSide).count : nil,
+                                   overshoots: mark == .gate && !rounded.isEmpty ? rounded.filter(\.overshoots).count : nil)
+            }
+        }
     }
 
     // MARK: - Text
@@ -414,6 +449,21 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
                      spread(row.secondsBehind), fixed(row.completedShare, 3), text(row.cleanLost, 1), text(row.turnLost, 1),
                      fixed(row.turnShare, 3), fixed(row.turns), fixed(row.falls), fixed(row.gybes)]
                         + rules.map { fixed(row.calls[$0] ?? 0, 3) }
+                })
+        }
+        if !roundings.isEmpty {
+            lines.append("roundings by tier and mark: extra metres a rounding (approach from \(Int(RoundingObservation.entryRange)) m "
+                + "out, the rounding, the \(RoundingObservation.exitSeconds) s after, against the ideal path): mean, median / p90; "
+                + "the share of roundings 30 m or more and 50 m or more over; windward roundings that passed the mark on its "
+                + "wrong side; gate roundings that spent \(RoundingObservation.overshootSeconds) s or more below the line before "
+                + "crossing it")
+            func count(_ count: Int?, of row: RoundingRow) -> String {
+                count.map { "\($0) (\(fixed(100 * share($0, of: row.roundings), 1))%)" } ?? "-"
+            }
+            lines += table([["tier", "mark", "roundings", "mean m", "median / p90 m", ">= 30 m", ">= 50 m", "wrong side", "overshoot"]]
+                + printed(roundings, \.tier).map { row in
+                    [row.tier, row.mark, "\(row.roundings)", text(row.extraMean, 1), spread(row.extra), fixed(row.over30Share, 3),
+                     fixed(row.over50Share, 3), count(row.wrongSide, of: row), count(row.overshoots, of: row)]
                 })
         }
         return lines
