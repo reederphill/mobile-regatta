@@ -12,7 +12,7 @@
 #   3. race: a 4 s queue and a 12 s race. OnlineQueueRaceUITests queues, races to the close, leaves a briefing,
 #      rejoins a race it dropped out of, leaves one for good, and gets its livery back from the server.
 #   4. pair: a 30 s queue, and a headless second person (regatta-loadclient --queue-player 7001) queued beside the
-#      app: OnlineQueueRaceUITests/testTwoHumansShareOneFleet.
+#      app, when the test says the app is about to join: OnlineQueueRaceUITests/testTwoHumansShareOneFleet.
 #   5. kill: the server is killed (-9) while the app is in a race and started again on the same port and database:
 #      OnlineQueueRaceUITests/testServerKilledMidRaceCancelsToHome. No retry: a second try would find no kill.
 #
@@ -158,6 +158,17 @@ run_tests() {
         ${phase_arguments[@]+"${phase_arguments[@]}"}
 }
 
+# Waits (ten minutes at most) until the server on port $1 has a race: a test's word that it has got that far.
+wait_for_a_race() {
+    local races
+    for _ in $(seq 1 600); do
+        races="$(curl --silent "http://127.0.0.1:$1/health" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("races", 0))' 2>/dev/null || echo 0)"
+        (( races >= 1 )) && return 0
+        sleep 1
+    done
+    return 1
+}
+
 caller_arguments=("$@")
 
 echo "== build RegattaServer and regatta-loadclient"
@@ -191,30 +202,33 @@ echo "== race: OnlineQueueRaceUITests against 127.0.0.1:$port"
 arguments_for race
 run_tests race -only-testing:RegattaUITests/OnlineQueueRaceUITests
 
-# 4. pair (#162): the app and a headless second person in one fleet. She joins 12 s after the tests start; the 30 s to
-# the lock take either order of the two joins.
+# 4. pair (#162): the app and a headless second person in one fleet. xcodebuild takes a minute or two to reach the
+# test, so she doesn't join on the script's clock: the test arranges a race on the server as it taps Race online, and
+# she joins as soon as /health shows it. The 30 s to the lock take either order of the two joins.
 stop_server
 start_server free QUEUE_LOCK_SECONDS=30 QUEUE_RACE_SECONDS=12 CATCH_FINISHERS=off
 echo "== pair: OnlineQueueRaceUITests/testTwoHumansShareOneFleet with regatta-loadclient --queue-player 7001"
-"$loadclient" --host 127.0.0.1 --port "$port" --queue-player 7001 --join-after 12 --timeout 600 >> "$log" 2>&1 &
+pair_port=$port
+(
+    wait_for_a_race "$pair_port" || exit 1
+    echo "== pair: the second person joins the queue"
+    exec "$loadclient" --host 127.0.0.1 --port "$pair_port" --queue-player 7001 --timeout 600 >> "$log" 2>&1
+) &
 helper_pid=$!
 arguments_for pair no-retry
 run_tests pair -only-testing:RegattaUITests/OnlineQueueRaceUITests/testTwoHumansShareOneFleet
 kill "$helper_pid" 2>/dev/null || true
 helper_pid=""
 
-# 5. kill (#162): once the test's race is on the server and the app has had time to rejoin it, the server is killed
-# and started again on the same port and database, where it cancels the race it finds orphaned.
+# 5. kill (#162): once the test's race is on the server and the app has had time to rejoin it (the test gives the
+# cold launch 40 s to offer the rejoin), the server is killed and started again on the same port and database, where
+# it cancels the race it finds orphaned.
 stop_server
 start_server free ALL_GONE_GRACE_SECONDS=120 CATCH_FINISHERS=off
 kill_port=$port
 (
-    for _ in $(seq 1 600); do
-        races="$(curl --silent "http://127.0.0.1:$kill_port/health" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("races", 0))' 2>/dev/null || echo 0)"
-        (( races >= 1 )) && break
-        sleep 1
-    done
-    sleep 25
+    wait_for_a_race "$kill_port" || exit 1
+    sleep 45
     echo "== kill: RegattaServer killed, and started again on 127.0.0.1:$kill_port"
     kill -9 "$server_pid" 2>/dev/null || true
     sleep 2

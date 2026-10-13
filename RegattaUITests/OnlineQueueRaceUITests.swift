@@ -10,7 +10,8 @@ import XCTest
 /// - `race`: the queue locks 4 s after the join, a queue race closes 12 s after the gun, and a race everyone dropped
 ///   out of waits two minutes for someone to come back.
 /// - `pair`: the queue locks 30 s after the first join, and the script queues a headless second person
-///   (`regatta-loadclient --queue-player 7001`) beside the app.
+///   (`regatta-loadclient --queue-player 7001`) beside the app, once the test has arranged a race on the server to
+///   say the app is about to join (the script watches `/health` for it).
 /// - `kill`: the script kills the server while the app is in a race, and starts it again on the same port.
 ///
 /// One simulator runs one app, so "two people" here is the app and a headless client; two apps in one race is the
@@ -75,12 +76,20 @@ final class OnlineQueueRaceUITests: XCTestCase {
         XCTAssertFalse(app.alerts["Online racing is on its way"].exists, "the stand-in alert came up with a server to race on")
     }
 
-    /// Home, with Race online open again.
+    /// Home on screen, with Race online open again. Home stays in the window under the race cover, where a query
+    /// still finds its buttons (`RaceUITestCase.homeIsCovered`), so the button has to be hittable too.
     @MainActor private func waitForRaceOnlineOpen(_ app: XCUIApplication, timeout: TimeInterval = 30, _ message: String) {
         let raceOnline = app.buttons["race-online"]
         XCTAssertTrue(raceOnline.waitForExistence(timeout: timeout), "\(message): no Race online")
-        let open = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isEnabled == true"), object: raceOnline)
-        XCTAssertEqual(XCTWaiter().wait(for: [open], timeout: timeout), .completed, "\(message): Race online is \(raceOnline.label)")
+        let open = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isEnabled == true AND isHittable == true"), object: raceOnline)
+        XCTAssertEqual(XCTWaiter().wait(for: [open], timeout: timeout), .completed,
+                       "\(message): Race online is \(raceOnline.label), \(raceOnline.isHittable ? "on screen" : "covered")")
+    }
+
+    /// The briefing's fleet rows whose label has `name` in it. A row is one element (`briefing-fleet-<seat>`) labelled
+    /// with its boat, the word "Bot" for a bot, the name, the rating and the sail number; her own row's name is "You".
+    @MainActor private func fleetRows(_ app: XCUIApplication, named name: String) -> XCUIElementQuery {
+        app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'briefing-fleet-' AND label CONTAINS %@", name))
     }
 
     /// A race of hers in progress on the server, her seat dropped, and the app launched into it: Home offers Rejoin race,
@@ -108,7 +117,10 @@ final class OnlineQueueRaceUITests: XCTestCase {
         let app = launch(host: host, player: player)
         joinTheQueue(app)
         XCTAssertTrue(app.buttons["briefing-leave"].waitForExistence(timeout: 30), "the fleet never locked: no takeover")
-        XCTAssertTrue(app.staticTexts["Dev \(player)"].waitForExistence(timeout: 10), "her own name isn't in the briefing's fleet")
+        // Her own row says "You", as a person: her name is for the others' screens.
+        let mine = fleetRows(app, named: "You").firstMatch
+        XCTAssertTrue(mine.waitForExistence(timeout: 10), "her own boat isn't in the briefing's fleet")
+        XCTAssertFalse(mine.label.contains("Bot"), "her own boat is listed as a bot: \(mine.label)")
         XCTAssertTrue(app.otherElements["race-viewport"].waitForExistence(timeout: 40), "the briefing didn't lead to the race")
         XCTAssertTrue(app.staticTexts["race-clock"].waitForExistence(timeout: 30), "no race clock on the water: the race link never joined")
         // The sequence is 60 s, the race 12 s.
@@ -132,7 +144,8 @@ final class OnlineQueueRaceUITests: XCTestCase {
         let leave = app.buttons["briefing-leave"]
         XCTAssertTrue(leave.waitForExistence(timeout: 30), "the fleet never locked: no takeover")
         leave.tap()
-        let confirm = app.buttons["race-leave-confirm-leave"]
+        // The briefing's card keeps its own identifiers (`LeaveConfirm.Place.briefing`); the race's are `race-leave-…`.
+        let confirm = app.buttons["briefing-leave-confirm"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 10), "Leave didn't ask")
         confirm.tap()
         XCTAssertTrue(element(app, "briefing").waitForNonExistence(timeout: 15), "Leave left the briefing up")
@@ -223,16 +236,19 @@ final class OnlineQueueRaceUITests: XCTestCase {
         let player = newPlayer()
         try await arrange(host: host, player: player, service: "QueueService", situation: "joinable")
         let app = launch(host: host, player: player)
+        waitForTheSession(app)
+        // The word to the script that the app is on Home and about to join: a race of somebody else's on the server,
+        // which /health counts. The second person joins the queue within a few seconds of it.
+        try await arrange(host: host, player: newPlayer(), service: "RaceSessionService", situation: "inProgress")
         joinTheQueue(app)
         // The lock is 30 s after whichever of the two joined first.
         XCTAssertTrue(app.buttons["briefing-leave"].waitForExistence(timeout: 60), "the fleet never locked: no takeover")
-        let name = "Dev \(Self.secondPlayer)"
-        XCTAssertTrue(app.staticTexts[name].waitForExistence(timeout: 10), "the second person isn't in the briefing's fleet")
-        let rows = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'briefing-fleet-' AND label CONTAINS %@", name))
-        if rows.count > 0 {
-            XCTAssertFalse(rows.firstMatch.label.contains("Bot"), "the second person is listed as a bot: \(rows.firstMatch.label)")
-        }
-        XCTAssertTrue(app.staticTexts["Dev \(player)"].exists, "her own name isn't in the briefing's fleet")
+        let second = fleetRows(app, named: "Dev \(Self.secondPlayer)").firstMatch
+        XCTAssertTrue(second.waitForExistence(timeout: 10), "the second person isn't in the briefing's fleet")
+        XCTAssertFalse(second.label.contains("Bot"), "the second person is listed as a bot: \(second.label)")
+        let mine = fleetRows(app, named: "You").firstMatch
+        XCTAssertTrue(mine.exists, "her own boat isn't in the briefing's fleet")
+        XCTAssertFalse(mine.label.contains("Bot"), "her own boat is listed as a bot: \(mine.label)")
         XCTAssertTrue(app.staticTexts["race-clock"].waitForExistence(timeout: 60), "no race clock on the water")
     }
 
