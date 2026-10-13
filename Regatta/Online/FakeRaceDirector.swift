@@ -24,7 +24,8 @@ final class FakeRaceDirector {
 
     private let scenario: FakeServiceScenario
     private let base: any RaceSessionService
-    private let clock: MonotonicClock
+    /// The race's clock in microseconds: the launch's monotonic clock at `-timescale`, or a test's.
+    private let now: () -> UInt64
     private let timescale: Double
     private let raceSeconds: Int?
     private(set) var host: FakeRaceHost?
@@ -55,12 +56,15 @@ final class FakeRaceDirector {
         return director
     }
 
-    init(scenario: FakeServiceScenario, base: any RaceSessionService, timescale: Double, raceSeconds: Int?) {
+    /// `now` is the race's clock; nil runs it on the wall clock at `timescale`, as a launch does. A test passes its
+    /// own, so the race stands where the test put it however long the suites beside it take.
+    init(scenario: FakeServiceScenario, base: any RaceSessionService, timescale: Double, raceSeconds: Int?,
+         now: (() -> UInt64)? = nil) {
         self.scenario = scenario
         self.base = base
         self.timescale = timescale
         self.raceSeconds = raceSeconds
-        clock = MonotonicClock(timescale: timescale)
+        self.now = now ?? MonotonicClock(timescale: timescale).now
         if scenario == .rejoinable {
             let briefing = FakeServiceScenario.briefing()
             let under = Self.rejoinableSeconds * Race.tickRate
@@ -146,7 +150,7 @@ final class FakeRaceDirector {
         guard let setup = try? RaceSetup(raceSeed: from.raceSeed, seats: from.seats, laps: from.laps,
                                          startSequenceTicks: startSequenceTicks),
               let host = try? FakeRaceHost(setup: setup, names: briefing.fleet.map(\.name), closeTick: closeTick,
-                                           now: clock.now) else { return }
+                                           now: now) else { return }
         if scenario == .cancelledRace { host.cancelTick = 8 * Race.tickRate }
         // One of the other players gives her seat up before the gun: a bot's name and glyph from then on.
         if setup.seats.indices.contains(2), setup.seats[2] == .human {

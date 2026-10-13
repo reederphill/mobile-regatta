@@ -113,8 +113,14 @@ nonisolated final class FakeRaceHost {
         origin + Double(tick + race.setup.startSequenceTicks) * ClockSync.tickMicros
     }
 
-    /// Handles what has arrived, then simulates every tick that is due (a few at most, so a stall doesn't freeze the
-    /// app catching up).
+    /// Handles what has arrived, then simulates every tick that is due.
+    ///
+    /// The host shares the main thread with the client it serves, so it is polled only as often as the app gets round
+    /// to it: once a frame while the race draws, and a frame is long on a slow machine at a fast `-timescale`. It
+    /// keeps its clock all the same, as the server does: every tick due is sailed in the one poll. Sailing only a few
+    /// a poll let it fall behind the clock the client had synchronised to; the client then predicted ever further
+    /// past the last snapshot, each frame took longer for it, the host was polled less, and the race stood still
+    /// (PR #505's first CI run).
     func poll() {
         if let connection, !connection.isConnected {
             // Dropped: the seat stays hers.
@@ -123,6 +129,7 @@ nonisolated final class FakeRaceHost {
         }
         // With nobody on the link the race keeps its clock, as the server's does while the app is suspended in the
         // background: back on, it has sailed on, or closed.
+        let served = seated
         if !seated { sail(atMost: Self.catchUpTicks) }
         if let connection {
             let frames = connection.uplink
@@ -132,18 +139,24 @@ nonisolated final class FakeRaceHost {
                 receive(frame)
             }
         }
-        sail(atMost: 8)
-        // Too far behind to catch up: the race clock slips rather than the app.
-        if ending == nil, Double(now()) - time(ofTick: race.tick + 1) > 500_000 { origin += 250_000 }
+        // Further behind than one poll sails (the app stood still for seconds): the race clock slips by the rest,
+        // once, rather than the app freezing to catch up. The client's clock follows as its samples turn over.
+        let caughtUp = sail(atMost: Self.pollTicks)
+        let behind = Double(now()) - time(ofTick: race.tick + 1)
+        if served, !caughtUp, ending == nil, behind > 0 { origin += behind }
     }
 
     /// The most ticks one poll sails to catch up while nobody is connected: a minute of the race.
     static let catchUpTicks = 1800
+    /// The most ticks one poll sails for a client on the link: four seconds of the race.
+    static let pollTicks = 4 * Race.tickRate
 
-    private func sail(atMost limit: Int) {
+    /// Sails the ticks due, `limit` at most. False when it stopped at the limit with more due.
+    @discardableResult private func sail(atMost limit: Int) -> Bool {
         var steps = 0
         let now = Double(now())
-        while ending == nil, !race.isOver, now >= time(ofTick: race.tick + 1), steps < limit {
+        while ending == nil, !race.isOver, now >= time(ofTick: race.tick + 1) {
+            guard steps < limit else { return false }
             step()
             steps += 1
             if let cancelTick, race.tick >= cancelTick {
@@ -152,6 +165,7 @@ nonisolated final class FakeRaceHost {
                 end(.closed)
             }
         }
+        return true
     }
 
     private func end(_ ending: Ending) {

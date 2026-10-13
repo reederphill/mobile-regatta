@@ -262,9 +262,14 @@ nonisolated final class CountingQueue: QueueService, @unchecked Sendable {
                 let connection = FakeRaceConnection()
                 host.accept(connection)
                 return AnsweredConnection(connection, host: host, answers: answers)
-            }, results: nil) { connect, token in OnlineLaunch(connect: connect, token: token) }
-            // The suites run side by side on a slow machine: the join gets the time it needs.
-            link.leaveJoinTimeout = .seconds(120)
+            }, results: nil) { connect, token in
+                // The link's clock stands still too (`-timescale 0`): the handshake's own 10 s can't run out and send
+                // the join round again.
+                OnlineLaunch(connect: connect, token: token, timescale: 0)
+            }
+            // The suites run side by side and hold the main actor for minutes on a slow machine: the leave waits for
+            // the join however long that takes, so nothing here is decided by the wall clock.
+            link.leaveJoinTimeout = .seconds(86_400)
             return link
         }
         await rig.lock()

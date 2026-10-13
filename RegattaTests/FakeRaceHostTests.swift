@@ -93,6 +93,29 @@ import Testing
         #expect(!rig.join(), "a closed race took a join")
     }
 
+    /// The app stood still for a while (a long frame on a slow machine at a fast `-timescale`): the host sails every
+    /// tick it missed in its next poll and keeps its clock, so the client's clock stays true. Only a stall longer
+    /// than one poll sails makes the race clock slip, by the rest.
+    @Test func aStallIsCaughtUpInOnePollAndTheClockKept() throws {
+        let rig = try Rig(closeTick: 3000)
+        #expect(rig.join())
+        rig.run(to: 10)
+        let before = rig.host.tick
+        rig.clock.advance(by: 2_000_000)
+        rig.host.poll()
+        #expect(rig.host.tick == before + 2 * Race.tickRate, "two seconds' ticks in the one poll")
+        #expect(rig.connection.isConnected)
+
+        rig.clock.advance(by: 10_000_000)
+        rig.host.poll()
+        let caught = before + 2 * Race.tickRate + FakeRaceHost.pollTicks
+        #expect(rig.host.tick == caught, "one poll sails four seconds at most")
+        rig.clock.advance(by: 1_000_000)
+        rig.host.poll()
+        #expect((caught + Race.tickRate...caught + Race.tickRate + 2).contains(rig.host.tick),
+                "the rest was let go: the clock slipped rather than the app catching up for good")
+    }
+
     /// `cancelled-race`: the race is cancelled at its tick, before the close, with `RaceCancelled`.
     @Test func theHostCancelsAtItsScriptedTick() throws {
         let rig = try Rig(closeTick: 600, cancelTick: 30)
@@ -133,11 +156,14 @@ import Testing
     /// race clock, and the queue is closed to her meanwhile, as the server's is.
     @Test func rejoinableOffersTheRaceItLaunchedInto() async throws {
         let services = ServiceSet.fake(.rejoinable)
-        let director = FakeRaceDirector(scenario: .rejoinable, base: services.raceSession, timescale: 1, raceSeconds: nil)
+        // The race's clock stands still: under way and a minute from its close, however long the suites beside this
+        // one hold the main actor (on the wall clock it had closed by the time a slow run asked the queue).
+        let director = FakeRaceDirector(scenario: .rejoinable, base: services.raceSession, timescale: 1, raceSeconds: nil,
+                                        now: { 0 })
         let offer = try await FakeRaceSession(director).rejoin()
         #expect(offer.handOff.raceID == FakeRaceDirector.raceID && offer.seat == FakeRaceHost.seat)
         let under = FakeRaceDirector.rejoinableSeconds * Race.tickRate
-        #expect(offer.clock.tick >= under && offer.clock.tick < under + 2 * Race.tickRate)
+        #expect(offer.clock.tick == under)
         #expect(director.holdsSeat)
         await #expect(throws: QueueError.alreadyQueued) { try await DirectedQueue(services.queue, director: director).join() }
         var states = DirectedQueue(services.queue, director: director).stateUpdates().makeAsyncIterator()
@@ -150,7 +176,8 @@ import Testing
     /// `race-gone`: fleet lock hands her a seat, and nothing ever answers on the race link.
     @Test func raceGoneNeverAnswersTheRaceLink() async throws {
         let services = ServiceSet.fake(.raceGone)
-        let director = FakeRaceDirector(scenario: .raceGone, base: services.raceSession, timescale: 1, raceSeconds: nil)
+        let director = FakeRaceDirector(scenario: .raceGone, base: services.raceSession, timescale: 1, raceSeconds: nil,
+                                        now: { 0 })
         let handOff = try await director.handOff()
         #expect(handOff.briefing != nil)
         let connection = director.connect(handOff.token)
