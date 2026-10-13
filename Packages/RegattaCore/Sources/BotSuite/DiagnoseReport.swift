@@ -47,6 +47,22 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
         public var wrongSide: Int?
         /// Those that overshot the gate's line (`RoundingObservation.overshoots`); the gate row's only.
         public var overshoots: Int?
+        /// The gate from her entry to the leg's end against the ideal for that span (#519,
+        /// `RoundingObservation.EntryToEnd`): the mean metres and seconds over it, and the seconds' spread. The gate
+        /// row's only. Unlike the extra metres' rounding part, it charges a boat that crosses the line at the gate's
+        /// centre for her way along it to a mark.
+        public var entryToEndExtraMetres: Double?
+        public var entryToEndExtraSeconds: Double?
+        public var entryToEndSeconds: Spread?
+        /// The gate's time and depth beyond it (#519, `RoundingObservation.BelowTheLine`): the seconds from her first
+        /// tick below the gate's line to her last, mean and spread; the deepest she was below it, metres, mean and
+        /// spread; and the roundings still below it when the exit's window closed, whose seconds are capped there.
+        /// The gate row's only. It has no ideal path in it: a clean rounding is a few seconds, not 0.
+        public var belowLineSecondsMean: Double?
+        public var belowLineSeconds: Spread?
+        public var deepestMean: Double?
+        public var deepest: Spread?
+        public var stillBelow: Int?
     }
 
     /// The legs of one kind (`LegKind.rawValue`) begun by the live bots of one tactics skill and one handling skill
@@ -341,12 +357,21 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
             return ([nil] + RoundingMark.allCases.map { $0 }).map { (mark: RoundingMark?) in
                 let rounded = seen.filter { mark == nil || $0.mark == mark }
                 let extras = rounded.map(\.extraMetres)
+                let spans = mark == .gate ? rounded.compactMap(\.entryToEnd) : []
+                let below = mark == .gate ? rounded.compactMap(\.belowTheLine) : []
                 return RoundingRow(tier: group.name, mark: mark?.rawValue ?? Self.all, roundings: rounded.count,
                                    extraMean: mean(extras), extra: Spread(extras),
                                    over30Share: share(extras.filter { $0 >= wide[0] }.count, of: extras.count),
                                    over50Share: share(extras.filter { $0 >= wide[1] }.count, of: extras.count),
                                    wrongSide: mark == .windward && !rounded.isEmpty ? rounded.filter(\.wrongSide).count : nil,
-                                   overshoots: mark == .gate && !rounded.isEmpty ? rounded.filter(\.overshoots).count : nil)
+                                   overshoots: mark == .gate && !rounded.isEmpty ? rounded.filter(\.overshoots).count : nil,
+                                   entryToEndExtraMetres: mean(spans.map(\.extraMetres)),
+                                   entryToEndExtraSeconds: mean(spans.map(\.extraSeconds)),
+                                   entryToEndSeconds: Spread(spans.map(\.extraSeconds)),
+                                   belowLineSecondsMean: mean(below.map(\.seconds)),
+                                   belowLineSeconds: Spread(below.map(\.seconds)),
+                                   deepestMean: mean(below.map(\.deepest)), deepest: Spread(below.map(\.deepest)),
+                                   stillBelow: below.isEmpty ? nil : below.filter(\.stillBelow).count)
             }
         }
     }
@@ -456,14 +481,26 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
                 + "out, the rounding, the \(RoundingObservation.exitSeconds) s after, against the ideal path): mean, median / p90; "
                 + "the share of roundings 30 m or more and 50 m or more over; windward roundings that passed the mark on its "
                 + "wrong side; gate roundings that spent \(RoundingObservation.overshootSeconds) s or more below the line before "
-                + "crossing it")
+                + "crossing it; gate roundings from entry to the leg's end against the ideal approach to the better mark and "
+                + "round it: mean extra metres and seconds, the seconds' median / p90 (read these for the gate: its rounding "
+                + "part starts where she crossed the line, so a centre crossing's way along the line to a mark is free); gate "
+                + "roundings below the line, from her first tick more than \(Int(RoundingObservation.belowLine)) m below its level "
+                + "(outside a mark too) to her last within the \(RoundingObservation.exitSeconds) s after the leg's end: mean "
+                + "seconds, median / p90, the deepest she was, mean and p90 metres, and those still below it then (no ideal "
+                + "path in it, so a clean rounding is a few seconds, not 0: compare two trees; it is blind to the approach, "
+                + "which the entry-to-end columns catch)")
             func count(_ count: Int?, of row: RoundingRow) -> String {
                 count.map { "\($0) (\(fixed(100 * share($0, of: row.roundings), 1))%)" } ?? "-"
             }
-            lines += table([["tier", "mark", "roundings", "mean m", "median / p90 m", ">= 30 m", ">= 50 m", "wrong side", "overshoot"]]
+            lines += table([["tier", "mark", "roundings", "mean m", "median / p90 m", ">= 30 m", ">= 50 m", "wrong side", "overshoot",
+                             "entry to end m", "entry to end s", "median / p90 s", "below the line s", "median / p90 s", "deepest m",
+                             "p90 m", "still below"]]
                 + printed(roundings, \.tier).map { row in
                     [row.tier, row.mark, "\(row.roundings)", text(row.extraMean, 1), spread(row.extra), fixed(row.over30Share, 3),
-                     fixed(row.over50Share, 3), count(row.wrongSide, of: row), count(row.overshoots, of: row)]
+                     fixed(row.over50Share, 3), count(row.wrongSide, of: row), count(row.overshoots, of: row),
+                     text(row.entryToEndExtraMetres, 1), text(row.entryToEndExtraSeconds, 1), spread(row.entryToEndSeconds),
+                     text(row.belowLineSecondsMean, 1), spread(row.belowLineSeconds), text(row.deepestMean, 1),
+                     text(row.deepest?.p90, 1), count(row.stillBelow, of: row)]
                 })
         }
         return lines

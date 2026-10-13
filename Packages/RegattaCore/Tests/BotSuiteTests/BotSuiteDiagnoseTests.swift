@@ -625,11 +625,14 @@ import Testing
         func cells(_ line: String) -> [String] {
             line.components(separatedBy: "  ").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         }
-        #expect(cells(lines[heading + 1]) == ["tier", "mark", "roundings", "mean m", "median / p90 m", ">= 30 m", ">= 50 m", "wrong side", "overshoot"])
-        #expect(cells(lines[heading + 2]) == ["all", "all", "7", "41.4", "30.0 / 120.0", "0.571", "0.286", "-", "-"])
-        #expect(cells(lines[heading + 3]).suffix(4) == ["0.250", "0.000", "1 (25.0%)", "-"])
-        #expect(cells(lines[heading + 5]) == ["all", "gate", "2", "85.0", "85.0 / 120.0", "1.000", "1.000", "-", "1 (50.0%)"])
-        #expect(cells(lines[heading + 7]) == ["club", "windward", "0", "-", "-", "0.000", "0.000", "-", "-"])
+        #expect(cells(lines[heading + 1]) == ["tier", "mark", "roundings", "mean m", "median / p90 m", ">= 30 m", ">= 50 m", "wrong side", "overshoot",
+                                                "entry to end m", "entry to end s", "median / p90 s", "below the line s", "median / p90 s",
+                                                "deepest m", "p90 m", "still below"])
+        let unspanned = Array(repeating: "-", count: 8)
+        #expect(cells(lines[heading + 2]) == ["all", "all", "7", "41.4", "30.0 / 120.0", "0.571", "0.286", "-", "-"] + unspanned)
+        #expect(cells(lines[heading + 3]).suffix(12) == ["0.250", "0.000", "1 (25.0%)", "-"] + unspanned)
+        #expect(cells(lines[heading + 5]) == ["all", "gate", "2", "85.0", "85.0 / 120.0", "1.000", "1.000", "-", "1 (50.0%)"] + unspanned)
+        #expect(cells(lines[heading + 7]) == ["club", "windward", "0", "-", "-", "0.000", "0.000", "-", "-"] + unspanned)
         // No rounding, no table.
         let bare = DiagnoseSummary([RaceDiagnosis(cell: Self.cell(), boats: [boat(.national, [])])], seats: [])
         #expect(bare.roundings.isEmpty && !bare.lines.contains { $0.hasPrefix("roundings") })
@@ -652,7 +655,322 @@ import Testing
         for row in table {
             #expect((row.wrongSide != nil) == (row.mark == "windward" && row.roundings > 0), "\(row)")
             #expect((row.overshoots != nil) == (row.mark == "gate" && row.roundings > 0), "\(row)")
+            #expect((row.entryToEndSeconds != nil) == (row.mark == "gate" && row.roundings > 0), "\(row)")
+            #expect((row.belowLineSeconds != nil) == (row.mark == "gate" && row.roundings > 0), "\(row)")
         }
+        for rounding in diagnosis.boats.flatMap(\.roundings) {
+            #expect((rounding.entryToEnd != nil) == (rounding.mark == .gate), "\(rounding)")
+            #expect((rounding.belowTheLine != nil) == (rounding.mark == .gate), "\(rounding)")
+            if let below = rounding.belowTheLine {
+                #expect(below.seconds >= below.secondsOnLeg && below.secondsOnLeg >= 0 && below.deepest >= 0, "\(below)")
+            }
+            if let span = rounding.entryToEnd {
+                #expect(span.metres > 0 && span.seconds > 0 && span.idealMetres > 0 && span.idealSeconds > 0, "\(span)")
+            }
+        }
+    }
+
+    /// The gate from entry to the leg's end (#519): the scorer on hand-posed tracks, and the table's columns.
+    @Test func gateRoundingIsScoredFromEntryToTheLegsEnd() throws {
+        let lapped = BotMatrix(seeds: [5], fleetSizes: [4], tierMixes: [.national], laps: 2, capSecondsAfterGun: 900).cells[0]
+        let setup = try BotRaceHarness.raceSetup(for: lapped)
+        let race = try Race(setup: setup, files: RaceFiles(resolving: setup),
+                            mode: .authoritative(windSeed: BotRaceHarness.windSeed(for: lapped.seed)))
+        let course = race.course, polar = race.boatClass.polar
+        guard case .round(CourseLayout.gateIndex) = course.legs[2],
+              case .gate(let left, let right) = course.elements[CourseLayout.gateIndex] else {
+            Issue.record("leg 2 of a two-lap course is the gate")
+            return
+        }
+        func score(_ track: Track) throws -> RoundingObservation {
+            var scorer = RoundingScorer(course: course, polar: polar)
+            for sample in track.samples { scorer.record(sample) }
+            #expect(scorer.observations().count == 1)
+            return try #require(scorer.observations().first)
+        }
+        let u = course.upwind, r = u.rightPerp
+        let along = (right.position - left.position).normalized
+        let centre = course.targetPosition(for: course.legs[2])
+        let best = polar.bestDownwind(tws: 6)
+        let half = Double.pi - best.twa
+        let rate = Double(Race.tickRate)
+        /// The ticks a boat at `speed` takes over `metres`, to the nearest.
+        func ticks(_ metres: Double, at speed: Double) -> Int { Int((metres / speed * rate).rounded()) }
+        // Either mark's rounding point 4 m inside it, and the leg's end 3 m outside it and 6 m below.
+        let points = [left.position + along * 4, right.position - along * 4]
+        let ends = [left.position - along * 3 - u * 6, right.position + along * 3 - u * 6]
+        let traverse = (points[0] - centre).length
+        // Round the mark: the straight line from the point to the leg's end, at the polar's speed for its angle.
+        let turnMetres = (ends[0] - points[0]).length
+        func turnSeconds(_ end: Int) -> Double {
+            let line = ends[end] - points[end]
+            return line.length / polar.speed(twa: abs(wrapAngle(line.bearing - course.axis)), tws: 6)
+        }
+        let turnTicks = ticks(turnMetres, at: turnMetres / turnSeconds(0))
+        // One gybe out and one back on the polar's best angle, 60 m down the wind: the ideal approach to the point below.
+        let board = 30 / cos(half)
+        let boardTicks = ticks(board, at: best.speed)
+        /// From 60 m above `above`: two samples out of range, the two gybes down to it, `along` the gate's line from
+        /// there where given, then round the mark at `end`. She crosses the line at `above`.
+        func rounding(above: Vec2, traverseTicks: Int? = nil, end: Int = 0) -> Track {
+            var track = Track(wind: course.axis)
+            track.jump(above + u * 90, leg: 2)
+            track.jump(above + u * 85, leg: 2)
+            track.jump(above + u * 60, leg: 2)
+            track.sail(above + u * 30 + r * (30 * tan(half)), ticks: boardTicks, leg: 2)
+            track.sail(above, ticks: boardTicks, leg: 2, end: (2, 1))
+            if let traverseTicks { track.sail(points[end], ticks: traverseTicks, leg: 2, stage: 1) }
+            track.sail(ends[end], ticks: turnTicks, leg: 2, stage: 1, end: (3, 0))
+            return track
+        }
+        /// The ideal approach from 60 m above `above` to the left mark's point: inside the gybing cone, by hand.
+        func cone(from above: Vec2) throws -> Double {
+            let line = points[0] - (above + u * 60)
+            try #require(abs(line.dot(r)) <= -line.dot(u) * tan(half), "the left point is inside her laylines")
+            return -line.dot(u) / cos(half)
+        }
+
+        // (1) The ideal approach to the left mark's point, and round it: nothing over, to the tick.
+        let ideal = try score(rounding(above: points[0]))
+        let idealSpan = try #require(ideal.entryToEnd)
+        #expect(ideal.mark == .gate && abs(ideal.approachExtra) < 1e-6 && abs(ideal.roundExtra) < 1e-6, "\(ideal)")
+        #expect(abs(idealSpan.idealMetres - (60 / cos(half) + turnMetres)) < 1e-6, "\(idealSpan)")
+        #expect(abs(idealSpan.idealSeconds - (60 / cos(half) / best.speed + turnSeconds(0))) < 1e-6, "\(idealSpan)")
+        #expect(abs(idealSpan.metres - idealSpan.idealMetres) < 1e-6 && abs(idealSpan.extraMetres) < 1e-6, "\(idealSpan)")
+        #expect(idealSpan.seconds == Double(2 * boardTicks + turnTicks) / rate)
+        #expect(abs(idealSpan.extraSeconds) < 0.05, "half a tick a part: \(idealSpan)")
+
+        // (2) The defect. The same two gybes down to the gate's centre, 8 s along the line to the left mark's point,
+        // and round it. The rounding part is against the chord from the centre to the leg's end: a metre or two.
+        // Entry to end she is the traverse over, and its 8 s.
+        let crossed = try score(rounding(above: centre, traverseTicks: 240))
+        let span = try #require(crossed.entryToEnd)
+        let chord = (ends[0] - centre).length
+        #expect(abs(crossed.roundExtra - (traverse + turnMetres - chord)) < 1e-6 && crossed.roundExtra < 0.1 * traverse, "\(crossed)")
+        let approach = try cone(from: centre)
+        #expect(abs(crossed.approachExtra - (60 / cos(half) - approach)) < 1e-6 && abs(crossed.approachExtra) < 0.5, "\(crossed)")
+        #expect(abs(span.extraMetres - (60 / cos(half) + traverse - approach)) < 1e-6, "\(span)")
+        #expect(abs(span.extraMetres - traverse) < 0.5 && traverse > 10, "the traverse, \(traverse) m: \(span)")
+        #expect(abs(span.extraSeconds - (Double(2 * boardTicks + 240 + turnTicks) / rate - approach / best.speed - turnSeconds(0))) < 1e-6)
+        #expect(abs(span.extraSeconds - 8) < 0.1, "\(span)")
+        #expect(crossed.approachExtra + crossed.roundExtra < 0.2 * traverse, "the approach and the rounding part miss it")
+
+        // From above the centre the left point is the better one (as soon as the right, and first). Rounding the right
+        // mark instead is scored against the left one's leg end, mirrored: the same extras as (2).
+        let other = try score(rounding(above: centre, traverseTicks: 240, end: 1))
+        let mirrored = try #require(other.entryToEnd)
+        #expect(abs(mirrored.extraMetres - span.extraMetres) < 1e-6, "\(mirrored)")
+        let mirroredEnd = left.position - along * 3 - u * 6 + along * (2 * u.dot(along) * 6)
+        let mirroredLine = mirroredEnd - points[0]
+        let mirroredSeconds = mirroredLine.length / polar.speed(twa: abs(wrapAngle(mirroredLine.bearing - course.axis)), tws: 6)
+        #expect(abs(mirrored.idealMetres - (approach + mirroredLine.length)) < 1e-6, "\(mirrored)")
+        #expect(abs(mirrored.idealSeconds - (approach / best.speed + mirroredSeconds)) < 1e-6, "\(mirrored)")
+
+        // (3) The table. Club: two gate roundings, 10 m and 4 s over and 30 m and 11 s over, and a windward one;
+        // National: one at the gate, 2 m and 1 s under.
+        func boat(_ tier: BotTier, _ roundings: [RoundingObservation]) -> BoatDiagnosis {
+            var boat = BoatDiagnosis(tier: tier, start: StartObservation(startSeconds: 1), finish: FinishObservation(status: .finished))
+            boat.roundings = roundings
+            return boat
+        }
+        func gate(_ metres: Double, _ seconds: Double) -> RoundingObservation {
+            RoundingObservation(mark: .gate, approachExtra: 1, roundExtra: 2, exitExtra: 3, entryToEnd:
+                RoundingObservation.EntryToEnd(metres: 100 + metres, seconds: 20 + seconds, idealMetres: 100, idealSeconds: 20))
+        }
+        let upwind = RoundingObservation(mark: .windward, approachExtra: 5, roundExtra: 0, exitExtra: 0)
+        let summary = DiagnoseSummary([RaceDiagnosis(cell: Self.cell(), boats: [boat(.club, [upwind, gate(10, 4), gate(30, 11)]),
+                                                                                boat(.national, [gate(-2, -1)])])], seats: [])
+        func row(_ tier: String, _ mark: String) throws -> DiagnoseSummary.RoundingRow {
+            try #require(summary.roundings.first { $0.tier == tier && $0.mark == mark })
+        }
+        func near(_ value: Double?, _ expected: Double) -> Bool { value.map { abs($0 - expected) < 1e-9 } ?? false }
+        let every = try row("all", "gate")
+        #expect(every.roundings == 3 && near(every.entryToEndExtraMetres, 38.0 / 3) && near(every.entryToEndExtraSeconds, 14.0 / 3))
+        #expect(near(every.entryToEndSeconds?.median, 4) && near(every.entryToEndSeconds?.p90, 11))
+        #expect(near(every.extraMean, 6) && every.extra?.median == 6, "the three parts as before")
+        let club = try row("club", "gate")
+        #expect(near(club.entryToEndExtraMetres, 20) && near(club.entryToEndExtraSeconds, 7.5))
+        #expect(near(club.entryToEndSeconds?.median, 7.5) && near(club.entryToEndSeconds?.p90, 11))
+        let national = try row("national", "gate")
+        #expect(near(national.entryToEndExtraMetres, -2) && near(national.entryToEndExtraSeconds, -1))
+        for row in summary.roundings where row.mark != "gate" {
+            #expect(row.entryToEndExtraMetres == nil && row.entryToEndExtraSeconds == nil && row.entryToEndSeconds == nil, "\(row)")
+        }
+        // The JSON: the keys on the gate rows that have a rounding, and on no other.
+        let json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(summary)) as? [String: Any])
+        let rows = try #require(json["roundings"] as? [[String: Any]])
+        let keys: Set = ["entryToEndExtraMetres", "entryToEndExtraSeconds", "entryToEndSeconds"]
+        #expect(rows.count == 12)
+        for row in rows {
+            #expect(Set(row.keys).intersection(keys) == (row["mark"] as? String == "gate" ? keys : []), "\(row)")
+        }
+        #expect(rows[3]["entryToEndExtraSeconds"] as? Double == 14.0 / 3)
+        #expect((rows[3]["entryToEndSeconds"] as? [String: Double]) == ["median": 4, "p90": 11])
+        // The text: three more columns (before the five below the line's), a dash off the gate.
+        let lines = summary.lines
+        let heading = try #require(lines.firstIndex { $0.hasPrefix("roundings by tier and mark: extra metres a rounding") })
+        #expect(lines[heading].contains("entry to the leg's end") && lines[heading].contains("centre crossing"))
+        func cells(_ line: String) -> [String] {
+            line.components(separatedBy: "  ").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        }
+        #expect(cells(lines[heading + 1]).dropLast(5).suffix(3) == ["entry to end m", "entry to end s", "median / p90 s"])
+        #expect(cells(lines[heading + 2]).prefix(3) == ["all", "all", "4"] && cells(lines[heading + 2]).suffix(8) == Array(repeating: "-", count: 8))
+        #expect(cells(lines[heading + 5]) == ["all", "gate", "3", "6.0", "6.0 / 6.0", "0.000", "0.000", "-", "0 (0.0%)",
+                                              "12.7", "4.7", "4.0 / 11.0", "-", "-", "-", "-", "-"])
+        #expect(cells(lines[heading + 9]).dropLast(5).suffix(3) == ["20.0", "7.5", "7.5 / 11.0"], "club at the gate")
+        #expect(cells(lines[heading + 13]).dropLast(5).suffix(3) == ["-2.0", "-1.0", "-1.0 / -1.0"], "national at the gate")
+        // A gate rounding without the span (none is scored so) leaves the row's columns empty.
+        let bare = DiagnoseSummary([RaceDiagnosis(cell: Self.cell(), boats: [boat(.club, [upwind])])], seats: [])
+        #expect(bare.roundings.allSatisfy { $0.entryToEndSeconds == nil && $0.entryToEndExtraMetres == nil })
+    }
+
+    /// The gate's time and depth below its line (#519): the scorer on hand-posed tracks, and the table's columns.
+    @Test func gateRowsCountSecondsAndDepthBelowTheLine() throws {
+        let lapped = BotMatrix(seeds: [5], fleetSizes: [4], tierMixes: [.national], laps: 2, capSecondsAfterGun: 900).cells[0]
+        let setup = try BotRaceHarness.raceSetup(for: lapped)
+        let race = try Race(setup: setup, files: RaceFiles(resolving: setup),
+                            mode: .authoritative(windSeed: BotRaceHarness.windSeed(for: lapped.seed)))
+        let course = race.course, polar = race.boatClass.polar
+        guard case .round(CourseLayout.gateIndex) = course.legs[2],
+              case .gate(let left, let right) = course.elements[CourseLayout.gateIndex] else {
+            Issue.record("leg 2 of a two-lap course is the gate")
+            return
+        }
+        func score(_ track: Track) throws -> RoundingObservation {
+            var scorer = RoundingScorer(course: course, polar: polar)
+            for sample in track.samples { scorer.record(sample) }
+            #expect(scorer.observations().count == 1)
+            return try #require(scorer.observations().first)
+        }
+        let along = (right.position - left.position).normalized
+        var n = along.rightPerp
+        if n.dot(course.upwind) < 0 { n = -n }
+        let rate = Double(Race.tickRate)
+        #expect(Race.tickRate == 30 && RoundingObservation.belowLine == 1 && RoundingObservation.exitSeconds == 15)
+        /// `metres` along the gate's line from the left mark (under 0 outside it) and `depth` below the line's level.
+        func at(_ metres: Double, _ depth: Double) -> Vec2 { left.position + along * metres - n * depth }
+        /// On the gate's leg from 60 m above the line to 2 m above it, `metres` along it: 101 ticks, none below.
+        func approach(_ metres: Double) -> Track {
+            var track = Track(wind: course.axis)
+            track.jump(at(4, -60), leg: 2)
+            track.sail(at(metres, -2), ticks: 100, leg: 2)
+            return track
+        }
+        /// From 2 m above the line 4 m inside the left mark: across it in one tick to 4 m below (the race's crossing),
+        /// `turn` ticks down to the leg's end `deep` below and 3 m outside the mark, then `climb` ticks on the next
+        /// leg up to 4 m below, 8 m outside, and one more to 2 m above (where `climb` is given).
+        func round(_ track: inout Track, turn: Int, deep: Double, climb: Int?) {
+            track.sail(at(4, 4), ticks: 1, leg: 2, end: (2, 1))
+            track.sail(at(-3, deep), ticks: turn, leg: 2, stage: 1, end: (3, 0))
+            guard let climb else { return }
+            track.sail(at(-8, 4), ticks: climb - 1, leg: 3)
+            track.sail(at(-8, -2), ticks: 1, leg: 3)
+            track.sail(at(-8, -50), ticks: 500, leg: 3)
+        }
+
+        // (1) Clean. Below on her crossing tick, the 60 of the turn (2 s to the leg's end) and 59 of the climb: 120
+        // ticks, 4 s, 6 m deep at the leg's end.
+        var track = approach(4)
+        round(&track, turn: 60, deep: 6, climb: 60)
+        let clean = try score(track)
+        let cleanBelow = try #require(clean.belowTheLine)
+        #expect(clean.mark == .gate && clean.entryToEnd != nil && clean.overshootTicks == 0, "\(clean)")
+        #expect(cleanBelow.seconds == 120 / rate && cleanBelow.seconds == 4 && cleanBelow.secondsOnLeg == 2, "\(cleanBelow)")
+        #expect(abs(cleanBelow.deepest - 6) < 1e-9 && !cleanBelow.stillBelow, "\(cleanBelow)")
+
+        // (2) Wide and deep after the same crossing: 150 ticks down to 20 m below, 210 back up. 1 + 150 + 209 ticks, 12 s.
+        track = approach(4)
+        round(&track, turn: 150, deep: 20, climb: 210)
+        let wide = try #require(try score(track).belowTheLine)
+        #expect(wide.seconds == 12 && wide.secondsOnLeg == 5 && abs(wide.deepest - 20) < 1e-9 && !wide.stillBelow, "\(wide)")
+
+        // (3) An overshoot. Outside the left mark she goes under the line's level before the race has her across it:
+        // 1 tick to 5 m below, 60 down to 8 m, 59 back up to 3 m, 1 to 2 m above; 90 ticks above the line back to the
+        // gate, then (1)'s rounding. The clock runs from her first tick below: 120 + 91 + 120 ticks.
+        track = approach(-10)
+        let first = track.samples.count
+        track.sail(at(-10, 5), ticks: 1, leg: 2)
+        track.sail(at(-12, 8), ticks: 60, leg: 2)
+        track.sail(at(-10, 3), ticks: 59, leg: 2)
+        track.sail(at(-10, -2), ticks: 1, leg: 2)
+        track.sail(at(4, -2), ticks: 90, leg: 2)
+        round(&track, turn: 60, deep: 6, climb: 60)
+        let overshot = try score(track)
+        let circled = try #require(overshot.belowTheLine)
+        #expect(overshot.overshootTicks == 120 && overshot.overshoots, "\(overshot)")
+        #expect(circled.seconds == 331 / rate && circled.secondsOnLeg == 271 / rate, "\(circled)")
+        #expect(abs(circled.deepest - 8) < 1e-9 && !circled.stillBelow, "\(circled)")
+        #expect(track.samples[first].tick == first && circled.seconds > cleanBelow.seconds + 7)
+
+        // (4) Still below when the exit's window closes. (1)'s crossing and turn, then 600 ticks on down to 30 m below:
+        // the window is the 450 ticks after the leg's end, so 1 + 60 + 450 ticks and 6 + 24 x 450 / 600 = 24 m deep.
+        track = approach(4)
+        round(&track, turn: 60, deep: 6, climb: nil)
+        track.sail(at(-3, 30), ticks: 600, leg: 3)
+        let held = try #require(try score(track).belowTheLine)
+        #expect(held.seconds == 511 / rate && held.secondsOnLeg == 2 && held.stillBelow, "\(held)")
+        #expect(abs(held.deepest - 24) < 1e-9, "\(held)")
+        // The same, the race over 100 ticks after the leg's end: what she was seen below, and still below.
+        track.samples.removeLast(500)
+        let cut = try #require(try score(track).belowTheLine)
+        #expect(cut.seconds == 161 / rate && abs(cut.deepest - 10) < 1e-9 && cut.stillBelow, "\(cut)")
+
+        // (5) The table. Club: two gate roundings, 4 s and 6 m, and 12 s and 20 m, still below; and a windward one.
+        // National: one at the gate, 5 s and 7 m.
+        func boat(_ tier: BotTier, _ roundings: [RoundingObservation]) -> BoatDiagnosis {
+            var boat = BoatDiagnosis(tier: tier, start: StartObservation(startSeconds: 1), finish: FinishObservation(status: .finished))
+            boat.roundings = roundings
+            return boat
+        }
+        func gate(_ seconds: Double, _ deepest: Double, still: Bool = false) -> RoundingObservation {
+            RoundingObservation(mark: .gate, approachExtra: 1, roundExtra: 2, exitExtra: 3, belowTheLine:
+                RoundingObservation.BelowTheLine(seconds: seconds, deepest: deepest, stillBelow: still))
+        }
+        let upwind = RoundingObservation(mark: .windward, approachExtra: 5, roundExtra: 0, exitExtra: 0)
+        let summary = DiagnoseSummary([RaceDiagnosis(cell: Self.cell(), boats: [boat(.club, [upwind, gate(4, 6), gate(12, 20, still: true)]),
+                                                                                boat(.national, [gate(5, 7)])])], seats: [])
+        func row(_ tier: String, _ mark: String) throws -> DiagnoseSummary.RoundingRow {
+            try #require(summary.roundings.first { $0.tier == tier && $0.mark == mark })
+        }
+        func near(_ value: Double?, _ expected: Double) -> Bool { value.map { abs($0 - expected) < 1e-9 } ?? false }
+        let every = try row("all", "gate")
+        #expect(every.roundings == 3 && near(every.belowLineSecondsMean, 7) && near(every.deepestMean, 11) && every.stillBelow == 1)
+        #expect(near(every.belowLineSeconds?.median, 5) && near(every.belowLineSeconds?.p90, 12))
+        #expect(near(every.deepest?.median, 7) && near(every.deepest?.p90, 20))
+        #expect(near(every.extraMean, 6) && every.overshoots == 0 && every.entryToEndSeconds == nil, "the other columns as before")
+        let club = try row("club", "gate")
+        #expect(near(club.belowLineSecondsMean, 8) && near(club.belowLineSeconds?.median, 8) && near(club.belowLineSeconds?.p90, 12))
+        #expect(near(club.deepestMean, 13) && near(club.deepest?.p90, 20) && club.stillBelow == 1)
+        let national = try row("national", "gate")
+        #expect(near(national.belowLineSecondsMean, 5) && near(national.deepestMean, 7) && national.stillBelow == 0)
+        // The JSON: the keys on the gate rows that have a rounding, and on no other.
+        let keys: Set = ["belowLineSecondsMean", "belowLineSeconds", "deepestMean", "deepest", "stillBelow"]
+        for row in summary.roundings where row.mark != "gate" {
+            #expect(row.belowLineSecondsMean == nil && row.belowLineSeconds == nil && row.deepestMean == nil && row.deepest == nil
+                && row.stillBelow == nil, "\(row)")
+        }
+        let json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(summary)) as? [String: Any])
+        let rows = try #require(json["roundings"] as? [[String: Any]])
+        #expect(rows.count == 12)
+        for row in rows {
+            #expect(Set(row.keys).intersection(keys) == (row["mark"] as? String == "gate" ? keys : []), "\(row)")
+        }
+        #expect(rows[3]["belowLineSecondsMean"] as? Double == 7 && rows[3]["stillBelow"] as? Int == 1)
+        #expect((rows[3]["deepest"] as? [String: Double]) == ["median": 7, "p90": 20])
+        // The text: five more columns, a dash off the gate.
+        let lines = summary.lines
+        let heading = try #require(lines.firstIndex { $0.hasPrefix("roundings by tier and mark: extra metres a rounding") })
+        #expect(lines[heading].contains("below the line") && lines[heading].contains("no ideal path")
+            && lines[heading].contains("blind to the approach"))
+        func cells(_ line: String) -> [String] {
+            line.components(separatedBy: "  ").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        }
+        #expect(cells(lines[heading + 1]).suffix(5) == ["below the line s", "median / p90 s", "deepest m", "p90 m", "still below"])
+        #expect(cells(lines[heading + 2]).suffix(5) == ["-", "-", "-", "-", "-"], "all marks")
+        #expect(cells(lines[heading + 5]) == ["all", "gate", "3", "6.0", "6.0 / 6.0", "0.000", "0.000", "-", "0 (0.0%)", "-", "-", "-",
+                                              "7.0", "5.0 / 12.0", "11.0", "20.0", "1 (33.3%)"])
+        #expect(cells(lines[heading + 9]).suffix(5) == ["8.0", "8.0 / 12.0", "13.0", "20.0", "1 (50.0%)"], "club at the gate")
+        #expect(cells(lines[heading + 13]).suffix(5) == ["5.0", "5.0 / 5.0", "7.0", "7.0", "0 (0.0%)"], "national at the gate")
     }
 
     /// The harness's diagnosed run is its plain run, seat for seat, and the observer's starts are the tally's.
