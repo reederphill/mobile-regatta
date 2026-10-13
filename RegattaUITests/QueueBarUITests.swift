@@ -141,7 +141,7 @@ final class QueueBarUITests: RaceUITestCase {
         XCTAssertTrue(app.otherElements["race-viewport"].waitForExistence(timeout: 100), "the briefing didn't lead to the race")
         XCTAssertFalse(briefing.exists, "the briefing is still up over the race")
         XCTAssertFalse(element(app, "page-settings").exists, "Settings is still pushed after the takeover")
-        XCTAssertFalse(app.buttons["race-online"].exists, "the briefing's end led home")
+        XCTAssertTrue(homeIsCovered(app), "the briefing's end led home")
     }
 
     /// Fleet lock in the middle of a practice race: the chip rode over it, the race is dropped for the briefing, and

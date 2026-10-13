@@ -73,7 +73,7 @@ final class OnlineSequenceUITests: RaceUITestCase {
         let app = launch("joinable")
         sailToTheWater(app)
         XCTAssertFalse(element(app, "briefing").exists, "the briefing is still up over the race")
-        XCTAssertFalse(app.buttons["race-online"].exists, "Home shows through the race")
+        XCTAssertTrue(homeIsCovered(app), "Home shows through the race")
         XCTAssertEqual(app.buttons["race-pause"].label, "Race menu")
         XCTAssertLessThan(tick(app) ?? 0, 0, "the race came up after its gun")
         XCTAssertFalse(element(app, "race-joining").exists)
@@ -214,7 +214,7 @@ final class OnlineSequenceUITests: RaceUITestCase {
         Thread.sleep(forTimeInterval: 5)
         app.activate()
         XCTAssertTrue(app.otherElements["race-viewport"].waitForExistence(timeout: 15), "the race isn't up on return")
-        XCTAssertFalse(app.buttons["race-online"].exists, "Home shows on return")
+        XCTAssertTrue(homeIsCovered(app), "Home shows on return")
         XCTAssertFalse(app.buttons["race-rejoin"].exists)
         // 5 s away at twice the pace: the race is some 300 ticks on, not where she left it.
         let seen = watch(app.staticTexts["race-clock"], every: 1, until: Date().addingTimeInterval(30)) { clock in
