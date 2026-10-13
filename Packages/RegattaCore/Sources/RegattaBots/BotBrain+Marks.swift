@@ -72,9 +72,10 @@ extension BotBrain {
             guard let passes = clearance(from: b.position) else { return nil }
             guard passes <= wanted + Self.overstandReach + Self.windwardFetchOffset else { return nil }
             sailsHerMark()
-            guard passes < room - Self.dropBoardMargin + misjudged else { return upwindAim(b, view, tack: .starboard) }
-            setTack(.port, view)
-            return upwindAim(b, view, tack: .port)
+            // Her plan follows her board either way: a tack away that was refused and is no longer wanted is dropped.
+            let lays = passes >= room - Self.dropBoardMargin + misjudged
+            setTack(lays ? .starboard : .port, view)
+            return upwindAim(b, view, tack: lays ? .starboard : .port)
         }
         sailsHerMark()
         let exit = b.position + Vec2.heading(wind) * (max(b.speed, 1) * Self.tackAdvanceSeconds)
