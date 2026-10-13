@@ -144,6 +144,8 @@ public actor OnlineSession {
     /// The runner is between tries.
     private var waitingToRetry = false
     private var live: Live?
+    /// Reads the open connection's queue stream into `queueStates`.
+    private var queueReader: Task<Void, Never>?
     private var updateRequired = false
     /// Players the server refused for good (ADR 0010's first claimant keeps the `gamePlayerID`).
     private var conflicted: Set<String> = []
@@ -316,6 +318,27 @@ public actor OnlineSession {
         return RemoteTermsService(live.connection)
     }
 
+    /// Accepts the terms on the open connection. To a player who hadn't, the server's queue stream said so and ended
+    /// (its gate, #34): once she has, it is read again, or a join would never hear where it stands (#162).
+    fileprivate func acceptTerms(_ version: TermsVersion) async throws -> TermsStatus {
+        let connection = try remoteTerms().connection
+        let status = try await RemoteTermsService(connection).accept(version)
+        if status.isAccepted, live?.connection === connection { readQueue(on: connection) }
+        return status
+    }
+
+    /// Feeds the queue's state on `connection` to `queueStates`, in place of whichever stream was read before.
+    private func readQueue(on connection: ServiceConnection) {
+        queueReader?.cancel()
+        let states = queueStates
+        queueReader = Task {
+            for await state in RemoteQueueService(connection).stateUpdates() {
+                guard !Task.isCancelled else { return }
+                states.send(state)
+            }
+        }
+    }
+
     // MARK: - Running
 
     private var target: DevicePlayer? {
@@ -424,10 +447,9 @@ public actor OnlineSession {
                 settle()
                 opened += 1
                 opens.send(opened)
-                let states = queueStates
-                let queue = Task { for await state in RemoteQueueService(live.connection).stateUpdates() { states.send(state) } }
+                readQueue(on: live.connection)
                 await untilDead(live.link)
-                queue.cancel()
+                queueReader?.cancel()
                 guard epoch == self.epoch, !Task.isCancelled else { return }
                 self.live = nil
                 live.link.close()
@@ -615,7 +637,7 @@ struct SessionTermsService: TermsService {
     let session: OnlineSession
 
     func status() async throws -> TermsStatus { try await session.remoteTerms().status() }
-    func accept(_ version: TermsVersion) async throws -> TermsStatus { try await session.remoteTerms().accept(version) }
+    func accept(_ version: TermsVersion) async throws -> TermsStatus { try await session.acceptTerms(version) }
 }
 
 /// The queue on the session (#162): one state stream through every reconnect, and its calls on the open connection.

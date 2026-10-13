@@ -12,6 +12,20 @@ import Testing
         rig.server.events.items.compactMap { if case .call(let name, _) = $0 { name } else { nil } }
     }
 
+    /// The server's queue stream says "terms not accepted" and ends for a player who hasn't (its gate): once she has
+    /// accepted them on the session, the queue is read again, or the join that follows would never hear its state.
+    @Test func theQueueStreamIsReadAgainOnceTheTermsAreAccepted() async throws {
+        let rig = SessionRig()
+        rig.server.script { $0.queue = .unavailable(.termsNotAccepted) }
+        await rig.opened()
+        var queue = rig.session.queue.stateUpdates().makeAsyncIterator()
+        #expect(await queue.next() == .unavailable(.termsNotAccepted))
+        rig.server.script { $0.queue = .idle }
+        #expect(try await rig.session.terms.accept(TermsVersion(2)) == .accepted(TermsVersion(2)))
+        #expect(await queue.next() == .idle)
+        #expect(rig.server.connects == 1)
+    }
+
     @Test func joinAndLeaveGoThroughTheOpenConnection() async throws {
         let rig = SessionRig()
         await rig.opened()
