@@ -15,23 +15,25 @@ import Testing
     }
 
     /// Old classes sail the tap and the roll exactly as before #459: an all-bot race on skiff@7 (the default class until #461, the
-    /// autohelm off, a roll tack) and on skiff@6 (the autohelm on), pinned on #458's tip before any bot code changed.
+    /// autohelm off, a roll tack) and on skiff@6 (the autohelm on), pinned on #458's tip before any bot code changed
+    /// (re-pinned on #508, whose windward final approach every class sails).
     @Test(.onFiveRules) func skiffSevenBotsAreBitIdentical() throws {
         let seven = try Self.digest(seed: 459, boatClass: BoatClassFile.bundled(id: "skiff", version: 7))
         let six = try Self.digest(seed: 459, boatClass: BoatClassFile.bundled(id: "skiff", version: 6))
-        #expect(hex64(seven) == "0xa802fd2cfe1d943f")
-        #expect(hex64(six) == "0x3c5c84c4afc4054b")
+        #expect(hex64(seven) == "0x51aadb37c9f9ce79")
+        #expect(hex64(six) == "0x3b18c5b8b61919dc")
     }
 
     /// And skiff@8, the default class until #462's switch, sails exactly as before #462's bots layer (every change there is behind "the
     /// class has the new planing rule", skiff@9's `stayOnSpeedShare` and `apparentWind`): all-bot races through the
     /// start and the first beat, and through two laps with their runs, pinned on #462's core tip before any bot code
-    /// changed (re-pinned there on fleet-rules@6, #490's default).
+    /// changed (re-pinned there on fleet-rules@6, #490's default, and on #508: the windward final approach and the lower
+    /// tacking speed by hand near her mark are every class's).
     @Test func skiffEightBotsAreBitIdentical() throws {
         let short = try Self.digest(seed: 459, boatClass: Self.skiffEight)
         let long = try Self.digest(seed: 462, boatClass: Self.skiffEight, seconds: 700)
-        #expect(hex64(short) == "0xf996b3e87c5984b7")
-        #expect(hex64(long) == "0x08607166a1b7aa3c")
+        #expect(hex64(short) == "0x2f226740a8699d03")
+        #expect(hex64(long) == "0xc80a7d2307b70922")
     }
 
     // MARK: - skiff@8: tacks and gybes by hand
@@ -533,5 +535,75 @@ import Testing
         #expect(abs(brain.penaltyTurnSeconds(b, view, tacked, direction: -luff) - angle(b.twa, false, false, true) / rate) < 1e-9)
         // The other way from a turn under way (a recross): both crossings again.
         #expect(abs(brain.penaltyTurnSeconds(b, view, tacked, direction: luff) - (luffing / rate + crawl)) < 1e-9)
+    }
+
+    /// #508 acceptance: within `PlaningTable.markRange` of her mark a bot that turns by hand tacks from
+    /// `nearMarkTackingSpeed` of her close-hauled speed, not `tackingSpeed`; away from her mark, and for a tap's tack
+    /// anywhere, the floor is as it was.
+    @Test func tacksFromLowerSpeedNearHerMarkOnly() throws {
+        #expect(BotBrain.nearMarkTackingSpeed == 0.55 && BotBrain.tackingSpeed == 0.75)
+        /// Whether a bot beating in open water at `share` of her close-hauled speed can tack: by hand or by the tap,
+        /// near her mark or not.
+        func tacks(share: Double, byHand: Bool, nearHerMark: Bool,
+                   pose: @escaping (inout WorldSnapshot) -> Void = { _ in }) throws -> Bool {
+            let (probe, _) = try Self.alone(seed: 3) { snapshot, _ in pose(&snapshot) }
+            let own = probe.seatView(for: 0)
+            let closeHauled = Hand(seat: 0, race: probe, handling: 0.5).brain.closeHauledSpeed(own.own, own)
+            let (race, _) = try Self.alone(seed: 3) { snapshot, _ in
+                snapshot.seats[0].boat.speed = closeHauled * share
+                pose(&snapshot)
+            }
+            var hand = Hand(seat: 0, race: race, handling: 0.5)
+            let view = race.seatView(for: 0)
+            try #require(abs(view.own.speed - hand.brain.closeHauledSpeed(view.own, view) * share) < 0.01)
+            hand.brain.isNearHerMark = nearHerMark
+            return hand.brain.canTap(view.own, view, byHand: byHand)
+        }
+        for nearHerMark in [false, true] {
+            for byHand in [false, true] {
+                let lower = byHand && nearHerMark
+                #expect(try tacks(share: 0.8, byHand: byHand, nearHerMark: nearHerMark))
+                #expect(try tacks(share: 0.65, byHand: byHand, nearHerMark: nearHerMark) == lower,
+                        "by hand \(byHand), near her mark \(nearHerMark)")
+                #expect(try !tacks(share: 0.5, byHand: byHand, nearHerMark: nearHerMark))
+            }
+        }
+
+        // Only at a mark or gate of her course (#471's start first, then turn): before her start, returning to it and
+        // on the finish leg `isNearHerMark` is a point of her start or the line, and her hand tack keeps the 0.75.
+        let finishLeg = try #require(Self.alone(seed: 3).race.course.legs.lastIndex { if case .finish = $0 { true } else { false } })
+        let elsewhere: [(String, (inout WorldSnapshot) -> Void)] = [
+            ("before her start", { $0.seats[0].boat.status = .prestart }),
+            ("returning to her start", { $0.seats[0].boat.status = .ocs }),
+            ("on the finish leg", { $0.seats[0].boat.legIndex = finishLeg }),
+        ]
+        for (name, pose) in elsewhere {
+            #expect(try tacks(share: 0.8, byHand: true, nearHerMark: true, pose: pose), "\(name)")
+            #expect(try !tacks(share: 0.65, byHand: true, nearHerMark: true, pose: pose), "\(name)")
+        }
+
+        // At the helm: slow on port on the windward mark's final approach, her starboard board clear of it, she puts
+        // the helm down by hand on the default class; on a class whose tap sails the tack she waits for her speed.
+        let hand = try BotNavigationTests.finalApproach(tack: .port, over: 4, speedShare: 0.65)
+        var view = hand.view
+        try #require(BotBrain.turnsByHand(view))
+        var brain = hand.brain
+        _ = brain.decide(view)
+        #expect(brain.plannedTack == .starboard && brain.handTurn != nil)
+
+        let tap = try BotConductTests.$waterClass.withValue(BotHelmTests.autohelmOn().ref) {
+            try BotNavigationTests.finalApproach(tack: .port, over: 4, speedShare: 0.65)
+        }
+        view = tap.view
+        try #require(!BotBrain.turnsByHand(view))
+        brain = tap.brain
+        let decision = brain.decide(view)
+        #expect(brain.plannedTack == .starboard && decision.tap == nil)
+        // The tap is hers at speed: only the floor held it.
+        let fast = try BotConductTests.$waterClass.withValue(BotHelmTests.autohelmOn().ref) {
+            try BotNavigationTests.finalApproach(tack: .port, over: 4)
+        }
+        brain = fast.brain
+        #expect(brain.decide(fast.view).tap == .tackGybe)
     }
 }
