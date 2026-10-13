@@ -3,8 +3,9 @@ import RegattaCore
 
 // PROTOTYPE (#510, never merged): the leeward gate redesign's elements, each behind a letter in `REGATTA_BOT_VARIANT`,
 // so one binary sails the baseline (no letters) and every variant.
-//  P: pick the gate mark she rounds by `pickRange` above the line and sail for its inside; inside `straightRange` of
-//     that point she sails straight for it on her own gybe (no gybe).
+//  P: pick the gate mark she rounds by `pickRange` above the line (the cheaper in metres: the way to her point inside
+//     it and her gybes, one round the mark dearest) and sail for its inside; inside `straightRange` of that point she
+//     sails straight for it on her own gybe (no gybe).   p: P0, the first draft: the nearer mark, no rounding gybe counted.
 //  C: no corridor gybe inside `PlaningTable.gateRange` of her point through the gate (REGATTA_GATE_C_RANGE metres).
 //  R: below the line and not through it, she sails back above it round the nearer end, latched until 10 m above.
 //  X: off the gate, a turn by hand onto the beat goes the shorter way (through the wind, with the speed for it).
@@ -20,6 +21,9 @@ public enum BotVariant {
     static let straightRange = number("REGATTA_GATE_STRAIGHT", 30)
     /// P: what a gybe is worth in metres when she picks.
     static let gybeMetres = number("REGATTA_GATE_GYBE_M", 20)
+    /// P: what a gybe round the mark, after the line, is worth in metres; and the gain she changes her pick for.
+    static let markGybeMetres = number("REGATTA_GATE_MARKGYBE_M", 35)
+    static let repickMetres = number("REGATTA_GATE_REPICK_M", 10)
     /// P: metres more than the mark's radius, her beam and the clearance her point lies inside the mark.
     static let inset = number("REGATTA_GATE_INSET", 2.5)
     /// P: metres below the line her point lies.
@@ -61,45 +65,69 @@ extension BotBrain {
                 return navigate(b, to: near.position + (near.position - gate.centre).normalized * 8 + up * 20, view)
             }
         }
-        guard BotVariant.on("P"), above < BotVariant.pickRange, above > -1 else { return nil }
-        let w = b.windDirection
+        guard BotVariant.on("P") || BotVariant.on("p"), above < BotVariant.pickRange, above > -1 else { return nil }
         let down = grooveAngle(.downwind, b, view)
-        // What sailing to a mark's point costs her from here, metres: the way there, and a gybe if it is on her other one.
-        func cost(_ mark: CourseLayout.Mark) -> (cost: Double, entry: Vec2, gybes: Bool, offWind: Double) {
+        let lee = Double.pi - deg2rad(10)
+        // What rounding a mark costs her from here, metres: the way to her point inside it, and her gybes. She rounds
+        // it in one luff on the gybe that heads her outwards across the line (`needs`); on the other she gybes round it.
+        func cost(_ mark: CourseLayout.Mark) -> (cost: Double, entry: Vec2, onOwn: Bool, offWind: Double, needs: Tack) {
             let entry = Self.gateEntry(mark, centre: gate.centre, view)
             let to = entry - b.position
             let aim = Aim(heading: to.bearing, b, tolerance: 0)
-            let gybes = aim.tack != b.tack
+            let onOwn = aim.tack == b.tack || aim.angle >= lee
+            let needs = Aim(heading: ((mark.position - gate.centre).normalized - up * 0.3).bearing, b, tolerance: 0).tack
             // Deeper than her groove she gybes down to it: the gybing cone's length.
-            let deep = Double.pi - aim.angle
-            let length = aim.angle > down ? to.length * cos(deep) / cos(.pi - down) : to.length
-            return (length + (gybes ? BotVariant.gybeMetres : 0), entry, gybes, aim.angle)
+            let cone = to.length * cos(.pi - aim.angle) / cos(.pi - down)
+            let length = aim.angle > down ? cone : to.length
+            let g = BotVariant.gybeMetres
+            var cost: Double
+            if BotVariant.on("p") {
+                // P0: nearest by the way there, a gybe to get there counted; not the gybe round the mark.
+                cost = length + (aim.tack != b.tack ? g : 0)
+            } else if b.tack == needs {
+                cost = onOwn ? length : length + 2 * g
+            } else if !onOwn {
+                cost = length + g
+            } else if aim.angle > down, to.length >= BotVariant.straightRange {
+                cost = cone + g
+            } else {
+                cost = length + BotVariant.markGybeMetres
+            }
+            return (cost, entry, onOwn, aim.angle, needs)
         }
         let l = cost(gate.left), r = cost(gate.right)
-        var picksLeft: Bool
+        var picksLeft = l.cost <= r.cost
         if let pick = gatePick, pick.leg == b.legIndex {
-            picksLeft = pick.left
-            // Close in, a pick on her other gybe gives way to one she lays on this one.
-            let mine = picksLeft ? l : r, other = picksLeft ? r : l
-            if mine.gybes, mine.offWind < .pi - deg2rad(10), !other.gybes, other.offWind > .pi / 2,
-               (mine.entry - b.position).length < BotVariant.straightRange { picksLeft.toggle() }
-        } else {
-            picksLeft = l.cost <= r.cost
+            // She changes her mind only for a clear gain.
+            let mine = pick.left ? l : r, other = pick.left ? r : l
+            picksLeft = BotVariant.on("p") || other.cost + BotVariant.repickMetres >= mine.cost ? pick.left : !pick.left
         }
         gatePick = (b.legIndex, picksLeft)
         let mine = picksLeft ? l : r
         let to = mine.entry - b.position
-        gateNote = picksLeft ? "pick-L" : "pick-R"
-        guard to.length < BotVariant.straightRange, mine.offWind > down - deg2rad(2),
-              !mine.gybes || mine.offWind >= .pi - deg2rad(10) else {
-            return navigate(b, to: mine.entry, view)
+        gateNote = (picksLeft ? "pick-L" : "pick-R") + String(format: "(%.0f/%.0f)", l.cost, r.cost)
+        let deeper = mine.offWind > down - deg2rad(2)
+        if BotVariant.on("p") {
+            guard to.length < BotVariant.straightRange, deeper, mine.onOwn else { return navigate(b, to: mine.entry, view) }
+        } else if b.tack == mine.needs {
+            // On the gybe she rounds it on: straight for her point from her pick, not down her groove past it. Past it
+            // already, she gybes now; a reach to it is `navigate`'s.
+            if !mine.onOwn {
+                gateNote += "-gybe"
+                plannedTack = b.tack.other
+                return navigate(b, to: mine.entry, view)
+            }
+            guard deeper else { return navigate(b, to: mine.entry, view) }
+        } else {
+            // On the other gybe: to its layline and the gybe while there is room; close in, straight on and round it.
+            guard to.length < BotVariant.straightRange, deeper, mine.onOwn else { return navigate(b, to: mine.entry, view) }
         }
         // Straight for it on her own gybe, by the lee no further than a few degrees.
         gateNote += "-straight"
         plannedTack = b.tack
         isNearHerMark = true
-        isAtHerGate = true
-        let angle = mine.gybes ? .pi - deg2rad(3) : min(mine.offWind, .pi - deg2rad(3))
+        isAtHerGate = to.length < PlaningTable.gateRange
+        let angle = min(mine.offWind, .pi - deg2rad(3))
         return downwindAim(b, view, aim: Aim(angle: angle, tack: b.tack, tolerance: Self.reachTolerance), nearMark: true)
     }
 
@@ -125,6 +153,7 @@ extension BotBrain {
         guard onGate != nil || isOffHerGate(b, view) else { return }
         let centre = onGate?.centre ?? c.targetPosition(for: c.legs[b.legIndex - 1])
         let rel = b.position - centre
+        guard rel.length < 100 else { return }
         let line = String(format: "GT t=%.1f seat=%d leg=%d st=%d above=%.1f right=%.1f v=%.1f twa=%.0f%@ aim=%.0f%@ %@ %@ near=%d atGate=%d turn=%d pen=%d",
                           view.time, view.seat, b.legIndex, b.roundingStage, rel.dot(c.upwind), rel.dot(c.upwind.rightPerp), b.speed,
                           rad2deg(abs(sailingAngle(b))), b.tack == .port ? "P" : "S", rad2deg(aim.angle), aim.tack == .port ? "P" : "S",

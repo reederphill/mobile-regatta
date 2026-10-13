@@ -39,6 +39,15 @@ public struct RoundingObservation: Hashable, Sendable {
     public var wrongSide: Bool
     /// The ticks before her crossing she was more than `belowLine` below the gate's line. 0 at a mark.
     public var overshootTicks: Int
+    /// PROTOTYPE (#510): entry to the leg's end, her seconds and metres; the ideal approach's seconds and metres (to her
+    /// point inside the gate's sooner end, or off the mark); the metres up the course she made in the exit's seconds.
+    public var legSeconds = 0.0
+    public var legMetres = 0.0
+    public var idealSeconds = 0.0
+    public var idealMetres = 0.0
+    public var exitUpwind = 0.0
+    /// Metres up the course from the mark's (the gate's centre's) height at the leg's end.
+    public var doneAbove = 0.0
 
     /// Metres over the ideal, the whole rounding.
     public var extraMetres: Double { approachExtra + roundExtra + exitExtra }
@@ -126,6 +135,8 @@ struct RoundingScorer {
         var roundPath = 0.0
         var wrongSide = false
         var overshootTicks = 0
+        var idealSeconds = 0.0
+        var idealMetres = 0.0
     }
 
     /// A rounding sailed to its leg's end, its exit still running.
@@ -230,9 +241,16 @@ struct RoundingScorer {
             // Onto a later leg: the rounding she crossed is sailed, and its exit begins here.
             if sample.leg > leg, let rounding = open, let cross = rounding.cross, let from = legs[leg] {
                 let chord = (sample.position - cross.position).length
-                let seen = RoundingObservation(mark: from.mark, approachExtra: rounding.approachExtra,
+                var seen = RoundingObservation(mark: from.mark, approachExtra: rounding.approachExtra,
                                                roundExtra: rounding.roundPath + step - chord, exitExtra: 0,
                                                wrongSide: rounding.wrongSide, overshootTicks: rounding.overshootTicks)
+                if let entry = rounding.entry {
+                    seen.legSeconds = Double(sample.tick - entry.tick) / Double(Race.tickRate)
+                    seen.legMetres = rounding.approachPath + rounding.roundPath + step
+                    seen.idealSeconds = rounding.idealSeconds
+                    seen.idealMetres = rounding.idealMetres
+                    seen.doneAbove = (sample.position - from.centre).dot(upwind)
+                }
                 exits.append(Exit(observation: seen, done: sample, mode: from.exitMode, last: sample.position))
             }
             leg = sample.leg
@@ -257,6 +275,8 @@ struct RoundingScorer {
             }
             let ideal = ideals.dropFirst().reduce(ideals[0]) { $1.seconds < $0.seconds ? $1 : $0 }
             rounding.approachExtra = rounding.approachPath - ideal.metres
+            rounding.idealSeconds = ideal.seconds
+            rounding.idealMetres = ideal.metres
             rounding.cross = sample
             return
         }
@@ -285,6 +305,7 @@ struct RoundingScorer {
         let ideal = Self.ideal(from: exit.done.position, to: exit.last, wind: exit.done.windDirection, tws: exit.done.tws,
                                mode: exit.mode, polar: polar)
         seen.exitExtra = exit.path - ideal.metres
+        seen.exitUpwind = (exit.last - exit.done.position).dot(upwind)
         return seen
     }
 

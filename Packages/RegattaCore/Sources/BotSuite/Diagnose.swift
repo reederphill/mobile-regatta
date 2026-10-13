@@ -902,9 +902,10 @@ extension BotRaceHarness {
             var lines = ""
             for (seat, boat) in boats.enumerated() {
                 for (n, seen) in boat.roundings.filter({ $0.mark == .gate }).enumerated() where seen.extraMetres >= least {
-                    lines += String(format: "GD %@:%@:%d:%d seat=%d tier=%@ gate#%d extra=%.0f approach=%.0f round=%.0f exit=%.0f below=%d\n",
+                    lines += String(format: "GD %@:%@:%d:%d seat=%d tier=%@ gate#%d extra=%.0f approach=%.0f round=%.0f exit=%.0f below=%d legs=%.1f ideals=%.1f legm=%.0f idealm=%.0f exitup=%.0f doneabove=%.0f\n",
                                     cell.venue, cell.conditions, Int(cell.seed), cell.fleetSize, seat, "\(boat.tier)", n + 1,
-                                    seen.extraMetres, seen.approachExtra, seen.roundExtra, seen.exitExtra, seen.overshootTicks)
+                                    seen.extraMetres, seen.approachExtra, seen.roundExtra, seen.exitExtra, seen.overshootTicks,
+                                    seen.legSeconds, seen.idealSeconds, seen.legMetres, seen.idealMetres, seen.exitUpwind, seen.doneAbove)
                 }
             }
             if !lines.isEmpty { FileHandle.standardError.write(lines.data(using: .utf8)!) }
