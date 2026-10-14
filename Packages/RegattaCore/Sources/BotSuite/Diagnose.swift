@@ -881,12 +881,15 @@ extension BotRaceHarness {
     public static func runDiagnosed(_ cell: BotRaceCell) throws -> (result: RaceResult, diagnosis: RaceDiagnosis) {
         var observer: RaceObserver?
         var sailed: Race?
+        var probe: PackProbe?
         let result = try run(cell, cautiousSeats: cell.cautiousSeats, seatSkills: cell.seatSkills) { race, events in
             if observer == nil {
                 observer = RaceObserver(race: race)
                 sailed = race
+                if PackProbe.enabled { probe = PackProbe(race: race) }
             }
             observer?.record(race, events: events)
+            probe?.record(race)
         }
         var boats = sailed.flatMap { race in observer?.boats(of: race, tiers: result.seats.map(\.tier)) } ?? []
         // The live mix's live bots by their two skills, as `AxesSummary.init(live:)` buckets them.
@@ -896,6 +899,11 @@ extension BotRaceHarness {
                 boats[seat].skill = BotTier.holding(skill: metrics.skill)
                 boats[seat].hand = AxesSummary.handlingTier(handling)
             }
+        }
+        // PROTOTYPE (#525): the gate roundings' pack, mark-room and dirty-air measures, on stderr.
+        if let probe {
+            let lines = probe.lines(cell, boats: boats)
+            if !lines.isEmpty { FileHandle.standardError.write(lines.data(using: .utf8)!) }
         }
         return (result, RaceDiagnosis(cell: cell, boats: boats))
     }

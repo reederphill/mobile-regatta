@@ -46,17 +46,21 @@ def summ(path):
     return o
 
 def row(name, o):
-    g = o['R'][('all', 'gate')]
+    g = o['R'].get(('all', 'gate')) or [v for k, v in o['R'].items() if k[1] == 'gate'][0]
     ru = o['legs']['runs']
-    c = lambda t: f"{o['R'][(t, 'gate')]['mean']:.1f}"
-    s = (f"{name:12s} gate n={g['n']} mean {g['mean']:5.1f} med {g['med']:5.1f} p90 {g['p90']:5.1f} >=30 {g['s30']:.3f} >=50 {g['s50']:.3f}"
+    t3 = lambda d, fmt: '/'.join((fmt % d[t]) if t in d else '-' for t in TIERS)
+    gt = {t: o['R'][(t, 'gate')]['mean'] for t in TIERS if (t, 'gate') in o['R']}
+    calls = {}
+    for t in o['calls']:
+        for k, v in o['calls'][t].items(): calls[k] = calls.get(k, 0) + v
+    cs = ' '.join(f"{k}:{calls.get(k, 0)}" for k in ('10', '11', '12', '13', '16.1', '17'))
+    return (f"{name:12s} gate n={g['n']} mean {g['mean']:5.1f} med {g['med']:5.1f} p90 {g['p90']:5.1f} >=30 {g['s30']:.3f} >=50 {g['s50']:.3f}"
          f" | e2e {g.get('e2em', 0):.1f} m {g.get('e2es', 0):.1f} s (p90 {g.get('e2es90', 0):.1f}) below {g.get('below', 0):.1f} s deepest {g.get('deepest', 0):.1f} over {g.get('over', 0)} still {g.get('still', 0)}"
-         f" | by tier {c('club')}/{c('regional')}/{c('national')}"
-         f" | runs gybes {ru['gybes'] / ru['legs']:.2f} calls {ru['calls']:.0f} t31 {ru['t31']:.0f}"
-         f" | marks C/R/N {o['marks']['club']:.2f}/{o['marks']['regional']:.2f}/{o['marks']['national']:.2f}"
-         f" | racing fouls {o['racing']} | fin C/R/N {o['fin']['club']:.3f}/{o['fin']['regional']:.3f}/{o['fin']['national']:.3f}"
-         f" | place C/R/N {o['place'].get('club', 0):.2f}/{o['place'].get('regional', 0):.2f}/{o['place'].get('national', 0):.2f}")
-    return s
+         f" | gate by tier {t3(gt, '%.1f')}"
+         f" | runs gybes {ru['gybes'] / ru['legs']:.2f} | calls {cs} t31 {ru['t31']:.0f}"
+         f" | marks/boat {t3(o['marks'], '%.2f')}"
+         f" | racing fouls {o['racing']} | fin {t3(o['fin'], '%.3f')}"
+         f" | place {t3(o['place'], '%.2f')}")
 
 if __name__ == '__main__':
     for n in sys.argv[1:]:
