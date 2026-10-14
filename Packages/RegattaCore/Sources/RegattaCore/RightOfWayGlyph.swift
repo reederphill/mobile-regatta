@@ -4,14 +4,14 @@
 /// Mark-room has no words of its own (#386): within the glow range a boat owing it glows red and the boat owed it
 /// green, as a keep-clear boat and a right-of-way boat do (`Race.keepClearRelation(of:to:)` decides, and online the
 /// server's relations carry it). Display only: the umpire's calls are unchanged (Case 25).
-/// A boat taking a penalty (rule 21.2) shows every other boat a plain orange ring in place of the green glow (#517);
+/// A boat taking a penalty (rule 21.2) shows every other boat an orange glow in place of the green one (#517);
 /// her own view keeps every boat red, and a boat returning to start (21.1) keeps green.
 public enum RightOfWayGlyph: Sendable, Equatable {
     /// I must keep clear of her: the red glow.
     case giveWay
     /// She must keep clear of me: the green glow.
     case hasRight
-    /// She is taking a penalty (21.2): the orange ring, no halo.
+    /// She is taking a penalty (21.2): the orange glow.
     case takingAPenalty
 
     /// How far away, in hull lengths centre to centre, a boat's glow starts to show: a placeholder the app's

@@ -250,7 +250,7 @@ final class GameScene: SKScene {
             node.effects.nodes.forEach(effectsLayer.addChild)
         }
         // Over the fleet, whose top z is about 14 (`DrawOrder`), under the edge arrow (20).
-        let rules = RuleCueLayer(pointsPerMeter: ppm, seats: driver.currentFrame.boats.count)
+        let rules = RuleCueLayer(pointsPerMeter: ppm)
         rules.zPosition = 16
         world.addChild(rules)
         ruleCues = rules
@@ -380,12 +380,10 @@ final class GameScene: SKScene {
     var ruleCueSummary: String { ruleCues?.summary ?? "" }
     /// The penalty arc's tack and gybe marks as drawn (#489, `RuleCueLayer.marksSummary`), for tests.
     var penaltyMarksSummary: String { ruleCues?.marksSummary ?? "none" }
-    /// The penalty rings on other boats taking a penalty (#517, `RuleCueLayer.ringsSummary`), for tests.
-    var penaltyRingsSummary: String { ruleCues?.ringsSummary ?? "rings=0" }
     /// The right-of-way glow each seat shows, for tests.
     var shownGlows: [RightOfWayGlow?] { ruleCues?.glows ?? [] }
-    /// Whether each seat's right-of-way halo shows (#517: never on a boat taking a penalty), for tests.
-    var shownHalos: [Bool] { boatNodes.map(\.showsRightOfWayHalo) }
+    /// Each seat's right-of-way halo as drawn, nil where hidden (#517: orange on a boat taking a penalty), for tests.
+    var shownHalos: [(colour: UIColor, alpha: CGFloat)?] { boatNodes.map(\.shownRightOfWayHalo) }
     /// Whether a hint's leader line shows (#129), for tests.
     var showsHintLeader: Bool { hintLeader.isShowing }
 

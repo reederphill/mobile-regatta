@@ -34,8 +34,8 @@
         "glows": ["giveWay", "hasRight"]
     },
     {
-        "fixtures": ["rules-ring"],
-        "log": "rules-ring.racelog.json", "camera": "race", "zoom": [0.6, 1.0],
+        "fixtures": ["rules-penalty-glow"],
+        "log": "rules-penalty-glow.racelog.json", "camera": "race", "zoom": [0.6, 1.0],
         "leg": 0, "glows": ["takingAPenalty"], "glowsWithinHulls": 2.5
     },
     {

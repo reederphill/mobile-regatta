@@ -73,7 +73,7 @@ import Testing
         #expect(onOne == .giveWay && onZero == .takingAPenalty)
     }
 
-    /// #517: a boat taking a penalty (21.2) shows every other boat the penalty kind, the orange ring, in place of
+    /// #517: a boat taking a penalty (21.2) shows every other boat the penalty kind, the orange glow, in place of
     /// green; her own view keeps the other boat red.
     @Test func boatTakingAPenaltyShowsThePenaltyKindToOtherBoats() throws {
         let (onOne, onZero, rule) = try Self.glyphs(edit: Self.penalised(45))
@@ -110,7 +110,7 @@ import Testing
             snapshot.seats[0].boat.status = .ocs
         }
         #expect(rule == .returningToStart)
-        #expect(onZero == .hasRight, "no ring: the green glow")
+        #expect(onZero == .hasRight, "the green glow, not the orange")
         #expect(onOne == .giveWay)
         let returning = RightOfWay(keepClear: 0, rule: .returningToStart)
         #expect(RightOfWayGlyph.glyph(for: returning, me: 1) == .hasRight)
