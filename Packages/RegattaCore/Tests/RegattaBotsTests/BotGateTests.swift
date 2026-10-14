@@ -574,4 +574,153 @@ import RegattaCore
         }
         return ticks
     }
+
+    // MARK: - #525 H1: the crowded mark and the shadow gybe
+
+    /// Moves seat 1 (far off in `scene`) to `position`, `status` as given: racing on the gate's leg, at her heading and speed.
+    static func park(_ scene: inout Scene, at position: Vec2, status: BoatStatus = .racing) throws {
+        var snapshot = scene.race.exportSnapshot()
+        snapshot.seats[1].boat.position = position
+        snapshot.seats[1].boat.heading = scene.boat.heading
+        snapshot.seats[1].boat.speed = scene.boat.speed
+        snapshot.seats[1].boat.status = status
+        try scene.race.importSnapshot(snapshot)
+    }
+
+    /// A scene 60 m above the line whose marks cost her nearly the same, the left the cheaper or equal (a fresh pick
+    /// takes the left on a tie), and her cost of each.
+    static func closePick() throws -> (scene: Scene, costs: (left: Double, right: Double)) {
+        var found: (Scene, (left: Double, right: Double), Double)?
+        for off in stride(from: -30.0, through: 30.0, by: 1.5) {
+            var scene = try Self.scene(tack: .starboard) { $0.gate.centre + $0.outwards(left: true) * off + $0.up * 60 }
+            let costs = try scene.costs()
+            let gap = costs.right - costs.left
+            if gap >= 0, gap < 20, gap < (found?.2 ?? .infinity) { found = (scene, costs, gap) }
+        }
+        let close = try #require(found, "no pose 60 m above the line with the left mark the cheaper by under 20 m")
+        return (close.0, close.1)
+    }
+
+    /// #525 H1 acceptance: a boat parked on the line to one mark's point makes that mark dearer (`gateCosts`), by
+    /// `gateTrafficBoatMetres` on the line, and in a scene that picks the left mark (a tie goes left) she picks the
+    /// other. A boat through the gate, behind her, off the line by `gateTrafficNear`, and a ghost add nothing.
+    @Test func aBoatOnTheLineToAMarkMakesItDearer() throws {
+        var (scene, base) = try Self.closePick()
+        let fresh = scene.hand.brain
+        _ = scene.aim()
+        try #require(scene.hand.brain.gatePick?.left == true, "the pose picks the left mark on its own")
+        scene.hand.brain = fresh
+
+        let me = scene.boat.position
+        let entry = scene.bearings.leftEntry
+        // Nine tenths of the way: the right mark's line is 0.9 x 31 m off it, clear of `gateTrafficNear`.
+        let onTheLine = me + (entry - me) * 0.9
+        let toRight = scene.bearings.rightEntry - me
+        let lineOff = abs((onTheLine - me).cross(toRight.normalized))
+        try #require(lineOff >= BotBrain.gateTrafficNear, "the right mark's line is \(lineOff) m off the parked boat")
+        try #require(scene.bearings.above(onTheLine) > 0, "she is parked above the gate's line")
+        try Self.park(&scene, at: onTheLine)
+        let costs = try scene.costs()
+        #expect(abs(costs.left - (base.left + BotBrain.gateTrafficBoatMetres)) < 1e-6, "left \(base.left) -> \(costs.left)")
+        #expect(abs(costs.right - base.right) < 1e-6, "right \(base.right) -> \(costs.right)")
+        _ = scene.aim()
+        #expect(scene.hand.brain.gatePick?.left == false, "she picks the right mark, the left one crowded")
+
+        // Off the line it fades, and at `gateTrafficNear` off it is nothing.
+        // Off the line to its upper side, still above the gate's line.
+        let side = -(entry - me).normalized.rightPerp
+        try Self.park(&scene, at: onTheLine + side * (BotBrain.gateTrafficNear * 0.5))
+        let half = try scene.costs()
+        #expect(abs(half.left - (base.left + BotBrain.gateTrafficBoatMetres * 0.5)) < 1e-6, "half way off: \(half.left), base \(base.left)")
+
+        // None of these is in her road.
+        // Three metres past her point along the line: on the way, but 5 m below the gate's line.
+        let beyond = entry + (entry - me).normalized * 3
+        try #require(scene.bearings.above(beyond) < -3)
+        let cases: [(String, Vec2, BoatStatus)] = [
+            ("through the gate", beyond, .racing),
+            ("behind her", me + scene.bearings.up * 20, .racing),
+            ("ghost on the line", onTheLine, .finished),
+            ("far off the line", onTheLine + side * BotBrain.gateTrafficNear, .racing),
+        ]
+        for (name, position, status) in cases {
+            try Self.park(&scene, at: position, status: status)
+            let moved = try scene.costs()
+            #expect(abs(moved.left - base.left) < 1e-6 && abs(moved.right - base.right) < 1e-6, "\(name): \(moved) against \(base)")
+        }
+    }
+
+    /// #525 H1: the traffic she prices is blended over `gateTrafficSeconds`: a boat that sails on through the gate leaves
+    /// the mark it crowded dear a while, and her pick holds (unblended, the pick followed the pack and changed 70 of 128
+    /// roundings in a trace, against 8).
+    @Test func aBoatThatSailsOnLeavesTheMarkDearAWhile() throws {
+        var (scene, base) = try Self.closePick()
+        let me = scene.boat.position
+        try Self.park(&scene, at: me + (scene.bearings.leftEntry - me) * 0.9)
+        _ = scene.aim()
+        try #require(scene.hand.brain.gatePick?.left == false, "the left mark, crowded, is not picked")
+        let first = try #require(scene.hand.brain.gateTraffic)
+        #expect(abs(first.left - BotBrain.gateTrafficBoatMetres) < 1e-6 && first.right == 0)
+        // The boat is gone (far off), a second on: the left mark is cheap again by the costs now.
+        try Self.park(&scene, at: me + scene.bearings.up * 300)
+        for _ in 0..<Race.tickRate { scene.race.step() }
+        let costs = try scene.costs()
+        #expect(abs(costs.left - base.left) < 5, "left costs \(costs.left) against \(base.left) without the boat")
+        _ = scene.aim()
+        let later = try #require(scene.hand.brain.gateTraffic)
+        let share = 1 - exp(-1 / BotBrain.gateTrafficSeconds)
+        #expect(abs(later.left - first.left * (1 - share)) < 0.5, "the traffic she prices decays to \(later.left) from \(first.left)")
+        #expect(later.left > first.left / 2 && scene.hand.brain.gatePick?.left == false, "and she holds her pick")
+    }
+
+    /// #525 H1 acceptance: with no other boat in range the traffic term is nothing: a single-boat scene costs what it
+    /// did, the wake's loss included (none in clean air).
+    @Test func noBoatInRangeAddsNothing() throws {
+        var scene = try Self.scene(tack: .starboard) { $0.gate.centre + $0.up * 60 }
+        let view = scene.seen()
+        let gate = scene.gate
+        let entry = scene.bearings.leftEntry
+        #expect(scene.hand.brain.gateTrafficMetres(to: entry, gate, view.own, view) == 0)
+        try Self.park(&scene, at: scene.boat.position + scene.bearings.up * 300)
+        let far = scene.seen()
+        #expect(scene.hand.brain.gateTrafficMetres(to: entry, gate, far.own, far) == 0)
+    }
+
+    /// #525 H1 acceptance: on the rounding gybe, in a shadow, 45 m or more from her point, she plans the other gybe once
+    /// on the leg (`navigate` brings her back on its layline); not a second time that leg, not inside 45 m, not in clean
+    /// air.
+    @Test func gybesOutOfDirtyAirOnceOnTheRoundingGybe() throws {
+        for tack in [Tack.starboard, .port] {
+            func scene(out: Double, shadow: Double) throws -> Scene {
+                var scene = try Self.scene(tack: tack) {
+                    $0.laying(left: $0.rounded(on: tack), on: tack, out: out, deeper: deg2rad(6))
+                }
+                var snapshot = scene.race.exportSnapshot()
+                snapshot.seats[0].boat.shadow = shadow
+                try scene.race.importSnapshot(snapshot)
+                return scene
+            }
+            // In dirty air with room: the other gybe, once.
+            var shadowed = try scene(out: BotBrain.gateShadowGybeMetres + 15, shadow: 0.7)
+            let view = shadowed.seen()
+            try #require(view.own.shadow < BotBrain.dirtyAir, "\(tack): shadow \(view.own.shadow)")
+            let aimAsked = shadowed.aim()
+            let first = try #require(aimAsked, "\(tack)")
+            let pick = try #require(shadowed.hand.brain.gatePick, "\(tack)")
+            try #require(BotBrain.roundingTack(shadowed.gate.mark(left: pick.left), centre: shadowed.gate.centre, view.own, view) == tack,
+                         "\(tack): she is on the gybe that rounds her mark")
+            #expect(shadowed.hand.brain.plannedTack == tack.other, "\(tack): planned \(shadowed.hand.brain.plannedTack)")
+            #expect(first.tack == tack.other, "\(tack): aims on \(first.tack)")
+            // Not a second time that leg: she holds on for her point.
+            _ = shadowed.aim()
+            #expect(shadowed.hand.brain.plannedTack == tack, "\(tack): gybed away twice")
+            // Not inside 45 m, nor in clean air.
+            var near = try scene(out: BotBrain.gateShadowGybeMetres - 5, shadow: 0.7)
+            _ = near.aim()
+            #expect(near.hand.brain.plannedTack == tack, "\(tack): gybed out of the shadow inside \(BotBrain.gateShadowGybeMetres) m")
+            var clean = try scene(out: BotBrain.gateShadowGybeMetres + 15, shadow: 1)
+            _ = clean.aim()
+            #expect(clean.hand.brain.plannedTack == tack, "\(tack): gybed in clean air")
+        }
+    }
 }

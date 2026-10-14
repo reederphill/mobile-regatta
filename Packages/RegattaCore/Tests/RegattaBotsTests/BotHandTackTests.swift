@@ -37,13 +37,13 @@ import Testing
     /// and kept theirs; the two laps, seed 462, again on #517, whose circle round a boat taking a penalty is every
     /// class's before a tack or gybe: it holds a turn off first 18.8 s before the gun, and others up the first beat, and
     /// with the circle off they kept their digest; in the start and the first beat, seed 459, no circle holds any turn
-    /// off, and they kept theirs; the two laps again on #523, whose gate pick range and exit tack are every class's: the start and the first beat reach no gate and kept theirs). On fleet-rules@6 since #517's default switch: the class is the test's subject, and on
+    /// off, and they kept theirs; the two laps again on #523, whose gate pick range and exit tack are every class's: the start and the first beat reach no gate and kept theirs; the two laps again on #525's step 1, whose traffic in the gate's pick, gybe out of dirty air and tap past a boat that owes her room are every class's: the start and the first beat kept theirs). On fleet-rules@6 since #517's default switch: the class is the test's subject, and on
     /// fleet-rules@7 the two laps have a 21.2 incident called as 16.1.
     @Test(.onSixRules) func skiffEightBotsAreBitIdentical() throws {
         let short = try Self.digest(seed: 459, boatClass: Self.skiffEight)
         let long = try Self.digest(seed: 462, boatClass: Self.skiffEight, seconds: 700)
         #expect(hex64(short) == "0x2f226740a8699d03")
-        #expect(hex64(long) == "0x92df68b4d1064722")
+        #expect(hex64(long) == "0xf802fb1dd21dc2b9")
     }
 
     // MARK: - skiff@8: tacks and gybes by hand

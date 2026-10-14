@@ -64,6 +64,10 @@ extension BotBrain {
     static let tapSpeedShare = 0.5
     /// Hull lengths, centre to centre, a boat must pass off her through a tack or gybe.
     static let tapClearance = 1.3
+    /// Hull lengths, centre to centre, a boat that owes her mark-room must pass off her through a tack or gybe (#525 H3):
+    /// it must keep clear of her, so the gybe at the gate may pass it close, where 1.3 refused the gybe and left her on the
+    /// wrong one. Set by hand (the prototype's value; not swept).
+    static let tapClearanceOwing = 0.6
     /// "Give a turning boat her circle" (#517): the radius of the water a boat taking a penalty is to her before a tack or
     /// gybe (`penaltyCircleRadius`), in diameters of a penalty turn. One: `OtherBoat` shows no rudder, so she can't see
     /// which way that boat turns, and a disc that far round her holds the circle on either side. Placeholder.
@@ -240,7 +244,7 @@ extension BotBrain {
     /// Whether a tack or gybe now leaves her clear of every boat, racing or before her start (rules 13 and 15, #280):
     /// sailing her wind angle on the other tack at `tapSpeedShare` of her speed for `tapLookahead` seconds
     /// (`tapOntoPortLookahead` for a boat on starboard when she goes onto port), no boat within `tapRange` comes inside
-    /// `tapClearance` hull lengths of her. Held off a tap before her start, she sails her own tack's groove meanwhile
+    /// `tapClearance` hull lengths of her (`tapClearanceOwing` for a boat that owes her mark-room, #525 H3). Held off a tap before her start, she sails her own tack's groove meanwhile
     /// (`sail`). OCS, her return is #99's: she runs back on her own tack, short of a gybe.
     ///
     /// "Tacks away from a boat alongside" (#263): a boat already inside the clearance, overlapped with her, is clear of
@@ -267,13 +271,15 @@ extension BotBrain {
         guard b.status == .racing || b.status == .prestart else { return true }
         let heading = 2 * b.windDirection - b.heading
         let speed = b.speed * Self.tapSpeedShare
-        let clear = view.boatClass.hull.length * tapClearanceLengths
+        let hull = view.boatClass.hull.length
         let ontoPort = b.tack == .starboard
         // Her track through the tap, sailed in her mind only once a boat is near enough to matter (the cautious bot's).
         var track: [Vec2]?
         return view.others.allSatisfy { other in
             let gap = (other.position - b.position).length
             guard !other.isGhost else { return true }
+            // "Gybe past a boat that owes her room" (#525 H3): it keeps clear of her, so it may pass this close.
+            let clear = hull * tapClearanceLengths(for: other, b, view)
             // Her circle, from as far off as her track reaches it; then the boat she is, as every other.
             if let radius = penaltyCircleRadius(of: other, b, view), gap <= Self.tapRange + radius + clear {
                 guard circleApproach(to: other, b, heading: heading) >= min(radius + clear, gap) else { return false }

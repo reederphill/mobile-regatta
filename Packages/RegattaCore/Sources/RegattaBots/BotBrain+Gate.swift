@@ -1,3 +1,4 @@
+import Foundation
 import RegattaCore
 
 // The leg to the leeward gate before she is through it (#518, from #510's prototype, variants P and R). On main she
@@ -12,6 +13,10 @@ import RegattaCore
 // Far and deep of her point (two gybes, away and back) the other mark is the cheaper by a gybe wherever the way to
 // it is no reach: with the default gate's points 31 m apart she then changes for it and gybes once, and gybes away
 // and back only for a pick she holds within `gateRepickMetres` (`BotGateTests.farAndDeepSheGybesAwayNotByTheLee`).
+//
+// #525 H1: the pick prices a crowded or shadowed mark (`gateTrafficMetres`), and on the rounding gybe in dirty air with
+// room to come back she gybes out of it once a leg; the traffic is blended over `gateTrafficSeconds` so the pick does
+// not follow the pack. H3 is the tap's (`tapClearanceOwing`).
 //
 // Every constant here was set by hand in #510 on 80 races (8 bots, 2 laps); none was swept beyond a step or two inside
 // the noise, but the pick's range (40 against 80 m) and the inset, which moved the overshoots clearly.
@@ -59,6 +64,25 @@ extension BotBrain {
     static let gateRecoverOutside = 8.0
     /// Metres above the line that point lies (#510 R, set by hand on 80 races).
     static let gateRecoverUp = 20.0
+
+    /// "Avoid the crowded mark" (#525 H1): metres from the line to a mark's point inside which a boat below her, on the
+    /// way, is in her road (`gateTrafficMetres`). Set by hand (the prototype's value; not swept).
+    static let gateTrafficNear = 25.0
+    /// Metres a boat on that line adds to a mark's cost, fading linearly to nothing at `gateTrafficNear` off it: about a
+    /// gybe and a half (`gateGybeMetres`, `gateMarkGybeMetres`), enough to flip a close pick and not a far one. Set by
+    /// hand (the prototype's value; not swept).
+    static let gateTrafficBoatMetres = 30.0
+    /// What the speed she loses in the wake and shadow along that line is worth, as metres per metre of line lost (four
+    /// samples of the ribbons at the time she would be there). Set by hand (the prototype's value; not swept).
+    static let gateTrafficShadowWeight = 1.5
+    /// Seconds of the time constant with which the traffic and wake on each mark's line is blended into her pick: boats
+    /// are read where they are now and sail on through the gate in a few seconds, and the pick must not follow every
+    /// one of them (unsmoothed, 70 of 128 roundings in a trace of 16 races changed their pick, against 8 on main; at 8 s 20, at 12 s 17, at
+    /// 15 s 13). Set by hand.
+    static let gateTrafficSeconds = 12.0
+    /// Metres from her point, at least, at which she gybes out of dirty air on the rounding gybe (#525 H1): room to come
+    /// back on its layline before `gateStraightRange`. Set by hand (the prototype's value; not swept).
+    static let gateShadowGybeMetres = 45.0
 
     /// Seconds after a gate's leg ends that the beat's first tack is held (#523), so a boat that never gets
     /// close-hauled (a refused luff) is not held to it for good.
@@ -113,6 +137,8 @@ extension BotBrain {
         /// Whether it lies beyond `gateStraightRange` and more than `gateDeepest` deeper than her groove, and she has
         /// not yet sailed straight for it (`gateCommitted`).
         var farDeep: Bool
+        /// Of `cost`, the metres of traffic and wake on the way to it (`gateTrafficMetres`).
+        var traffic: Double = 0
     }
 
     /// What rounding the gate's left or right mark is to her now. On the gybe that rounds it in one luff the cost is
@@ -133,7 +159,7 @@ extension BotBrain {
         // Once she has sailed straight for a mark's point she is no longer far and deep of it: she holds on.
         let committed = gateCommitted.map { $0.leg == b.legIndex && $0.left == left } ?? false
         let farDeep = !committed && to.length >= Self.gateStraightRange && aim.angle > down + Self.gateDeepest
-        let cost: Double
+        var cost: Double
         if b.tack == needs {
             // Far out and much deeper than her groove she gybes away and back for it rather than run by the lee.
             cost = !onOwn || farDeep ? length + 2 * Self.gateGybeMetres : length
@@ -144,8 +170,54 @@ extension BotBrain {
         } else {
             cost = length + Self.gateMarkGybeMetres
         }
+        let traffic = gateTrafficMetres(to: entry, gate, b, view)
+        cost += traffic
         return GateOption(cost: cost, entry: entry, distance: to.length, onOwn: onOwn, offWind: aim.angle, needs: needs,
-                          farDeep: farDeep)
+                          farDeep: farDeep, traffic: traffic)
+    }
+
+    /// "Avoid the crowded mark" (#525 H1): the metres the boats below her and their wake cost her on the way to `point`.
+    /// Each boat below her on the way, within `gateTrafficNear` of the line to it and not yet through the gate, blocks it
+    /// (`gateTrafficBoatMetres`, less the further off the line), as boats are where they are now; and the speed she loses
+    /// in the wake the ribbons leave along it at the time she gets there (`view.wake`), `gateTrafficShadowWeight` times.
+    /// Ghosts add nothing. Nothing in range: 0.
+    func gateTrafficMetres(to point: Vec2, _ gate: Gate, _ b: SeatView.OwnBoat, _ view: SeatView) -> Double {
+        let line = point - b.position
+        let length = line.length
+        guard length > 1, view.others.contains(where: { !$0.isGhost }) else { return 0 }
+        let up = view.course.upwind
+        let dir = line / length
+        var metres = 0.0
+        for other in view.others where !other.isGhost {
+            let rel = other.position - b.position
+            let along = rel.dot(dir)
+            // Below her, on the way to the point, and not already through the gate.
+            guard along > 0, along < length + 5, rel.dot(up) < 0, up.dot(other.position - gate.centre) > -3 else { continue }
+            let off = abs(rel.cross(dir))
+            if off < Self.gateTrafficNear { metres += Self.gateTrafficBoatMetres * (1 - off / Self.gateTrafficNear) }
+        }
+        let speed = max(b.speed, 1)
+        var lost = 0.0
+        for k in 1...4 {
+            let f = Double(k) / 4
+            let tick = TurbulenceRibbons.tick(after: length * f / speed, from: view.tick)
+            lost += (1 - view.wake.factor(at: b.position + line * f, tick: tick, receiver: view.seat)) * length / 4
+        }
+        return metres + Self.gateTrafficShadowWeight * lost
+    }
+
+    /// The traffic metres she prices on each mark's pick (#525 H1): `left` and `right` now, blended into the last leg's
+    /// with a time constant of `gateTrafficSeconds`; the first on a leg is as it is.
+    mutating func smoothedGateTraffic(_ left: Double, _ right: Double, _ b: SeatView.OwnBoat, _ view: SeatView)
+        -> (left: Double, right: Double) {
+        var smoothed = (leg: b.legIndex, left: left, right: right, time: view.time)
+        if let last = gateTraffic, last.leg == b.legIndex, view.time > last.time {
+            let share = 1 - exp(-(view.time - last.time) / Self.gateTrafficSeconds)
+            smoothed.left = last.left + (left - last.left) * share
+            smoothed.right = last.right + (right - last.right) * share
+        }
+        gateTraffic = smoothed
+        return (smoothed.left, smoothed.right)
     }
 
     /// What each of her gate's marks costs her now (`gateOption`), or nil when her leg rounds no gate.
@@ -197,7 +269,11 @@ extension BotBrain {
 
         let l = gateOption(left: true, gate, b, view), r = gateOption(left: false, gate, b, view)
         let held = gatePick.flatMap { $0.leg == b.legIndex ? $0.left : nil }
-        let picksLeft = Self.picksLeftGateMark(held: held, left: l.cost, right: r.cost)
+        // The traffic she prices is the boats' of the last `gateTrafficSeconds`, not of this tick: a boat that sails on
+        // through the gate leaves a crowded mark dear a while, so her pick does not flip back and forth with the pack.
+        let traffic = smoothedGateTraffic(l.traffic, r.traffic, b, view)
+        let picksLeft = Self.picksLeftGateMark(held: held, left: l.cost - l.traffic + traffic.left,
+                                               right: r.cost - r.traffic + traffic.right)
         gatePick = (b.legIndex, picksLeft)
         let mine = picksLeft ? l : r
         let down = grooveAngle(.downwind, b, view)
@@ -210,6 +286,12 @@ extension BotBrain {
                 return navigate(b, to: mine.entry, view)
             }
             guard deeper else { return navigate(b, to: mine.entry, view) }
+            // "Gybe out of dirty air, once" (#525 H1): in a shadow with room to come back, the other gybe, once a leg.
+            if b.shadow < Self.dirtyAir, mine.distance >= Self.gateShadowGybeMetres, gateShadowGybeLeg != b.legIndex {
+                gateShadowGybeLeg = b.legIndex
+                plannedTack = b.tack.other
+                return navigate(b, to: mine.entry, view)
+            }
             // She has sailed straight for this point: far and deep never reprices it.
             gateCommitted = (b.legIndex, picksLeft)
         } else {

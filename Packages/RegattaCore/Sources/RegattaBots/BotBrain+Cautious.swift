@@ -73,6 +73,13 @@ extension BotBrain {
     var keepClearLengths: Double { Self.keepClearDistance * clearanceScale }
     /// Hull lengths a boat must pass off her through a tack or gybe (`tapClearance`, scaled for a cautious bot).
     var tapClearanceLengths: Double { Self.tapClearance * clearanceScale }
+    /// Hull lengths `other` must pass off her through a tack or gybe (#525 H3): `tapClearanceOwing` when `other` owes her
+    /// mark-room now (`OwnBoat.markRoom` names her entitled and `other` owing), else `tapClearanceLengths`; scaled for a
+    /// cautious bot either way.
+    func tapClearanceLengths(for other: SeatView.OtherBoat, _ b: SeatView.OwnBoat, _ view: SeatView) -> Double {
+        let owes = b.markRoom.contains { $0.entitled == view.seat && $0.owing == other.seat }
+        return owes ? Self.tapClearanceOwing * clearanceScale : tapClearanceLengths
+    }
     /// Hull lengths inside which a turn of hers towards a boat keeping clear of her takes its room (`roomDistance`,
     /// scaled for a cautious bot).
     var roomLengths: Double { Self.roomDistance * clearanceScale }

@@ -194,6 +194,10 @@ struct BotBrain: Sendable {
     /// The gate mark whose point she has sailed straight for on the gybe that rounds it (`gateAim`), likewise: she is
     /// no longer far and deep of it.
     var gateCommitted: (leg: Int, left: Bool)?
+    /// The leg she has gybed out of dirty air on the rounding gybe (#525 H1, `gateAim`): once a leg.
+    var gateShadowGybeLeg: Int?
+    /// The traffic she prices on each of her gate's marks, smoothed over the leg (#525 H1, `smoothedGateTraffic`).
+    var gateTraffic: (leg: Int, left: Double, right: Double, time: Double)?
     /// Whether she is sailing back above a gate's line she fell below without going through it (`gateAim`).
     var gateRecovering = false
     /// The tack she starts the beat on after a gate, until she is close-hauled on it (#523, `updateGateExit`): the leg
