@@ -1,0 +1,260 @@
+-- all: 576 races
+  extra      base   31.246 branch   29.788 diff   -1.458 (paired SE 0.613, z -2.4)
+  pack       base  101.273 branch  101.671 diff   +0.398 (paired SE 2.617, z +0.2)
+  held       base    0.858 branch    0.859 diff   +0.002 (paired SE 0.005, z +0.4)
+  both       base    0.717 branch    0.918 diff   +0.201 (paired SE 0.018, z +11.2)
+  contacts   base    1.384 branch    1.373 diff   -0.010 (paired SE 0.050, z -0.2)
+  touches    base    0.026 branch    0.045 diff   +0.019 (paired SE 0.015, z +1.3)
+  calls      base    1.003 branch    0.990 diff   -0.014 (paired SE 0.030, z -0.5)
+  deepest    base    8.895 branch    8.510 diff   -0.385 (paired SE 0.118, z -3.3)
+  below      base   11.217 branch   11.314 diff   +0.097 (paired SE 0.217, z +0.4)
+  stillbelow base    0.042 branch    0.040 diff   -0.002 (paired SE 0.004, z -0.4)
+  rule 10    base 0.413 branch 0.382 diff -0.031
+  rule 11    base 0.160 branch 0.155 diff -0.005
+  rule 12    base 0.017 branch 0.021 diff +0.003
+  rule 13    base 0.049 branch 0.043 diff -0.005
+  rule 15    base 0.024 branch 0.035 diff +0.010
+  rule 16.1  base 0.122 branch 0.146 diff +0.024
+  rule 17    base 0.009 branch 0.002 diff -0.007
+  rule 18.2  base 0.026 branch 0.033 diff +0.007
+  rule 21.2  base 0.184 branch 0.174 diff -0.010
+-- seeds 1-8: 288 races
+  extra      base   32.378 branch   31.316 diff   -1.062 (paired SE 0.868, z -1.2)
+  pack       base  104.365 branch  107.242 diff   +2.877 (paired SE 3.577, z +0.8)
+  held       base    0.847 branch    0.847 diff   +0.000 (paired SE 0.007, z +0.0)
+  both       base    0.708 branch    0.927 diff   +0.219 (paired SE 0.026, z +8.5)
+  contacts   base    1.330 branch    1.299 diff   -0.031 (paired SE 0.064, z -0.5)
+  touches    base    0.038 branch    0.049 diff   +0.010 (paired SE 0.022, z +0.5)
+  calls      base    1.045 branch    0.972 diff   -0.073 (paired SE 0.041, z -1.8)
+  deepest    base    9.150 branch    8.517 diff   -0.634 (paired SE 0.181, z -3.5)
+  below      base   11.309 branch   11.175 diff   -0.135 (paired SE 0.308, z -0.4)
+  stillbelow base    0.045 branch    0.040 diff   -0.005 (paired SE 0.006, z -0.8)
+  rule 10    base 0.448 branch 0.396 diff -0.052
+  rule 11    base 0.142 branch 0.118 diff -0.024
+  rule 12    base 0.010 branch 0.017 diff +0.007
+  rule 13    base 0.062 branch 0.056 diff -0.007
+  rule 15    base 0.031 branch 0.035 diff +0.003
+  rule 16.1  base 0.122 branch 0.146 diff +0.024
+  rule 17    base 0.007 branch 0.000 diff -0.007
+  rule 18.2  base 0.031 branch 0.017 diff -0.014
+  rule 21.2  base 0.191 branch 0.188 diff -0.003
+-- seeds 9-16: 288 races
+  extra      base   30.115 branch   28.260 diff   -1.855 (paired SE 0.866, z -2.1)
+  pack       base   98.269 branch   96.258 diff   -2.011 (paired SE 3.813, z -0.5)
+  held       base    0.868 branch    0.872 diff   +0.003 (paired SE 0.006, z +0.6)
+  both       base    0.726 branch    0.910 diff   +0.184 (paired SE 0.025, z +7.4)
+  contacts   base    1.438 branch    1.448 diff   +0.010 (paired SE 0.077, z +0.1)
+  touches    base    0.014 branch    0.042 diff   +0.028 (paired SE 0.021, z +1.3)
+  calls      base    0.962 branch    1.007 diff   +0.045 (paired SE 0.043, z +1.0)
+  deepest    base    8.640 branch    8.504 diff   -0.136 (paired SE 0.151, z -0.9)
+  below      base   11.125 branch   11.453 diff   +0.329 (paired SE 0.307, z +1.1)
+  stillbelow base    0.039 branch    0.040 diff   +0.001 (paired SE 0.006, z +0.2)
+  rule 10    base 0.378 branch 0.368 diff -0.010
+  rule 11    base 0.177 branch 0.191 diff +0.014
+  rule 12    base 0.024 branch 0.024 diff +0.000
+  rule 13    base 0.035 branch 0.031 diff -0.003
+  rule 15    base 0.017 branch 0.035 diff +0.017
+  rule 16.1  base 0.122 branch 0.146 diff +0.024
+  rule 17    base 0.010 branch 0.003 diff -0.007
+  rule 18.2  base 0.021 branch 0.049 diff +0.028
+  rule 21.2  base 0.177 branch 0.160 diff -0.017
+-- size 4: 192 races
+  extra      base   27.412 branch   26.923 diff   -0.488 (paired SE 1.083, z -0.5)
+  pack       base   61.941 branch   65.722 diff   +3.781 (paired SE 4.409, z +0.9)
+  held       base    0.755 branch    0.750 diff   -0.005 (paired SE 0.009, z -0.6)
+  both       base    0.599 branch    0.818 diff   +0.219 (paired SE 0.033, z +6.6)
+  contacts   base    0.797 branch    0.714 diff   -0.083 (paired SE 0.077, z -1.1)
+  touches    base    0.000 branch    0.052 diff   +0.052 (paired SE 0.023, z +2.3)
+  calls      base    0.479 branch    0.469 diff   -0.010 (paired SE 0.035, z -0.3)
+  deepest    base    8.803 branch    8.784 diff   -0.019 (paired SE 0.221, z -0.1)
+  below      base   10.917 branch   11.480 diff   +0.563 (paired SE 0.377, z +1.5)
+  stillbelow base    0.034 branch    0.043 diff   +0.009 (paired SE 0.007, z +1.4)
+  rule 10    base 0.203 branch 0.188 diff -0.016
+  rule 11    base 0.073 branch 0.057 diff -0.016
+  rule 12    base 0.000 branch 0.021 diff +0.021
+  rule 13    base 0.026 branch 0.021 diff -0.005
+  rule 15    base 0.016 branch 0.016 diff +0.000
+  rule 16.1  base 0.057 branch 0.068 diff +0.010
+  rule 17    base 0.000 branch 0.005 diff +0.005
+  rule 18.2  base 0.005 branch 0.016 diff +0.010
+  rule 21.2  base 0.099 branch 0.078 diff -0.021
+-- size 5: 192 races
+  extra      base   31.305 branch   30.989 diff   -0.316 (paired SE 1.046, z -0.3)
+  pack       base   95.839 branch   99.653 diff   +3.814 (paired SE 4.480, z +0.9)
+  held       base    0.885 branch    0.891 diff   +0.005 (paired SE 0.005, z +1.0)
+  both       base    0.719 branch    0.943 diff   +0.224 (paired SE 0.032, z +7.0)
+  contacts   base    1.359 branch    1.448 diff   +0.089 (paired SE 0.078, z +1.1)
+  touches    base    0.021 branch    0.042 diff   +0.021 (paired SE 0.028, z +0.8)
+  calls      base    1.089 branch    1.042 diff   -0.047 (paired SE 0.058, z -0.8)
+  deepest    base    8.773 branch    8.420 diff   -0.352 (paired SE 0.196, z -1.8)
+  below      base   10.985 branch   11.552 diff   +0.568 (paired SE 0.376, z +1.5)
+  stillbelow base    0.046 branch    0.032 diff   -0.014 (paired SE 0.007, z -2.0)
+  rule 10    base 0.417 branch 0.422 diff +0.005
+  rule 11    base 0.203 branch 0.172 diff -0.031
+  rule 12    base 0.016 branch 0.021 diff +0.005
+  rule 13    base 0.052 branch 0.052 diff +0.000
+  rule 15    base 0.042 branch 0.036 diff -0.005
+  rule 16.1  base 0.125 branch 0.120 diff -0.005
+  rule 17    base 0.016 branch 0.000 diff -0.016
+  rule 18.2  base 0.031 branch 0.036 diff +0.005
+  rule 21.2  base 0.188 branch 0.182 diff -0.005
+-- size 6: 192 races
+  extra      base   35.022 branch   31.452 diff   -3.570 (paired SE 1.043, z -3.4)
+  pack       base  138.061 branch  132.480 diff   -5.582 (paired SE 4.598, z -1.2)
+  held       base    0.932 branch    0.938 diff   +0.005 (paired SE 0.009, z +0.6)
+  both       base    0.833 branch    0.995 diff   +0.161 (paired SE 0.028, z +5.8)
+  contacts   base    1.995 branch    1.958 diff   -0.036 (paired SE 0.102, z -0.4)
+  touches    base    0.057 branch    0.042 diff   -0.016 (paired SE 0.028, z -0.6)
+  calls      base    1.443 branch    1.458 diff   +0.016 (paired SE 0.059, z +0.3)
+  deepest    base    9.109 branch    8.326 diff   -0.783 (paired SE 0.194, z -4.0)
+  below      base   11.749 branch   10.909 diff   -0.840 (paired SE 0.370, z -2.3)
+  stillbelow base    0.046 branch    0.045 diff   -0.001 (paired SE 0.008, z -0.1)
+  rule 10    base 0.620 branch 0.536 diff -0.083
+  rule 11    base 0.203 branch 0.234 diff +0.031
+  rule 12    base 0.036 branch 0.021 diff -0.016
+  rule 13    base 0.068 branch 0.057 diff -0.010
+  rule 15    base 0.016 branch 0.052 diff +0.036
+  rule 16.1  base 0.182 branch 0.250 diff +0.068
+  rule 17    base 0.010 branch 0.000 diff -0.010
+  rule 18.2  base 0.042 branch 0.047 diff +0.005
+  rule 21.2  base 0.266 branch 0.260 diff -0.005
+-- offset -6: 192 races
+  extra      base   29.181 branch   27.220 diff   -1.961 (paired SE 1.016, z -1.9)
+  pack       base   88.882 branch   84.356 diff   -4.526 (paired SE 4.640, z -1.0)
+  held       base    0.844 branch    0.839 diff   -0.005 (paired SE 0.005, z -1.0)
+  both       base    0.693 branch    0.906 diff   +0.214 (paired SE 0.035, z +6.1)
+  contacts   base    1.198 branch    1.182 diff   -0.016 (paired SE 0.073, z -0.2)
+  touches    base    0.042 branch    0.000 diff   -0.042 (paired SE 0.019, z -2.2)
+  calls      base    0.990 branch    1.000 diff   +0.010 (paired SE 0.055, z +0.2)
+  deepest    base    8.861 branch    8.581 diff   -0.280 (paired SE 0.191, z -1.5)
+  below      base   11.052 branch   10.870 diff   -0.182 (paired SE 0.355, z -0.5)
+  stillbelow base    0.040 branch    0.046 diff   +0.006 (paired SE 0.007, z +0.8)
+  rule 10    base 0.354 branch 0.328 diff -0.026
+  rule 11    base 0.167 branch 0.177 diff +0.010
+  rule 12    base 0.031 branch 0.016 diff -0.016
+  rule 13    base 0.021 branch 0.031 diff +0.010
+  rule 15    base 0.036 branch 0.052 diff +0.016
+  rule 16.1  base 0.135 branch 0.156 diff +0.021
+  rule 17    base 0.016 branch 0.005 diff -0.010
+  rule 18.2  base 0.016 branch 0.031 diff +0.016
+  rule 21.2  base 0.214 branch 0.203 diff -0.010
+-- offset 0: 192 races
+  extra      base   33.078 branch   32.989 diff   -0.089 (paired SE 1.116, z -0.1)
+  pack       base  115.268 branch  119.873 diff   +4.606 (paired SE 4.483, z +1.0)
+  held       base    0.885 branch    0.891 diff   +0.005 (paired SE 0.005, z +1.0)
+  both       base    0.880 branch    0.958 diff   +0.078 (paired SE 0.019, z +4.0)
+  contacts   base    1.380 branch    1.552 diff   +0.172 (paired SE 0.086, z +2.0)
+  touches    base    0.000 branch    0.073 diff   +0.073 (paired SE 0.031, z +2.4)
+  calls      base    0.969 branch    1.021 diff   +0.052 (paired SE 0.045, z +1.1)
+  deepest    base    8.567 branch    8.127 diff   -0.441 (paired SE 0.219, z -2.0)
+  below      base   10.687 branch   11.358 diff   +0.670 (paired SE 0.387, z +1.7)
+  stillbelow base    0.034 branch    0.036 diff   +0.002 (paired SE 0.007, z +0.3)
+  rule 10    base 0.469 branch 0.464 diff -0.005
+  rule 11    base 0.109 branch 0.135 diff +0.026
+  rule 12    base 0.016 branch 0.031 diff +0.016
+  rule 13    base 0.062 branch 0.062 diff +0.000
+  rule 15    base 0.026 branch 0.042 diff +0.016
+  rule 16.1  base 0.094 branch 0.109 diff +0.016
+  rule 17    base 0.005 branch 0.000 diff -0.005
+  rule 18.2  base 0.036 branch 0.026 diff -0.010
+  rule 21.2  base 0.151 branch 0.151 diff +0.000
+-- offset 6: 192 races
+  extra      base   31.480 branch   29.155 diff   -2.325 (paired SE 1.047, z -2.2)
+  pack       base   98.873 branch   99.756 diff   +0.883 (paired SE 4.470, z +0.2)
+  held       base    0.844 branch    0.849 diff   +0.005 (paired SE 0.012, z +0.4)
+  both       base    0.578 branch    0.891 diff   +0.312 (paired SE 0.034, z +9.1)
+  contacts   base    1.573 branch    1.385 diff   -0.188 (paired SE 0.097, z -1.9)
+  touches    base    0.036 branch    0.062 diff   +0.026 (paired SE 0.027, z +1.0)
+  calls      base    1.052 branch    0.948 diff   -0.104 (paired SE 0.055, z -1.9)
+  deepest    base    9.256 branch    8.823 diff   -0.433 (paired SE 0.205, z -2.1)
+  below      base   11.912 branch   11.715 diff   -0.198 (paired SE 0.385, z -0.5)
+  stillbelow base    0.052 branch    0.039 diff   -0.013 (paired SE 0.007, z -1.8)
+  rule 10    base 0.417 branch 0.354 diff -0.062
+  rule 11    base 0.203 branch 0.151 diff -0.052
+  rule 12    base 0.005 branch 0.016 diff +0.010
+  rule 13    base 0.062 branch 0.036 diff -0.026
+  rule 15    base 0.010 branch 0.010 diff +0.000
+  rule 16.1  base 0.135 branch 0.172 diff +0.036
+  rule 17    base 0.005 branch 0.000 diff -0.005
+  rule 18.2  base 0.026 branch 0.042 diff +0.016
+  rule 21.2  base 0.188 branch 0.167 diff -0.021
+-- gybes same: 288 races
+  extra      base   30.434 branch   29.224 diff   -1.210 (paired SE 0.948, z -1.3)
+  pack       base   95.212 branch  100.077 diff   +4.865 (paired SE 4.032, z +1.2)
+  held       base    0.878 branch    0.872 diff   -0.007 (paired SE 0.007, z -1.0)
+  both       base    0.635 branch    0.906 diff   +0.271 (paired SE 0.027, z +10.0)
+  contacts   base    1.177 branch    1.146 diff   -0.031 (paired SE 0.073, z -0.4)
+  touches    base    0.031 branch    0.035 diff   +0.003 (paired SE 0.022, z +0.2)
+  calls      base    0.788 branch    0.771 diff   -0.017 (paired SE 0.040, z -0.4)
+  deepest    base    9.074 branch    8.601 diff   -0.473 (paired SE 0.172, z -2.7)
+  below      base   11.262 branch   11.536 diff   +0.274 (paired SE 0.332, z +0.8)
+  stillbelow base    0.048 branch    0.045 diff   -0.004 (paired SE 0.006, z -0.6)
+  rule 10    base 0.215 branch 0.191 diff -0.024
+  rule 11    base 0.181 branch 0.163 diff -0.017
+  rule 12    base 0.021 branch 0.021 diff +0.000
+  rule 13    base 0.021 branch 0.028 diff +0.007
+  rule 15    base 0.014 branch 0.031 diff +0.017
+  rule 16.1  base 0.094 branch 0.122 diff +0.028
+  rule 17    base 0.014 branch 0.000 diff -0.014
+  rule 18.2  base 0.028 branch 0.024 diff -0.003
+  rule 21.2  base 0.201 branch 0.191 diff -0.010
+-- gybes mixed: 288 races
+  extra      base   32.059 branch   30.352 diff   -1.707 (paired SE 0.777, z -2.2)
+  pack       base  107.560 branch  103.325 diff   -4.235 (paired SE 3.288, z -1.3)
+  held       base    0.837 branch    0.847 diff   +0.010 (paired SE 0.006, z +1.7)
+  both       base    0.799 branch    0.931 diff   +0.132 (paired SE 0.023, z +5.8)
+  contacts   base    1.590 branch    1.601 diff   +0.010 (paired SE 0.069, z +0.2)
+  touches    base    0.021 branch    0.056 diff   +0.035 (paired SE 0.021, z +1.6)
+  calls      base    1.219 branch    1.208 diff   -0.010 (paired SE 0.045, z -0.2)
+  deepest    base    8.715 branch    8.419 diff   -0.296 (paired SE 0.162, z -1.8)
+  below      base   11.172 branch   11.092 diff   -0.081 (paired SE 0.281, z -0.3)
+  stillbelow base    0.035 branch    0.036 diff   +0.000 (paired SE 0.006, z +0.1)
+  rule 10    base 0.611 branch 0.573 diff -0.038
+  rule 11    base 0.139 branch 0.146 diff +0.007
+  rule 12    base 0.014 branch 0.021 diff +0.007
+  rule 13    base 0.076 branch 0.059 diff -0.017
+  rule 15    base 0.035 branch 0.038 diff +0.003
+  rule 16.1  base 0.149 branch 0.170 diff +0.021
+  rule 17    base 0.003 branch 0.003 diff +0.000
+  rule 18.2  base 0.024 branch 0.042 diff +0.017
+  rule 21.2  base 0.167 branch 0.156 diff -0.010
+-- current True: 288 races
+  extra      base   30.986 branch   28.783 diff   -2.203 (paired SE 0.762, z -2.9)
+  pack       base   95.571 branch   92.166 diff   -3.405 (paired SE 2.826, z -1.2)
+  held       base    0.812 branch    0.819 diff   +0.007 (paired SE 0.007, z +1.0)
+  both       base    0.719 branch    0.903 diff   +0.184 (paired SE 0.025, z +7.4)
+  contacts   base    1.219 branch    1.160 diff   -0.059 (paired SE 0.062, z -1.0)
+  touches    base    0.042 branch    0.049 diff   +0.007 (paired SE 0.024, z +0.3)
+  calls      base    0.927 branch    0.878 diff   -0.049 (paired SE 0.038, z -1.3)
+  deepest    base    8.984 branch    8.899 diff   -0.085 (paired SE 0.172, z -0.5)
+  below      base   11.085 branch   11.194 diff   +0.108 (paired SE 0.277, z +0.4)
+  stillbelow base    0.068 branch    0.065 diff   -0.004 (paired SE 0.007, z -0.5)
+  rule 10    base 0.361 branch 0.306 diff -0.056
+  rule 11    base 0.149 branch 0.125 diff -0.024
+  rule 12    base 0.024 branch 0.014 diff -0.010
+  rule 13    base 0.056 branch 0.049 diff -0.007
+  rule 15    base 0.024 branch 0.038 diff +0.014
+  rule 16.1  base 0.128 branch 0.160 diff +0.031
+  rule 17    base 0.003 branch 0.003 diff +0.000
+  rule 18.2  base 0.014 branch 0.024 diff +0.010
+  rule 21.2  base 0.167 branch 0.160 diff -0.007
+-- current False: 288 races
+  extra      base   31.506 branch   30.793 diff   -0.713 (paired SE 0.959, z -0.7)
+  pack       base  106.423 branch  110.256 diff   +3.833 (paired SE 4.270, z +0.9)
+  held       base    0.903 branch    0.899 diff   -0.003 (paired SE 0.006, z -0.6)
+  both       base    0.715 branch    0.934 diff   +0.219 (paired SE 0.026, z +8.5)
+  contacts   base    1.549 branch    1.587 diff   +0.038 (paired SE 0.078, z +0.5)
+  touches    base    0.010 branch    0.042 diff   +0.031 (paired SE 0.019, z +1.6)
+  calls      base    1.080 branch    1.101 diff   +0.021 (paired SE 0.046, z +0.4)
+  deepest    base    8.806 branch    8.121 diff   -0.684 (paired SE 0.161, z -4.3)
+  below      base   11.349 branch   11.434 diff   +0.085 (paired SE 0.336, z +0.3)
+  stillbelow base    0.015 branch    0.016 diff   +0.000 (paired SE 0.004, z +0.1)
+  rule 10    base 0.465 branch 0.458 diff -0.007
+  rule 11    base 0.170 branch 0.184 diff +0.014
+  rule 12    base 0.010 branch 0.028 diff +0.017
+  rule 13    base 0.042 branch 0.038 diff -0.003
+  rule 15    base 0.024 branch 0.031 diff +0.007
+  rule 16.1  base 0.115 branch 0.132 diff +0.017
+  rule 17    base 0.014 branch 0.000 diff -0.014
+  rule 18.2  base 0.038 branch 0.042 diff +0.003
+  rule 21.2  base 0.201 branch 0.188 diff -0.014

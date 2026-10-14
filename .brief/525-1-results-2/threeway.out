@@ -1,0 +1,96 @@
+### pack: 576 races
+metric | base | r1 | head | head-base (paired SE, z) | head-r1 (z) | 18.2/11/12 counts
+contacts/race | 0.936 | 0.927 | 0.939 | +0.003 (0.027, +0.1) | +0.012 (+0.4) | 539/534/541
+calls/race | 0.672 | 0.661 | 0.661 | -0.010 (0.020, -0.5) | +0.000 (+0.0) | 387/381/381
+rule 10/race | 0.236 | 0.227 | 0.229 | -0.007 (0.013, -0.5) | +0.002 (+0.1) | 136/131/132
+rule 11/race | 0.071 | 0.069 | 0.073 | +0.002 (0.006, +0.3) | +0.003 (+0.6) | 41/40/42
+rule 12/race | 0.003 | 0.009 | 0.003 | +0.000 (0.002, +0.0) | -0.005 (-1.3) | 2/5/2
+rule 18.2/race | 0.007 | 0.010 | 0.003 | -0.003 (0.004, -0.8) | -0.007 (-1.6) | 4/6/2
+-- all boats
+   base  n=2874 extra 33.5 deepest 9.36 p90 17.4 still 105 (3.7%) overshoot 163
+   r1    n=2873 extra 30.3 deepest 10.61 p90 22.4 still 139 (4.8%) overshoot 148
+   head  n=2873 extra 30.5 deepest 8.74 p90 15.7 still 84 (2.9%) overshoot 141
+-- kept base mark
+   base  n=2874 extra 33.5 deepest 9.36 p90 17.4 still 105 (3.7%) overshoot 163
+   r1    n=2257 extra 28.6 deepest 9.02 p90 16.7 still 78 (3.5%) overshoot 91
+   head  n=2221 extra 26.6 deepest 8.47 p90 14.4 still 69 (3.1%) overshoot 62
+-- switched from base mark
+   base  n=0
+   r1    n=616 extra 36.7 deepest 16.45 p90 31.3 still 61 (9.9%) overshoot 57
+   head  n=652 extra 43.4 deepest 9.66 p90 18.9 still 15 (2.3%) overshoot 79
+-- offset +-6, rounded the mark under the pack (near)
+   base  n=1533 extra 30.6 deepest 9.90 p90 18.7 still 69 (4.5%) overshoot 71
+   r1    n=1242 extra 26.8 deepest 9.82 p90 18.2 still 60 (4.8%) overshoot 50
+   head  n=1280 extra 25.1 deepest 9.05 p90 16.4 still 51 (4.0%) overshoot 28
+-- offset +-6, rounded the far mark
+   base  n=383 extra 45.8 deepest 8.46 p90 13.9 still 4 (1.0%) overshoot 48
+   r1    n=673 extra 33.4 deepest 13.05 p90 28.1 still 47 (7.0%) overshoot 45
+   head  n=636 extra 38.2 deepest 8.92 p90 17.0 still 12 (1.9%) overshoot 67
+-- offset 0
+   base  n=958 extra 33.2 deepest 8.85 p90 16.3 still 32 (3.3%) overshoot 44
+   r1    n=958 extra 32.9 deepest 9.93 p90 20.5 still 32 (3.3%) overshoot 53
+   head  n=957 extra 32.4 deepest 8.19 p90 13.8 still 21 (2.2%) overshoot 46
+### pack6: 192 races
+metric | base | r1 | head | head-base (paired SE, z) | head-r1 (z) | 18.2/11/12 counts
+contacts/race | 1.411 | 1.458 | 1.516 | +0.104 (0.062, +1.7) | +0.057 (+0.9) | 271/280/291
+calls/race | 1.000 | 1.026 | 1.057 | +0.057 (0.044, +1.3) | +0.031 (+0.7) | 192/197/203
+rule 10/race | 0.328 | 0.333 | 0.359 | +0.031 (0.029, +1.1) | +0.026 (+0.9) | 63/64/69
+rule 11/race | 0.089 | 0.078 | 0.094 | +0.005 (0.016, +0.3) | +0.016 (+1.1) | 17/15/18
+rule 12/race | 0.000 | 0.010 | 0.000 | +0.000 (0.000, +0.0) | -0.010 (-1.4) | 0/2/0
+rule 18.2/race | 0.016 | 0.026 | 0.010 | -0.005 (0.012, -0.4) | -0.016 (-1.3) | 3/5/2
+-- all boats
+   base  n=1152 extra 36.9 deepest 9.26 p90 17.4 still 48 (4.2%) overshoot 69
+   r1    n=1151 extra 33.2 deepest 10.79 p90 22.6 still 73 (6.3%) overshoot 56
+   head  n=1151 extra 33.2 deepest 8.73 p90 16.0 still 43 (3.7%) overshoot 54
+-- kept base mark
+   base  n=1152 extra 36.9 deepest 9.26 p90 17.4 still 48 (4.2%) overshoot 69
+   r1    n=870 extra 32.1 deepest 9.06 p90 17.0 still 41 (4.7%) overshoot 31
+   head  n=852 extra 30.3 deepest 8.45 p90 14.1 still 32 (3.8%) overshoot 25
+-- switched from base mark
+   base  n=0
+   r1    n=281 extra 36.5 deepest 16.15 p90 31.3 still 32 (11.4%) overshoot 25
+   head  n=299 extra 41.5 deepest 9.52 p90 19.3 still 11 (3.7%) overshoot 29
+-- offset +-6, rounded the mark under the pack (near)
+   base  n=592 extra 34.2 deepest 9.90 p90 19.8 still 32 (5.4%) overshoot 28
+   r1    n=473 extra 30.3 deepest 9.88 p90 19.1 still 33 (7.0%) overshoot 17
+   head  n=476 extra 28.1 deepest 8.92 p90 16.3 still 24 (5.0%) overshoot 11
+-- offset +-6, rounded the far mark
+   base  n=176 extra 46.8 deepest 8.39 p90 13.3 still 3 (1.7%) overshoot 23
+   r1    n=294 extra 33.7 deepest 12.59 p90 27.2 still 21 (7.1%) overshoot 20
+   head  n=292 extra 39.1 deepest 9.08 p90 17.3 still 8 (2.7%) overshoot 28
+-- offset 0
+   base  n=384 extra 36.6 deepest 8.68 p90 15.5 still 13 (3.4%) overshoot 18
+   r1    n=384 extra 36.3 deepest 10.54 p90 22.3 still 19 (4.9%) overshoot 19
+   head  n=383 extra 35.1 deepest 8.22 p90 13.9 still 11 (2.9%) overshoot 15
+### packmixed: 576 races
+metric | base | r1 | head | head-base (paired SE, z) | head-r1 (z) | 18.2/11/12 counts
+contacts/race | 1.384 | 1.394 | 1.373 | -0.010 (0.050, -0.2) | -0.021 (-0.4) | 797/803/791
+calls/race | 1.003 | 0.991 | 0.990 | -0.014 (0.030, -0.5) | -0.002 (-0.1) | 578/571/570
+rule 10/race | 0.413 | 0.396 | 0.382 | -0.031 (0.021, -1.5) | -0.014 (-0.7) | 238/228/220
+rule 11/race | 0.160 | 0.163 | 0.155 | -0.005 (0.013, -0.4) | -0.009 (-0.6) | 92/94/89
+rule 12/race | 0.017 | 0.023 | 0.021 | +0.003 (0.008, +0.4) | -0.002 (-0.2) | 10/13/12
+rule 18.2/race | 0.026 | 0.035 | 0.033 | +0.007 (0.010, +0.7) | -0.002 (-0.2) | 15/20/19
+-- all boats
+   base  n=2874 extra 31.8 deepest 8.91 p90 16.2 still 123 (4.3%) overshoot 129
+   r1    n=2873 extra 30.2 deepest 9.85 p90 19.3 still 154 (5.4%) overshoot 121
+   head  n=2871 extra 30.1 deepest 8.47 p90 14.5 still 116 (4.0%) overshoot 132
+-- kept base mark
+   base  n=2874 extra 31.8 deepest 8.91 p90 16.2 still 123 (4.3%) overshoot 129
+   r1    n=2192 extra 27.8 deepest 8.89 p90 16.3 still 96 (4.4%) overshoot 74
+   head  n=2196 extra 26.4 deepest 8.40 p90 13.9 still 96 (4.4%) overshoot 49
+-- switched from base mark
+   base  n=0
+   r1    n=681 extra 37.7 deepest 12.94 p90 25.8 still 58 (8.5%) overshoot 47
+   head  n=675 extra 42.3 deepest 8.71 p90 16.1 still 20 (3.0%) overshoot 83
+-- offset +-6, rounded the mark under the pack (near)
+   base  n=1465 extra 29.4 deepest 9.45 p90 17.2 still 80 (5.5%) overshoot 58
+   r1    n=1200 extra 26.6 deepest 9.86 p90 17.8 still 69 (5.8%) overshoot 43
+   head  n=1237 extra 24.5 deepest 8.81 p90 15.5 still 65 (5.3%) overshoot 19
+-- offset +-6, rounded the far mark
+   base  n=451 extra 35.5 deepest 7.84 p90 12.0 still 10 (2.2%) overshoot 30
+   r1    n=715 extra 31.9 deepest 10.40 p90 21.3 still 50 (7.0%) overshoot 33
+   head  n=678 extra 35.5 deepest 8.40 p90 14.7 still 18 (2.7%) overshoot 59
+-- offset 0
+   base  n=958 extra 33.7 deepest 8.59 p90 15.6 still 33 (3.4%) overshoot 41
+   r1    n=958 extra 33.3 deepest 9.44 p90 18.7 still 35 (3.7%) overshoot 45
+   head  n=956 extra 33.6 deepest 8.09 p90 12.6 still 33 (3.5%) overshoot 54

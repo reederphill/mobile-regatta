@@ -1,0 +1,148 @@
+1 races, 8 boats, 0 capped
+club: 2/4 finished, irons 0.14 s/boat, marks 0.00/boat, contacts 6 (1.00 fouls), encounters 52 (0.135 fouls; pre-start 4/33, racing 3/19), edge 0.00 s/boat, dsq 0, ocs 2
+  club calls: 10 1, 11 2; called before the first rounding 0.50 of boats; tacks racing 10.8/boat
+  club calls pre-start: 10 1; cascade (owing a turn already): none
+  club DNFs 2 by metres to go: <=60 m 0, <=150 m 1, <=300 m 1, >300 m 0; on the last leg 2, called at least once 1
+regional: 3/3 finished, irons 0.00 s/boat, marks 0.00/boat, contacts 1 (1.00 fouls), encounters 34 (0.059 fouls; pre-start 1/23, racing 1/11), edge 0.00 s/boat, dsq 0, ocs 0
+  regional calls: 16.1 1; called before the first rounding 0.33 of boats; tacks racing 7.3/boat
+  regional calls pre-start: none; cascade (owing a turn already): none
+national: 1/1 finished, irons 0.00 s/boat, marks 0.00/boat, contacts 1 (1.00 fouls), encounters 18 (0.056 fouls; pre-start 1/12, racing 0/6), edge 0.00 s/boat, dsq 0, ocs 0
+  national calls: 10 1; called before the first rounding 1.00 of boats; tacks racing 9.0/boat
+  national calls pre-start: 10 1; cascade (owing a turn already): none
+live places by tactics skill and handling skill (mean place, finished/seats):
+  by skill: club 5.0 (2/4), regional 3.0 (3/3), national 2.0 (1/1)
+  by handling: club 4.0 (1/3), regional 4.5 (2/2), national 2.7 (3/3)
+  skill club, by handling: club 4.0 (1/3), regional 6.0 (1/1), national -
+  skill regional, by handling: club -, regional 3.0 (1/1), national 3.0 (2/2)
+  skill national, by handling: club -, regional -, national 2.0 (1/1)
+engagement mild: 2 live seat-races, per seat-race lee-bows 0.000, tacks on wind 0.000, covers 0.000, pre-start luffing 0.00 s, fouls 1.000, pre-start calls 0.000
+engagement middle: 3 live seat-races, per seat-race lee-bows 0.000, tacks on wind 0.000, covers 0.000, pre-start luffing 0.00 s, fouls 0.667, pre-start calls 0.667
+engagement combative: 3 live seat-races, per seat-race lee-bows 0.000, tacks on wind 0.000, covers 0.000, pre-start luffing 0.00 s, fouls 0.333, pre-start calls 0.000
+tick: worst p99 0.120 ms, max 3.988 ms (budget 5.000 ms)
+placeholder keys: 26
+gate: FAIL
+  club: finish share 0.50 < 0.75
+diagnose: 1 races; starts by tier (on time is within 3 s of the gun):
+  tier      boats  on time  > 5 s  > 10 s  never  mean start s
+  all           8    0.250  0.750   0.500      0         14.27
+  club          4    0.250  0.750   0.750      0         20.90
+  regional      3    0.333  0.667   0.333      0          8.44
+  national      1    0.000  1.000   0.000      0          5.23
+late starters, more than 5 s after the gun or never, by primary cause: per 1000 boats (mean start s)
+  cause                                         all          club      regional      national
+  penalty turn before the start        375.0 (11.9)  250.0 (14.2)  333.3 (16.2)  1000.0 (5.2)
+  OCS and returning                    250.0 (33.6)  500.0 (33.6)       0.0 (-)       0.0 (-)
+  in irons                                  0.0 (-)       0.0 (-)       0.0 (-)       0.0 (-)
+  couldn't fetch the pin on starboard       0.0 (-)       0.0 (-)       0.0 (-)       0.0 (-)
+  on port inside 20 s                   125.0 (8.2)       0.0 (-)   333.3 (8.2)       0.0 (-)
+  tacking/gybing late                       0.0 (-)       0.0 (-)       0.0 (-)       0.0 (-)
+  keeping clear / held up                   0.0 (-)       0.0 (-)       0.0 (-)       0.0 (-)
+  slow acceleration                         0.0 (-)       0.0 (-)       0.0 (-)       0.0 (-)
+  too far from the line at the gun          0.0 (-)       0.0 (-)       0.0 (-)       0.0 (-)
+  other                                     0.0 (-)       0.0 (-)       0.0 (-)       0.0 (-)
+  all                                  750.0 (18.5)  750.0 (27.2)  666.7 (12.2)  1000.0 (5.2)
+late starters, more than 10 s after the gun or never, by primary cause: per 1000 boats (mean start s)
+  cause                                         all          club      regional  national
+  penalty turn before the start        250.0 (15.2)  250.0 (14.2)  333.3 (16.2)   0.0 (-)
+  OCS and returning                    250.0 (33.6)  500.0 (33.6)       0.0 (-)   0.0 (-)
+  in irons                                  0.0 (-)       0.0 (-)       0.0 (-)   0.0 (-)
+  couldn't fetch the pin on starboard       0.0 (-)       0.0 (-)       0.0 (-)   0.0 (-)
+  on port inside 20 s                       0.0 (-)       0.0 (-)       0.0 (-)   0.0 (-)
+  tacking/gybing late                       0.0 (-)       0.0 (-)       0.0 (-)   0.0 (-)
+  keeping clear / held up                   0.0 (-)       0.0 (-)       0.0 (-)   0.0 (-)
+  slow acceleration                         0.0 (-)       0.0 (-)       0.0 (-)   0.0 (-)
+  too far from the line at the gun          0.0 (-)       0.0 (-)       0.0 (-)   0.0 (-)
+  other                                     0.0 (-)       0.0 (-)       0.0 (-)   0.0 (-)
+  all                                  500.0 (24.4)  750.0 (27.2)  333.3 (16.2)   0.0 (-)
+penalty episodes; timings are median / p90 seconds over the served one-turn episodes (n): call to 30° in (the first crossing under tackAndGybe), turning, served to 90 % of target speed, total; then every served episode's seconds a turn
+              episodes  n  call to 30°      turning   recovering        total     s a turn
+  all                5  5  12.3 / 18.1   6.0 / 18.1  27.8 / 45.7  34.4 / 78.2  18.3 / 32.5
+  pre-start          3  3  12.3 / 14.4   6.0 / 18.1  18.3 / 45.7  32.3 / 78.2  18.3 / 32.5
+  first beat         1  1  18.1 / 18.1    6.8 / 6.8  37.5 / 37.5  62.3 / 62.3  24.9 / 24.9
+  later legs         1  1    1.9 / 1.9    4.7 / 4.7  27.8 / 27.8  34.4 / 34.4    6.6 / 6.6
+  last leg           0  0            -            -            -            -            -
+  club               3  3   8.1 / 18.1    5.7 / 6.8  27.8 / 37.5  34.4 / 62.3  13.8 / 24.9
+  regional           1  1  14.4 / 14.4  18.1 / 18.1  45.7 / 45.7  78.2 / 78.2  32.5 / 32.5
+  national           1  1  12.3 / 12.3    6.0 / 6.0  14.0 / 14.0  32.3 / 32.3  18.3 / 18.3
+started turns given up, an episode, by cause; recrosses and rounding voids (tackAndGybe) and calls on a boat turning, an episode; episodes of 2+ calls; turns served with more than 30 s gone; episodes ending in a DSQ, and owed at the end
+              resets  reversed  for a boat  steered off  let go  other  recross   void  calls turning  2+ calls  turns  > 30 s  dsq  open
+  all          0.000     0.000       0.000        0.000   0.000  0.000    0.000  0.000          0.000     0.000      5  0.2000    0     0
+  pre-start    0.000     0.000       0.000        0.000   0.000  0.000    0.000  0.000          0.000     0.000      3  0.3333    0     0
+  first beat   0.000     0.000       0.000        0.000   0.000  0.000    0.000  0.000          0.000     0.000      1  0.0000    0     0
+  later legs   0.000     0.000       0.000        0.000   0.000  0.000    0.000  0.000          0.000     0.000      1  0.0000    0     0
+  last leg     0.000     0.000       0.000        0.000   0.000  0.000    0.000  0.000          0.000     0.000      0  0.0000    0     0
+  club         0.000     0.000       0.000        0.000   0.000  0.000    0.000  0.000          0.000     0.000      3  0.0000    0     0
+  regional     0.000     0.000       0.000        0.000   0.000  0.000    0.000  0.000          0.000     0.000      1  1.0000    0     0
+  national     0.000     0.000       0.000        0.000   0.000  0.000    0.000  0.000          0.000     0.000      1  0.0000    0     0
+turns owed a boat a race, the share of boats owing 1, 2, 3 or more; pre-start episodes a boat, and those opened before the gun by the seconds left to it at the call (after: after the gun, not yet started)
+  tier      turns/boat   >= 1   >= 2   >= 3  pre-start/boat  > 40 s  40-20 s  20-10 s  < 10 s  after
+  all             0.62  0.500  0.125  0.000           0.375       0        2        0       0      1
+  club            0.75  0.500  0.250  0.000           0.250       0        1        0       0      0
+  regional        0.33  0.333  0.000  0.000           0.333       0        0        0       0      1
+  national        1.00  1.000  0.000  0.000           1.000       0        1        0       0      0
+pre-start calls a boat by rule (all but 21.2, called while she turned a penalty; all):
+  tier         10  but 21.2    all
+  all       0.250     0.250  0.250
+  club      0.250     0.250  0.250
+  regional  0.000     0.000  0.000
+  national  1.000     1.000  1.000
+non-finishers by cause: per 1000 boats (boats; median metres to go)
+  cause                                         all            club    regional    national
+  DSQ: missed penalty                    0.0 (0; -)      0.0 (0; -)  0.0 (0; -)  0.0 (0; -)
+  out of the window, no turns        125.0 (1; 143)  250.0 (1; 143)  0.0 (0; -)  0.0 (0; -)
+  out of the window after 1-2 turns  125.0 (1; 291)  250.0 (1; 291)  0.0 (0; -)  0.0 (0; -)
+  out of the window after 3+ turns       0.0 (0; -)      0.0 (0; -)  0.0 (0; -)  0.0 (0; -)
+  stuck at a mark or the edge            0.0 (0; -)      0.0 (0; -)  0.0 (0; -)  0.0 (0; -)
+  other                                  0.0 (0; -)      0.0 (0; -)  0.0 (0; -)  0.0 (0; -)
+  all                                250.0 (2; 217)  500.0 (2; 217)  0.0 (0; -)  0.0 (0; -)
+planing off the wind, a boat a race: seconds running and off the plane (share), gybes, falls off the plane (by cause: a gybe, too deep, a lull or a shadow, slow), the share of gybes with a fall, seconds off a fall (median / p90), and falls she is back on from within 15 s
+  tier      running s  off s    off  gybes  falls  gybe  rounding  deep  lull  slow  falls/gybe  s off a fall  back on
+  all           112.5   12.8  0.114   2.62   1.25  0.25      0.25  0.50  0.00  0.25       0.095    5.3 / 18.3    0.700
+  club          113.6   18.6  0.164   3.00   2.00  0.50      0.50  0.50  0.00  0.50       0.167    6.9 / 18.3    0.750
+  regional      113.1    9.3  0.083   2.33   0.67  0.00      0.00  0.67  0.00  0.00       0.000     2.5 / 2.5    0.500
+  national      106.9    0.0  0.000   2.00   0.00  0.00      0.00  0.00  0.00  0.00       0.000             -    0.000
+legs by tactics skill and handling (live bots): legs begun, seconds behind the first boat onto the leg (median / p90), the share sailed to their end, mean seconds over the race's fastest boat on the leg without a penalty turn and with one, the share with one; turns, falls off the plane and gybes a leg; calls a leg by rule
+  skill         hand          leg  boats  legs       behind s  to its end  clean s  turn s  with a turn  turns  falls  gybes     11
+  club          club   first beat      3     3     9.8 / 13.3       1.000     52.8    81.6        0.333   0.33   0.00   0.00  0.333
+  club          club  later beats      3     3   93.5 / 140.2       1.000     21.5       -        0.000   0.00   0.00   0.00  0.000
+  club          club      reaches      3     6   79.2 / 156.3       1.000      4.6       -        0.000   0.00   0.33   0.00  0.000
+  club          club         runs      3     3    83.4 / 98.1       1.000     12.1    42.1        0.333   0.33   0.67   2.00  0.333
+  club          club     last run      3     3  127.9 / 157.5       0.333     10.7       -        0.000   0.00   1.00   1.00  0.000
+  club      regional   first beat      1     1    55.5 / 55.5       1.000     25.7       -        0.000   0.00   0.00   0.00  0.000
+  club      regional  later beats      1     1    80.6 / 80.6       1.000     11.4       -        0.000   0.00   0.00   0.00  0.000
+  club      regional      reaches      1     2    83.0 / 92.1       1.000      2.5       -        0.000   0.00   0.00   0.00  0.000
+  club      regional         runs      1     1    78.3 / 78.3       1.000      2.3       -        0.000   0.00   0.00   1.00  0.000
+  club      regional     last run      1     1    91.9 / 91.9       1.000     14.3       -        0.000   0.00   1.00   2.00  0.000
+  regional  regional   first beat      1     1      0.0 / 0.0       1.000     26.0       -        0.000   0.00   0.00   0.00  0.000
+  regional  regional  later beats      1     1    19.2 / 19.2       1.000     15.1       -        0.000   0.00   0.00   0.00  0.000
+  regional  regional      reaches      1     2    26.6 / 34.4       1.000      0.5       -        0.000   0.00   0.00   0.00  0.000
+  regional  regional         runs      1     1    18.5 / 18.5       1.000      0.8       -        0.000   0.00   0.00   1.00  0.000
+  regional  regional     last run      1     1    34.9 / 34.9       1.000      1.4       -        0.000   0.00   1.00   1.00  0.000
+  regional  national   first beat      2     2    11.2 / 15.2       1.000     23.2       -        0.000   0.00   0.00   0.50  0.000
+  regional  national  later beats      2     2    29.4 / 58.8       1.000     12.7       -        0.000   0.00   0.00   0.00  0.000
+  regional  national      reaches      2     4    27.2 / 84.2       1.000      2.0       -        0.000   0.00   0.00   0.00  0.000
+  regional  national         runs      2     2    27.8 / 55.6       1.000      1.6       -        0.000   0.00   0.00   1.00  0.000
+  regional  national     last run      2     2    44.7 / 89.4       1.000      0.8       -        0.000   0.00   0.50   1.00  0.000
+  national  national   first beat      1     1      4.3 / 4.3       1.000     25.7       -        0.000   0.00   0.00   0.00  0.000
+  national  national  later beats      1     1    23.2 / 23.2       1.000      4.8       -        0.000   0.00   0.00   0.00  0.000
+  national  national      reaches      1     2    25.4 / 28.0       1.000      0.6       -        0.000   0.00   0.00   0.00  0.000
+  national  national         runs      1     1    22.7 / 22.7       1.000      0.5       -        0.000   0.00   0.00   1.00  0.000
+  national  national     last run      1     1    28.4 / 28.4       1.000      0.1       -        0.000   0.00   0.00   1.00  0.000
+roundings by tier and mark: extra metres a rounding (approach from 80 m out, the rounding, the 15 s after, against the ideal path): mean, median / p90; the share of roundings 30 m or more and 50 m or more over; windward roundings that passed the mark on its wrong side; gate roundings that spent 3 s or more below the line before crossing it; gate roundings from entry to the leg's end against the ideal approach to the better mark and round it: mean extra metres and seconds, the seconds' median / p90 (read these for the gate: its rounding part starts where she crossed the line, so a centre crossing's way along the line to a mark is free); gate roundings below the line, from her first tick more than 1 m below its level (outside a mark too) to her last within the 15 s after the leg's end: mean seconds, median / p90, the deepest she was, mean and p90 metres, and those still below it then (no ideal path in it, so a clean rounding is a few seconds, not 0: compare two trees; it is blind to the approach, which the entry-to-end columns catch)
+  tier          mark  roundings  mean m  median / p90 m  >= 30 m  >= 50 m  wrong side  overshoot  entry to end m  entry to end s  median / p90 s  below the line s  median / p90 s  deepest m  p90 m  still below
+  all            all         40    12.3     12.3 / 26.4    0.050    0.000           -          -               -               -               -                 -               -          -      -            -
+  all       windward         16     5.6      7.4 / 17.2    0.000    0.000    0 (0.0%)          -               -               -               -                 -               -          -      -            -
+  all         offset         16    15.4     14.1 / 23.6    0.062    0.000           -          -               -               -               -                 -               -          -      -            -
+  all           gate          8    19.3     19.3 / 32.8    0.125    0.000           -   0 (0.0%)            20.7             3.6       3.3 / 8.3               5.0       5.0 / 7.5        7.8   10.4     0 (0.0%)
+  club           all         20    13.3     11.5 / 27.1    0.050    0.000           -          -               -               -               -                 -               -          -      -            -
+  club      windward          8     4.5      3.8 / 14.8    0.000    0.000    0 (0.0%)          -               -               -               -                 -               -          -      -            -
+  club        offset          8    18.0     14.6 / 46.5    0.125    0.000           -          -               -               -               -                 -               -          -      -            -
+  club          gate          4    21.4     24.2 / 27.1    0.000    0.000           -   0 (0.0%)            23.6             5.0       4.3 / 8.3               5.3       5.1 / 7.5        8.1   10.4     0 (0.0%)
+  regional       all         15    12.7     11.7 / 22.3    0.067    0.000           -          -               -               -               -                 -               -          -      -            -
+  regional  windward          6     8.6     10.2 / 18.0    0.000    0.000    0 (0.0%)          -               -               -               -                 -               -          -      -            -
+  regional    offset          6    13.7     14.6 / 22.3    0.000    0.000           -          -               -               -               -                 -               -          -      -            -
+  regional      gate          3    18.7     16.7 / 32.8    0.333    0.000           -   0 (0.0%)            19.0             2.4       2.3 / 3.5               4.9       5.1 / 5.1        7.7    8.4     0 (0.0%)
+  national       all          5     7.1     12.9 / 17.2    0.000    0.000           -          -               -               -               -                 -               -          -      -            -
+  national  windward          2     1.0      1.0 / 17.2    0.000    0.000    0 (0.0%)          -               -               -               -                 -               -          -      -            -
+  national    offset          2    10.2     10.2 / 14.6    0.000    0.000           -          -               -               -               -                 -               -          -      -            -
+  national      gate          1    12.9     12.9 / 12.9    0.000    0.000           -   0 (0.0%)            14.0             2.0       2.0 / 2.0               4.0       4.0 / 4.0        7.1    7.1     0 (0.0%)

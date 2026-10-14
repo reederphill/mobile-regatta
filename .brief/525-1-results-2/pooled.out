@@ -1,0 +1,40 @@
+m8 base racingfouls 344 passed False breaches ['club: finish share 0.71 < 0.75']
+m8 r1 racingfouls 364 passed False breaches ['club: finish share 0.70 < 0.75']
+m8 head racingfouls 362 passed False breaches ['club: finish share 0.71 < 0.75']
+m8n base racingfouls 354 passed False breaches ['club: finish share 0.71 < 0.75']
+m8n r1 racingfouls 336 passed False breaches ['club: finish share 0.69 < 0.75']
+m8n head racingfouls 360 passed False breaches ['club: finish share 0.72 < 0.75']
+m16 base racingfouls 686 passed False breaches ['club: finish share 0.43 < 0.75']
+m16 r1 racingfouls 728 passed False breaches ['club: finish share 0.39 < 0.75']
+m16 head racingfouls 728 passed False breaches ['club: finish share 0.41 < 0.75']
+m16n base racingfouls 832 passed False breaches ['club: finish share 0.33 < 0.75']
+m16n r1 racingfouls 848 passed False breaches ['club: finish share 0.32 < 0.75', 'regional: finish share 0.69 < 0.75']
+m16n head racingfouls 818 passed False breaches ['club: finish share 0.34 < 0.75']
+club8 base racingfouls 600 passed True breaches []
+club8 r1 racingfouls 608 passed True breaches []
+club8 head racingfouls 610 passed True breaches []
+mix10 base racingfouls 1250 passed False breaches ['club: finish share 0.60 < 0.75']
+mix10 r1 racingfouls 1266 passed False breaches ['club: finish share 0.61 < 0.75']
+mix10 head racingfouls 1202 passed False breaches ['club: finish share 0.61 < 0.75']
+nat16 base racingfouls 1612 passed False breaches ['navigation: finish share 0.851 < 0.980', 'navigation: dsq for a missed penalty 13 > 0', 'conduct: encounters to fouls 0.041 > 0.020', 'watchdog: centred-rudder 16.1 calls 1 > 0']
+nat16 r1 racingfouls 1560 passed False breaches ['navigation: finish share 0.850 < 0.980', 'navigation: dsq for a missed penalty 13 > 0', 'conduct: encounters to fouls 0.041 > 0.020', 'watchdog: centred-rudder 16.1 calls 1 > 0']
+nat16 head racingfouls 1544 passed False breaches ['navigation: finish share 0.858 < 0.980', 'navigation: dsq for a missed penalty 16 > 0', 'conduct: encounters to fouls 0.041 > 0.020', 'watchdog: centred-rudder 16.1 calls 1 > 0']
+pooled rule 11 1864 -> 1908 z +2.1
+pooled rule 12 236 -> 229 z -0.8
+pooled rule 18.2 22 -> 38 z +2.3
+pooled rule 10 2163 -> 2115 z -1.6
+base->r1 rule 11: 1864 -> 1906 z +1.9
+base->r1 rule 12: 236 -> 228 z -1.0
+base->r1 rule 18.2: 22 -> 30 z +1.4
+base->r1 rule 10: 2163 -> 2159 z -0.1
+base r1 18.2 by tier {'base': {'club': 10, 'regional': 4, 'national': 8}, 'r1': {'club': 17, 'regional': 5, 'national': 8}}
+r1->head rule 11: 1906 -> 1908 z +0.1
+r1->head rule 12: 228 -> 229 z +0.1
+r1->head rule 18.2: 30 -> 38 z +1.2
+r1->head rule 10: 2159 -> 2115 z -1.6
+r1 head 18.2 by tier {'r1': {'club': 17, 'regional': 5, 'national': 8}, 'head': {'club': 18, 'regional': 6, 'national': 14}}
+base->head rule 11: 1864 -> 1908 z +2.1
+base->head rule 12: 236 -> 229 z -0.8
+base->head rule 18.2: 22 -> 38 z +2.3
+base->head rule 10: 2163 -> 2115 z -1.6
+base head 18.2 by tier {'base': {'club': 10, 'regional': 4, 'national': 8}, 'head': {'club': 18, 'regional': 6, 'national': 14}}

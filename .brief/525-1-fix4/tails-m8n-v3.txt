@@ -1,0 +1,1016 @@
+TAIL dev-venue@7 classic-oscillating@7 9 seat 0 club leg 2 R deepest 15.9 still false
+TAIL dev-venue@7 classic-oscillating@7 9 seat 1 national leg 2 L deepest 7.0 still false
+TAIL dev-venue@7 classic-oscillating@7 9 seat 2 club leg 2 R deepest 6.2 still false
+TAIL dev-venue@7 classic-oscillating@7 9 seat 3 club leg 2 L deepest 6.1 still false
+TAIL dev-venue@7 classic-oscillating@7 9 seat 4 regional leg 2 L deepest 7.0 still false
+TAIL dev-venue@7 classic-oscillating@7 9 seat 5 club leg 2 R deepest 6.6 still false
+TAIL dev-venue@7 classic-oscillating@7 9 seat 6 national leg 2 L deepest 7.7 still false
+TAIL dev-venue@7 classic-oscillating@7 9 seat 7 regional leg 2 R deepest 6.6 still false
+TAIL dev-venue@7 gusty-offshore@7 9 seat 0 club leg 2 R deepest 8.8 still false
+TAIL dev-venue@7 gusty-offshore@7 9 seat 1 national leg 2 L deepest 8.5 still false
+TAIL dev-venue@7 gusty-offshore@7 9 seat 2 club leg 2 L deepest 5.8 still false
+TAIL dev-venue@7 gusty-offshore@7 9 seat 3 club leg 2 L deepest 6.9 still false
+TAIL dev-venue@7 gusty-offshore@7 9 seat 4 regional leg 2 R deepest 10.6 still false
+TAIL dev-venue@7 gusty-offshore@7 9 seat 5 club leg 2 L deepest 8.0 still false
+TAIL dev-venue@7 gusty-offshore@7 9 seat 6 national leg 2 L deepest 7.2 still false
+TAIL dev-venue@7 gusty-offshore@7 9 seat 7 regional leg 2 R deepest 9.8 still false
+TAIL dev-venue@7 light-and-patchy@7 9 seat 0 club leg 2 R deepest 5.6 still false
+TAIL dev-venue@7 light-and-patchy@7 9 seat 1 national leg 2 L deepest 6.1 still false
+TAIL dev-venue@7 light-and-patchy@7 9 seat 2 club leg 2 L deepest 5.1 still false
+TAIL dev-venue@7 light-and-patchy@7 9 seat 3 club leg 2 L deepest 5.8 still false
+TAIL dev-venue@7 light-and-patchy@7 9 seat 4 regional leg 2 R deepest 7.7 still false
+TAIL dev-venue@7 light-and-patchy@7 9 seat 5 club leg 2 R deepest 7.1 still false
+TAIL dev-venue@7 light-and-patchy@7 9 seat 6 national leg 2 R deepest 12.2 still false
+TAIL dev-venue@7 light-and-patchy@7 9 seat 7 regional leg 2 L deepest 6.1 still false
+TAIL dev-venue@7 sea-breeze@7 9 seat 0 club leg 2 L deepest 4.8 still false
+TAIL dev-venue@7 sea-breeze@7 9 seat 1 national leg 2 L deepest 6.6 still false
+TAIL dev-venue@7 sea-breeze@7 9 seat 2 club leg 2 R deepest 10.5 still false
+TAIL dev-venue@7 sea-breeze@7 9 seat 3 club leg 2 L deepest 10.0 still false
+TAIL dev-venue@7 sea-breeze@7 9 seat 4 regional leg 2 R deepest 7.9 still false
+TAIL dev-venue@7 sea-breeze@7 9 seat 5 club leg 2 L deepest 5.7 still false
+TAIL dev-venue@7 sea-breeze@7 9 seat 6 national leg 2 L deepest 6.8 still false
+TAIL dev-venue@7 sea-breeze@7 9 seat 7 regional leg 2 L deepest 8.1 still false
+TAIL fellmere@1 gusty-offshore@7 9 seat 0 club leg 2 L deepest 8.2 still false
+TAIL fellmere@1 gusty-offshore@7 9 seat 1 national leg 2 L deepest 7.1 still false
+TAIL fellmere@1 gusty-offshore@7 9 seat 2 club leg 2 R deepest 5.9 still false
+TAIL fellmere@1 gusty-offshore@7 9 seat 3 club leg 2 L deepest 7.9 still false
+TAIL fellmere@1 gusty-offshore@7 9 seat 4 regional leg 2 R deepest 7.8 still false
+TAIL fellmere@1 gusty-offshore@7 9 seat 5 club leg 2 L deepest 8.4 still false
+TAIL fellmere@1 gusty-offshore@7 9 seat 6 national leg 2 R deepest 11.0 still false
+TAIL fellmere@1 gusty-offshore@7 9 seat 7 regional leg 2 R deepest 5.2 still false
+TAIL fellmere@1 light-and-patchy@7 9 seat 0 club leg 2 L deepest 4.1 still false
+TAIL fellmere@1 light-and-patchy@7 9 seat 1 national leg 2 L deepest 6.2 still false
+TAIL fellmere@1 light-and-patchy@7 9 seat 2 club leg 2 R deepest 4.8 still false
+TAIL fellmere@1 light-and-patchy@7 9 seat 3 club leg 2 R deepest 7.4 still false
+TAIL fellmere@1 light-and-patchy@7 9 seat 4 regional leg 2 L deepest 6.6 still false
+TAIL fellmere@1 light-and-patchy@7 9 seat 5 club leg 2 R deepest 7.3 still false
+TAIL fellmere@1 light-and-patchy@7 9 seat 6 national leg 2 R deepest 6.7 still false
+TAIL fellmere@1 light-and-patchy@7 9 seat 7 regional leg 2 L deepest 4.8 still false
+TAIL hollin-bay@1 classic-oscillating@7 9 seat 0 club leg 2 R deepest 8.7 still false
+TAIL hollin-bay@1 classic-oscillating@7 9 seat 1 national leg 2 L deepest 7.0 still false
+TAIL hollin-bay@1 classic-oscillating@7 9 seat 2 club leg 2 L deepest 5.4 still false
+TAIL hollin-bay@1 classic-oscillating@7 9 seat 3 club leg 2 R deepest 5.8 still false
+TAIL hollin-bay@1 classic-oscillating@7 9 seat 4 regional leg 2 R deepest 7.4 still false
+TAIL hollin-bay@1 classic-oscillating@7 9 seat 5 club leg 2 R deepest 7.7 still false
+TAIL hollin-bay@1 classic-oscillating@7 9 seat 6 national leg 2 L deepest 7.2 still false
+TAIL hollin-bay@1 classic-oscillating@7 9 seat 7 regional leg 2 R deepest 7.0 still false
+TAIL hollin-bay@1 sea-breeze@7 9 seat 0 club leg 2 R deepest 8.8 still false
+TAIL hollin-bay@1 sea-breeze@7 9 seat 1 national leg 2 L deepest 7.0 still false
+TAIL hollin-bay@1 sea-breeze@7 9 seat 2 club leg 2 R deepest 6.7 still false
+TAIL hollin-bay@1 sea-breeze@7 9 seat 3 club leg 2 L deepest 6.3 still false
+TAIL hollin-bay@1 sea-breeze@7 9 seat 4 regional leg 2 L deepest 7.9 still false
+TAIL hollin-bay@1 sea-breeze@7 9 seat 5 club leg 2 L deepest 7.9 still false
+TAIL hollin-bay@1 sea-breeze@7 9 seat 6 national leg 2 L deepest 11.0 still false
+TAIL hollin-bay@1 sea-breeze@7 9 seat 7 regional leg 2 R deepest 7.8 still false
+TAIL saltings-reach@1 classic-oscillating@7 9 seat 0 club leg 2 R deepest 5.1 still false
+TAIL saltings-reach@1 classic-oscillating@7 9 seat 1 national leg 2 L deepest 6.1 still false
+TAIL saltings-reach@1 classic-oscillating@7 9 seat 2 club leg 2 R deepest 5.8 still false
+TAIL saltings-reach@1 classic-oscillating@7 9 seat 3 club leg 2 L deepest 4.0 still false
+TAIL saltings-reach@1 classic-oscillating@7 9 seat 4 regional leg 2 L deepest 4.1 still false
+TAIL saltings-reach@1 classic-oscillating@7 9 seat 5 club leg 2 R deepest 4.2 still false
+TAIL saltings-reach@1 classic-oscillating@7 9 seat 6 national leg 2 L deepest 6.7 still false
+TAIL saltings-reach@1 classic-oscillating@7 9 seat 7 regional leg 2 L deepest 7.6 still false
+TAIL saltings-reach@1 gusty-offshore@7 9 seat 0 club leg 2 L deepest 7.5 still false
+TAIL saltings-reach@1 gusty-offshore@7 9 seat 1 national leg 2 L deepest 7.4 still false
+TAIL saltings-reach@1 gusty-offshore@7 9 seat 2 club leg 2 L deepest 4.7 still false
+TAIL saltings-reach@1 gusty-offshore@7 9 seat 3 club leg 2 L deepest 6.4 still false
+TAIL saltings-reach@1 gusty-offshore@7 9 seat 4 regional leg 2 L deepest 8.2 still false
+TAIL saltings-reach@1 gusty-offshore@7 9 seat 5 club leg 2 R deepest 8.4 still false
+TAIL saltings-reach@1 gusty-offshore@7 9 seat 6 national leg 2 R deepest 7.1 still false
+TAIL saltings-reach@1 gusty-offshore@7 9 seat 7 regional leg 2 R deepest 19.3 still false
+TAIL dev-venue@7 classic-oscillating@7 10 seat 0 club leg 2 R deepest 7.4 still false
+TAIL dev-venue@7 classic-oscillating@7 10 seat 1 regional leg 2 L deepest 7.1 still false
+TAIL dev-venue@7 classic-oscillating@7 10 seat 2 club leg 2 R deepest 6.1 still false
+TAIL dev-venue@7 classic-oscillating@7 10 seat 3 regional leg 2 R deepest 8.4 still false
+TAIL dev-venue@7 classic-oscillating@7 10 seat 4 national leg 2 L deepest 7.4 still false
+TAIL dev-venue@7 classic-oscillating@7 10 seat 5 national leg 2 L deepest 7.5 still false
+TAIL dev-venue@7 classic-oscillating@7 10 seat 6 regional leg 2 R deepest 7.1 still false
+TAIL dev-venue@7 classic-oscillating@7 10 seat 7 regional leg 2 L deepest 6.9 still false
+TAIL dev-venue@7 gusty-offshore@7 10 seat 0 club leg 2 R deepest 8.2 still false
+TAIL dev-venue@7 gusty-offshore@7 10 seat 1 regional leg 2 L deepest 5.6 still false
+TAIL dev-venue@7 gusty-offshore@7 10 seat 2 club leg 2 R deepest 6.4 still false
+TAIL dev-venue@7 gusty-offshore@7 10 seat 3 regional leg 2 R deepest 4.6 still false
+TAIL dev-venue@7 gusty-offshore@7 10 seat 4 national leg 2 L deepest 7.2 still false
+TAIL dev-venue@7 gusty-offshore@7 10 seat 5 national leg 2 L deepest 6.8 still false
+TAIL dev-venue@7 gusty-offshore@7 10 seat 6 regional leg 2 L deepest 7.2 still false
+TAIL dev-venue@7 gusty-offshore@7 10 seat 7 regional leg 2 L deepest 10.1 still false
+TAIL dev-venue@7 light-and-patchy@7 10 seat 0 club leg 2 R deepest 6.1 still false
+TAIL dev-venue@7 light-and-patchy@7 10 seat 1 regional leg 2 R deepest 7.3 still false
+TAIL dev-venue@7 light-and-patchy@7 10 seat 2 club leg 2 L deepest 6.7 still false
+TAIL dev-venue@7 light-and-patchy@7 10 seat 3 regional leg 2 L deepest 7.6 still false
+TAIL dev-venue@7 light-and-patchy@7 10 seat 4 national leg 2 L deepest 5.8 still false
+TAIL dev-venue@7 light-and-patchy@7 10 seat 5 national leg 2 L deepest 12.3 still false
+TAIL dev-venue@7 light-and-patchy@7 10 seat 6 regional leg 2 L deepest 11.1 still true
+TAIL dev-venue@7 light-and-patchy@7 10 seat 7 regional leg 2 R deepest 6.8 still false
+TAIL dev-venue@7 sea-breeze@7 10 seat 0 club leg 2 L deepest 5.6 still false
+TAIL dev-venue@7 sea-breeze@7 10 seat 1 regional leg 2 L deepest 15.2 still false
+TAIL dev-venue@7 sea-breeze@7 10 seat 2 club leg 2 R deepest 6.8 still false
+TAIL dev-venue@7 sea-breeze@7 10 seat 3 regional leg 2 R deepest 5.7 still false
+TAIL dev-venue@7 sea-breeze@7 10 seat 4 national leg 2 L deepest 6.8 still false
+TAIL dev-venue@7 sea-breeze@7 10 seat 5 national leg 2 R deepest 18.5 still false
+TAIL dev-venue@7 sea-breeze@7 10 seat 6 regional leg 2 L deepest 6.7 still false
+TAIL dev-venue@7 sea-breeze@7 10 seat 7 regional leg 2 R deepest 7.4 still false
+TAIL fellmere@1 gusty-offshore@7 10 seat 0 club leg 2 R deepest 4.9 still false
+TAIL fellmere@1 gusty-offshore@7 10 seat 1 regional leg 2 L deepest 7.8 still false
+TAIL fellmere@1 gusty-offshore@7 10 seat 2 club leg 2 L deepest 9.4 still false
+TAIL fellmere@1 gusty-offshore@7 10 seat 3 regional leg 2 L deepest 9.1 still false
+TAIL fellmere@1 gusty-offshore@7 10 seat 4 national leg 2 L deepest 7.3 still false
+TAIL fellmere@1 gusty-offshore@7 10 seat 5 national leg 2 L deepest 7.3 still false
+TAIL fellmere@1 gusty-offshore@7 10 seat 6 regional leg 2 R deepest 6.2 still false
+TAIL fellmere@1 gusty-offshore@7 10 seat 7 regional leg 2 L deepest 8.4 still false
+TAIL fellmere@1 light-and-patchy@7 10 seat 0 club leg 2 L deepest 5.3 still false
+TAIL fellmere@1 light-and-patchy@7 10 seat 1 regional leg 2 R deepest 4.9 still false
+TAIL fellmere@1 light-and-patchy@7 10 seat 2 club leg 2 R deepest 5.7 still false
+TAIL fellmere@1 light-and-patchy@7 10 seat 3 regional leg 2 R deepest 6.0 still false
+TAIL fellmere@1 light-and-patchy@7 10 seat 4 national leg 2 R deepest 6.6 still false
+TAIL fellmere@1 light-and-patchy@7 10 seat 5 national leg 2 L deepest 6.0 still false
+TAIL fellmere@1 light-and-patchy@7 10 seat 6 regional leg 2 L deepest 6.9 still false
+TAIL fellmere@1 light-and-patchy@7 10 seat 7 regional leg 2 R deepest 6.6 still false
+TAIL hollin-bay@1 classic-oscillating@7 10 seat 0 club leg 2 R deepest 6.8 still false
+TAIL hollin-bay@1 classic-oscillating@7 10 seat 1 regional leg 2 R deepest 7.6 still false
+TAIL hollin-bay@1 classic-oscillating@7 10 seat 2 club leg 2 L deepest 6.6 still false
+TAIL hollin-bay@1 classic-oscillating@7 10 seat 3 regional leg 2 R deepest 4.9 still false
+TAIL hollin-bay@1 classic-oscillating@7 10 seat 4 national leg 2 L deepest 6.9 still false
+TAIL hollin-bay@1 classic-oscillating@7 10 seat 5 national leg 2 R deepest 6.8 still false
+TAIL hollin-bay@1 classic-oscillating@7 10 seat 6 regional leg 2 R deepest 6.8 still false
+TAIL hollin-bay@1 classic-oscillating@7 10 seat 7 regional leg 2 R deepest 7.0 still false
+TAIL hollin-bay@1 sea-breeze@7 10 seat 0 club leg 2 L deepest 7.1 still false
+TAIL hollin-bay@1 sea-breeze@7 10 seat 1 regional leg 2 L deepest 7.7 still false
+TAIL hollin-bay@1 sea-breeze@7 10 seat 2 club leg 2 R deepest 9.5 still false
+TAIL hollin-bay@1 sea-breeze@7 10 seat 3 regional leg 2 R deepest 7.6 still false
+TAIL hollin-bay@1 sea-breeze@7 10 seat 4 national leg 2 L deepest 7.3 still false
+TAIL hollin-bay@1 sea-breeze@7 10 seat 5 national leg 2 L deepest 7.1 still false
+TAIL hollin-bay@1 sea-breeze@7 10 seat 6 regional leg 2 L deepest 7.0 still false
+TAIL hollin-bay@1 sea-breeze@7 10 seat 7 regional leg 2 R deepest 6.5 still false
+TAIL saltings-reach@1 classic-oscillating@7 10 seat 0 club leg 2 R deepest 7.9 still false
+TAIL saltings-reach@1 classic-oscillating@7 10 seat 1 regional leg 2 L deepest 8.1 still false
+TAIL saltings-reach@1 classic-oscillating@7 10 seat 2 club leg 2 L deepest 8.7 still false
+TAIL saltings-reach@1 classic-oscillating@7 10 seat 3 regional leg 2 R deepest 9.7 still false
+TAIL saltings-reach@1 classic-oscillating@7 10 seat 4 national leg 2 L deepest 7.2 still false
+TAIL saltings-reach@1 classic-oscillating@7 10 seat 5 national leg 2 R deepest 8.5 still false
+TAIL saltings-reach@1 classic-oscillating@7 10 seat 6 regional leg 2 L deepest 7.8 still false
+TAIL saltings-reach@1 classic-oscillating@7 10 seat 7 regional leg 2 L deepest 7.5 still false
+TAIL saltings-reach@1 gusty-offshore@7 10 seat 0 club leg 2 L deepest 13.5 still false
+TAIL saltings-reach@1 gusty-offshore@7 10 seat 1 regional leg 2 L deepest 27.9 still false
+TAIL saltings-reach@1 gusty-offshore@7 10 seat 2 club leg 2 R deepest 10.2 still false
+TAIL saltings-reach@1 gusty-offshore@7 10 seat 3 regional leg 2 R deepest 8.5 still false
+TAIL saltings-reach@1 gusty-offshore@7 10 seat 4 national leg 2 L deepest 7.5 still false
+TAIL saltings-reach@1 gusty-offshore@7 10 seat 5 national leg 2 L deepest 7.1 still false
+TAIL saltings-reach@1 gusty-offshore@7 10 seat 6 regional leg 2 L deepest 10.5 still false
+TAIL saltings-reach@1 gusty-offshore@7 10 seat 7 regional leg 2 L deepest 12.8 still false
+TAIL dev-venue@7 classic-oscillating@7 11 seat 0 club leg 2 R deepest 6.1 still false
+TAIL dev-venue@7 classic-oscillating@7 11 seat 1 club leg 2 L deepest 5.0 still false
+TAIL dev-venue@7 classic-oscillating@7 11 seat 2 club leg 2 R deepest 7.0 still false
+TAIL dev-venue@7 classic-oscillating@7 11 seat 3 regional leg 2 R deepest 6.0 still false
+TAIL dev-venue@7 classic-oscillating@7 11 seat 4 club leg 2 R deepest 4.7 still false
+TAIL dev-venue@7 classic-oscillating@7 11 seat 5 club leg 2 R deepest 7.5 still false
+TAIL dev-venue@7 classic-oscillating@7 11 seat 6 club leg 2 L deepest 6.9 still false
+TAIL dev-venue@7 classic-oscillating@7 11 seat 7 national leg 2 R deepest 5.5 still false
+TAIL dev-venue@7 gusty-offshore@7 11 seat 0 club leg 2 L deepest 5.9 still false
+TAIL dev-venue@7 gusty-offshore@7 11 seat 1 club leg 2 L deepest 7.2 still false
+TAIL dev-venue@7 gusty-offshore@7 11 seat 2 club leg 2 R deepest 7.4 still false
+TAIL dev-venue@7 gusty-offshore@7 11 seat 3 regional leg 2 L deepest 6.1 still false
+TAIL dev-venue@7 gusty-offshore@7 11 seat 4 club leg 2 R deepest 9.1 still false
+TAIL dev-venue@7 gusty-offshore@7 11 seat 5 club leg 2 R deepest 9.0 still false
+TAIL dev-venue@7 gusty-offshore@7 11 seat 6 club leg 2 L deepest 8.1 still false
+TAIL dev-venue@7 gusty-offshore@7 11 seat 7 national leg 2 R deepest 8.0 still false
+TAIL dev-venue@7 light-and-patchy@7 11 seat 0 club leg 2 L deepest 4.7 still false
+TAIL dev-venue@7 light-and-patchy@7 11 seat 1 club leg 2 R deepest 5.2 still false
+TAIL dev-venue@7 light-and-patchy@7 11 seat 2 club leg 2 R deepest 5.7 still false
+TAIL dev-venue@7 light-and-patchy@7 11 seat 3 regional leg 2 L deepest 7.6 still false
+TAIL dev-venue@7 light-and-patchy@7 11 seat 4 club leg 2 R deepest 7.1 still false
+TAIL dev-venue@7 light-and-patchy@7 11 seat 5 club leg 2 L deepest 4.3 still false
+TAIL dev-venue@7 light-and-patchy@7 11 seat 6 club leg 2 L deepest 6.4 still false
+TAIL dev-venue@7 light-and-patchy@7 11 seat 7 national leg 2 R deepest 6.1 still false
+TAIL dev-venue@7 sea-breeze@7 11 seat 0 club leg 2 R deepest 7.6 still false
+TAIL dev-venue@7 sea-breeze@7 11 seat 1 club leg 2 R deepest 7.9 still false
+TAIL dev-venue@7 sea-breeze@7 11 seat 2 club leg 2 R deepest 6.8 still false
+TAIL dev-venue@7 sea-breeze@7 11 seat 3 regional leg 2 L deepest 6.4 still false
+TAIL dev-venue@7 sea-breeze@7 11 seat 4 club leg 2 R deepest 6.0 still false
+TAIL dev-venue@7 sea-breeze@7 11 seat 5 club leg 2 R deepest 4.8 still false
+TAIL dev-venue@7 sea-breeze@7 11 seat 6 club leg 2 L deepest 8.5 still false
+TAIL dev-venue@7 sea-breeze@7 11 seat 7 national leg 2 L deepest 9.5 still false
+TAIL fellmere@1 gusty-offshore@7 11 seat 0 club leg 2 R deepest 7.2 still false
+TAIL fellmere@1 gusty-offshore@7 11 seat 1 club leg 2 L deepest 17.0 still false
+TAIL fellmere@1 gusty-offshore@7 11 seat 2 club leg 2 L deepest 9.0 still false
+TAIL fellmere@1 gusty-offshore@7 11 seat 3 regional leg 2 R deepest 6.9 still false
+TAIL fellmere@1 gusty-offshore@7 11 seat 4 club leg 2 L deepest 6.2 still false
+TAIL fellmere@1 gusty-offshore@7 11 seat 5 club leg 2 L deepest 8.5 still false
+TAIL fellmere@1 gusty-offshore@7 11 seat 6 club leg 2 R deepest 5.2 still false
+TAIL fellmere@1 gusty-offshore@7 11 seat 7 national leg 2 R deepest 7.6 still false
+TAIL fellmere@1 light-and-patchy@7 11 seat 0 club leg 2 R deepest 7.6 still false
+TAIL fellmere@1 light-and-patchy@7 11 seat 1 club leg 2 L deepest 15.3 still true
+TAIL fellmere@1 light-and-patchy@7 11 seat 2 club leg 2 L deepest 7.9 still false
+TAIL fellmere@1 light-and-patchy@7 11 seat 3 regional leg 2 R deepest 5.9 still false
+TAIL fellmere@1 light-and-patchy@7 11 seat 4 club leg 2 L deepest 6.3 still false
+TAIL fellmere@1 light-and-patchy@7 11 seat 5 club leg 2 L deepest 7.6 still false
+TAIL fellmere@1 light-and-patchy@7 11 seat 6 club leg 2 R deepest 5.5 still false
+TAIL fellmere@1 light-and-patchy@7 11 seat 7 national leg 2 L deepest 4.6 still false
+TAIL hollin-bay@1 classic-oscillating@7 11 seat 0 club leg 2 R deepest 5.0 still false
+TAIL hollin-bay@1 classic-oscillating@7 11 seat 1 club leg 2 R deepest 8.3 still false
+TAIL hollin-bay@1 classic-oscillating@7 11 seat 2 club leg 2 L deepest 7.8 still false
+TAIL hollin-bay@1 classic-oscillating@7 11 seat 3 regional leg 2 R deepest 5.9 still false
+TAIL hollin-bay@1 classic-oscillating@7 11 seat 4 club leg 2 L deepest 6.6 still false
+TAIL hollin-bay@1 classic-oscillating@7 11 seat 5 club leg 2 L deepest 6.4 still false
+TAIL hollin-bay@1 classic-oscillating@7 11 seat 6 club leg 2 R deepest 7.4 still false
+TAIL hollin-bay@1 classic-oscillating@7 11 seat 7 national leg 2 L deepest 5.9 still false
+TAIL hollin-bay@1 sea-breeze@7 11 seat 0 club leg 2 L deepest 16.3 still false
+TAIL hollin-bay@1 sea-breeze@7 11 seat 1 club leg 2 L deepest 5.8 still false
+TAIL hollin-bay@1 sea-breeze@7 11 seat 2 club leg 2 L deepest 6.6 still false
+TAIL hollin-bay@1 sea-breeze@7 11 seat 3 regional leg 2 L deepest 6.8 still false
+TAIL hollin-bay@1 sea-breeze@7 11 seat 4 club leg 2 R deepest 7.4 still false
+TAIL hollin-bay@1 sea-breeze@7 11 seat 5 club leg 2 R deepest 6.0 still false
+TAIL hollin-bay@1 sea-breeze@7 11 seat 6 club leg 2 L deepest 8.8 still false
+TAIL hollin-bay@1 sea-breeze@7 11 seat 7 national leg 2 R deepest 7.7 still false
+TAIL saltings-reach@1 classic-oscillating@7 11 seat 0 club leg 2 R deepest 5.9 still false
+TAIL saltings-reach@1 classic-oscillating@7 11 seat 1 club leg 2 R deepest 7.2 still false
+TAIL saltings-reach@1 classic-oscillating@7 11 seat 2 club leg 2 R deepest 7.3 still false
+TAIL saltings-reach@1 classic-oscillating@7 11 seat 3 regional leg 2 R deepest 8.0 still false
+TAIL saltings-reach@1 classic-oscillating@7 11 seat 4 club leg 2 R deepest 7.8 still false
+TAIL saltings-reach@1 classic-oscillating@7 11 seat 5 club leg 2 R deepest 7.7 still false
+TAIL saltings-reach@1 classic-oscillating@7 11 seat 6 club leg 2 L deepest 9.1 still false
+TAIL saltings-reach@1 classic-oscillating@7 11 seat 7 national leg 2 R deepest 5.8 still false
+TAIL saltings-reach@1 gusty-offshore@7 11 seat 0 club leg 2 R deepest 10.6 still false
+TAIL saltings-reach@1 gusty-offshore@7 11 seat 1 club leg 2 R deepest 9.0 still false
+TAIL saltings-reach@1 gusty-offshore@7 11 seat 2 club leg 2 L deepest 8.8 still false
+TAIL saltings-reach@1 gusty-offshore@7 11 seat 3 regional leg 2 R deepest 6.4 still false
+TAIL saltings-reach@1 gusty-offshore@7 11 seat 4 club leg 2 R deepest 4.7 still false
+TAIL saltings-reach@1 gusty-offshore@7 11 seat 5 club leg 2 R deepest 10.2 still false
+TAIL saltings-reach@1 gusty-offshore@7 11 seat 6 club leg 2 L deepest 6.7 still false
+TAIL saltings-reach@1 gusty-offshore@7 11 seat 7 national leg 2 R deepest 7.5 still false
+TAIL dev-venue@7 classic-oscillating@7 12 seat 0 national leg 2 L deepest 7.6 still false
+TAIL dev-venue@7 classic-oscillating@7 12 seat 1 regional leg 2 L deepest 4.2 still false
+TAIL dev-venue@7 classic-oscillating@7 12 seat 2 regional leg 2 L deepest 10.3 still false
+TAIL dev-venue@7 classic-oscillating@7 12 seat 3 national leg 2 L deepest 6.8 still false
+TAIL dev-venue@7 classic-oscillating@7 12 seat 4 club leg 2 L deepest 7.0 still false
+TAIL dev-venue@7 classic-oscillating@7 12 seat 5 national leg 2 R deepest 6.2 still false
+TAIL dev-venue@7 classic-oscillating@7 12 seat 6 club leg 2 R deepest 5.2 still false
+TAIL dev-venue@7 classic-oscillating@7 12 seat 7 club leg 2 R deepest 6.6 still false
+TAIL dev-venue@7 gusty-offshore@7 12 seat 0 national leg 2 R deepest 10.7 still false
+TAIL dev-venue@7 gusty-offshore@7 12 seat 1 regional leg 2 R deepest 5.1 still false
+TAIL dev-venue@7 gusty-offshore@7 12 seat 2 regional leg 2 L deepest 11.3 still false
+TAIL dev-venue@7 gusty-offshore@7 12 seat 3 national leg 2 L deepest 6.8 still false
+TAIL dev-venue@7 gusty-offshore@7 12 seat 4 club leg 2 R deepest 7.2 still false
+TAIL dev-venue@7 gusty-offshore@7 12 seat 5 national leg 2 L deepest 6.7 still false
+TAIL dev-venue@7 gusty-offshore@7 12 seat 6 club leg 2 R deepest 6.9 still false
+TAIL dev-venue@7 gusty-offshore@7 12 seat 7 club leg 2 R deepest 6.8 still false
+TAIL dev-venue@7 light-and-patchy@7 12 seat 0 national leg 2 R deepest 6.8 still false
+TAIL dev-venue@7 light-and-patchy@7 12 seat 1 regional leg 2 L deepest 7.7 still false
+TAIL dev-venue@7 light-and-patchy@7 12 seat 2 regional leg 2 R deepest 6.1 still false
+TAIL dev-venue@7 light-and-patchy@7 12 seat 3 national leg 2 L deepest 5.6 still false
+TAIL dev-venue@7 light-and-patchy@7 12 seat 4 club leg 2 R deepest 5.6 still false
+TAIL dev-venue@7 light-and-patchy@7 12 seat 5 national leg 2 R deepest 6.8 still false
+TAIL dev-venue@7 light-and-patchy@7 12 seat 6 club leg 2 R deepest 6.8 still false
+TAIL dev-venue@7 light-and-patchy@7 12 seat 7 club leg 2 L deepest 5.7 still false
+TAIL dev-venue@7 sea-breeze@7 12 seat 0 national leg 2 L deepest 9.8 still false
+TAIL dev-venue@7 sea-breeze@7 12 seat 1 regional leg 2 L deepest 6.5 still false
+TAIL dev-venue@7 sea-breeze@7 12 seat 2 regional leg 2 R deepest 8.1 still false
+TAIL dev-venue@7 sea-breeze@7 12 seat 3 national leg 2 L deepest 9.8 still false
+TAIL dev-venue@7 sea-breeze@7 12 seat 4 club leg 2 L deepest 7.4 still false
+TAIL dev-venue@7 sea-breeze@7 12 seat 5 national leg 2 R deepest 8.0 still false
+TAIL dev-venue@7 sea-breeze@7 12 seat 6 club leg 2 L deepest 9.8 still false
+TAIL dev-venue@7 sea-breeze@7 12 seat 7 club leg 2 R deepest 4.8 still false
+TAIL fellmere@1 gusty-offshore@7 12 seat 0 national leg 2 L deepest 25.8 still false
+TAIL fellmere@1 gusty-offshore@7 12 seat 1 regional leg 2 L deepest 5.0 still false
+TAIL fellmere@1 gusty-offshore@7 12 seat 2 regional leg 2 L deepest 8.3 still false
+TAIL fellmere@1 gusty-offshore@7 12 seat 3 national leg 2 L deepest 36.5 still false
+== fellmere@1 gusty-offshore@7 s12 seat 3 tier national leg 2 mark L end t 207.06666666666666 deepest 36.5 last -1.0 gate L SIMD2<Double>(78.1622146722973, 169.4959565911506) R SIMD2<Double>(55.47502912570468, 126.06449780866805)
+t  188.5 leg 2 st 0 al  -13.5 up   88.3 twa  -152 spd  8.5 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 157/157@188 tap y clr y room y eva n
+t  189.0 leg 2 st 0 al  -15.8 up   84.8 twa  -159 spd  8.4 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 157/157@189 tap y clr y room y eva n
+t  189.5 leg 2 st 0 al  -18.0 up   81.2 twa  -159 spd  8.5 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 158/158@189 tap y clr y room y eva n
+t  190.0 leg 2 st 0 al  -20.1 up   77.5 twa  -162 spd  8.5 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 147/147@190 tap n clr y room y eva n
+t  190.5 leg 2 st 0 al  -21.8 up   73.6 twa  -170 spd  8.4 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 144/144@190 tap n clr y room y eva n
+t  191.0 leg 2 st 0 al  -23.3 up   69.7 twa  -164 spd  8.3 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 142/142@191 tap n clr y room y eva n
+t  191.5 leg 2 st 0 al  -25.3 up   66.1 twa  -159 spd  8.3 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 140/140@191 tap n clr y room y eva n
+t  192.0 leg 2 st 0 al  -27.3 up   62.5 twa  -161 spd  8.3 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 137/137@192 tap n clr y room y eva n
+t  192.5 leg 2 st 0 al  -29.3 up   58.9 twa  -161 spd  8.3 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 134/134@192 tap n clr y room y eva n
+t  193.0 leg 2 st 0 al  -31.4 up   55.2 twa  -161 spd  8.4 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 132/132@193 tap n clr y room y eva n
+t  193.5 leg 2 st 0 al  -33.4 up   51.5 twa  -161 spd  8.4 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 129/129@193 tap y clr y room y eva n
+t  194.0 leg 2 st 0 al  -35.2 up   47.8 twa  -167 spd  8.4 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 149/149@194 tap n clr y room y eva n
+t  194.5 leg 2 st 0 al  -36.6 up   43.8 twa  -174 spd  8.3 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 146/146@194 tap n clr y room y eva n
+t  195.0 leg 2 st 0 al  -37.4 up   39.8 twa   179 spd  8.2 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 143/143@195 tap n clr y room y eva n
+t  195.5 leg 2 st 0 al  -37.7 up   35.7 twa   171 spd  8.1 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 140/140@195 tap n clr y room y eva n
+t  196.0 leg 2 st 0 al  -37.5 up   31.7 twa   164 spd  7.9 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 138/138@196 tap n clr y room y eva n
+t  196.5 leg 2 st 0 al  -36.9 up   27.9 twa   157 spd  7.8 S plan S pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 103/103@196 tap y clr y room y eva n
+t  197.0 leg 2 st 0 al  -35.7 up   24.1 twa   150 spd  7.9 S plan S pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 98/98@197 tap y clr y room y eva n
+t  197.5 leg 2 st 0 al  -34.0 up   20.5 twa   143 spd  8.0 S plan S pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 92/92@197 tap y clr y room y eva n
+t  198.0 leg 2 st 0 al  -31.9 up   17.0 twa   136 spd  8.1 S plan S pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 100/100@198 tap y clr y room y eva y
+t  198.5 leg 2 st 0 al  -29.4 up   13.8 twa   129 spd  8.2 S plan S pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 100/100@198 tap y clr y room y eva n
+t  199.0 leg 2 st 0 al  -26.4 up   10.9 twa   122 spd  8.3 S plan S pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 100/100@199 tap y clr y room y eva n
+t  199.5 leg 2 st 0 al  -23.1 up    8.4 twa   115 spd  8.4 S plan S pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 100/100@199 tap n clr n room y eva n
+t  200.0 leg 2 st 0 al  -19.6 up    6.0 twa   121 spd  8.3 S plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 100/100@199 tap n clr n room y eva n
+t  200.5 leg 2 st 0 al  -17.2 up    3.1 twa   143 spd  7.3 S plan P pick L rec n near y shd 0.96 cur -0.00,0.00 Lrounds P pen 0 ask 100/100@199 tap n clr n room y eva n
+t  201.0 leg 2 st 1 al  -15.6 up   -0.2 twa   149 spd  7.4 S plan P pick L rec n near y shd 0.93 cur -0.00,0.00 Lrounds P pen 0 ask 100/100@199 tap n clr n room y eva n
+t  201.5 leg 2 st 1 al  -14.4 up   -3.8 twa   157 spd  7.4 S plan S pick L rec n near y shd 0.91 cur -0.00,0.00 Lrounds P pen 0 ask 113/113@201 tap n clr n room y eva n
+t  202.0 leg 2 st 1 al  -13.5 up   -7.4 twa   163 spd  7.5 S plan S pick L rec n near y shd 0.90 cur -0.00,0.00 Lrounds P pen 0 ask 103/103@202 tap n clr y room y eva n
+t  202.5 leg 2 st 1 al  -13.0 up  -11.0 twa   171 spd  7.4 S plan S pick L rec n near y shd 0.90 cur -0.00,0.00 Lrounds P pen 0 ask 92/92@202 tap n clr y room y eva n
+t  203.0 leg 2 st 1 al  -13.0 up  -14.7 twa   179 spd  7.1 S plan S pick L rec n near y shd 0.91 cur -0.00,0.00 Lrounds P pen 0 ask 82/82@203 tap n clr y room y eva n
+t  203.5 leg 2 st 1 al  -13.5 up  -18.1 twa  -174 spd  6.8 S plan S pick L rec n near y shd 0.93 cur -0.00,0.00 Lrounds P pen 0 ask 73/73@203 tap n clr y room y eva n
+t  204.0 leg 2 st 1 al  -14.3 up  -21.3 twa  -166 spd  6.3 S plan S pick L rec n near y shd 0.94 cur -0.00,0.00 Lrounds P pen 0 ask 64/64@204 tap n clr y room y eva n
+t  204.5 leg 2 st 1 al  -15.4 up  -24.1 twa  -158 spd  5.6 P plan P pick L rec n near y shd 0.97 cur -0.00,0.00 Lrounds P pen 0 ask 56/56@204 tap n clr y room y eva n
+t  205.0 leg 2 st 1 al  -16.7 up  -26.4 twa  -150 spd  5.3 P plan P pick L rec n near y shd 0.98 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  205.5 leg 2 st 1 al  -18.2 up  -28.5 twa  -142 spd  5.2 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  206.0 leg 2 st 1 al  -20.0 up  -30.4 twa  -134 spd  5.2 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  206.5 leg 2 st 1 al  -22.0 up  -32.1 twa  -126 spd  5.3 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  207.0 leg 2 st 1 al  -24.3 up  -33.6 twa  -118 spd  5.5 P plan P pick L rec n near y shd 0.99 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  207.5 leg 3 st 0 al  -26.9 up  -34.8 twa  -110 spd  5.9 P plan P pick - rec n near n shd 0.99 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  208.0 leg 3 st 0 al  -29.7 up  -35.7 twa  -103 spd  6.1 P plan P pick - rec n near n shd 0.99 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  208.5 leg 3 st 0 al  -32.7 up  -36.3 twa   -95 spd  6.1 P plan P pick - rec n near n shd 0.99 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  209.0 leg 3 st 0 al  -35.8 up  -36.5 twa   -87 spd  6.2 P plan P pick - rec n near n shd 0.99 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  209.5 leg 3 st 0 al  -39.0 up  -36.3 twa   -80 spd  6.3 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  210.0 leg 3 st 0 al  -42.1 up  -35.7 twa   -72 spd  6.4 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  210.5 leg 3 st 0 al  -45.1 up  -34.7 twa   -65 spd  6.4 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  211.0 leg 3 st 0 al  -48.0 up  -33.4 twa   -57 spd  6.4 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  211.5 leg 3 st 0 al  -50.7 up  -31.8 twa   -53 spd  6.3 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  212.0 leg 3 st 0 al  -53.4 up  -30.1 twa   -53 spd  6.2 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  212.5 leg 3 st 0 al  -56.0 up  -28.5 twa   -53 spd  6.2 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  213.0 leg 3 st 0 al  -58.7 up  -26.9 twa   -53 spd  6.2 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  213.5 leg 3 st 0 al  -61.3 up  -25.3 twa   -53 spd  6.1 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  214.0 leg 3 st 0 al  -63.9 up  -23.7 twa   -53 spd  6.1 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  214.5 leg 3 st 0 al  -66.5 up  -22.1 twa   -53 spd  6.1 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  215.0 leg 3 st 0 al  -69.1 up  -20.5 twa   -53 spd  6.1 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  215.5 leg 3 st 0 al  -71.7 up  -18.9 twa   -53 spd  6.1 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  216.0 leg 3 st 0 al  -74.3 up  -17.3 twa   -54 spd  6.1 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  216.5 leg 3 st 0 al  -76.9 up  -15.9 twa   -54 spd  6.0 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  217.0 leg 3 st 0 al  -79.5 up  -14.4 twa   -54 spd  6.0 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  217.5 leg 3 st 0 al  -82.1 up  -12.9 twa   -53 spd  6.0 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  218.0 leg 3 st 0 al  -84.7 up  -11.4 twa   -53 spd  6.0 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  218.5 leg 3 st 0 al  -87.4 up  -10.0 twa   -55 spd  6.0 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  219.0 leg 3 st 0 al  -90.0 up   -8.6 twa   -54 spd  6.0 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  219.5 leg 3 st 0 al  -92.7 up   -7.2 twa   -53 spd  6.0 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  220.0 leg 3 st 0 al  -95.4 up   -5.9 twa   -55 spd  6.0 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  220.5 leg 3 st 0 al  -98.1 up   -4.6 twa   -54 spd  6.0 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  221.0 leg 3 st 0 al -100.8 up   -3.4 twa   -54 spd  5.9 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  221.5 leg 3 st 0 al -103.5 up   -2.2 twa   -55 spd  5.9 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+t  222.0 leg 3 st 0 al -106.2 up   -1.0 twa   -55 spd  5.9 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 49/49@205 tap y clr y room y eva n
+TAIL fellmere@1 gusty-offshore@7 12 seat 4 club leg 2 R deepest 10.0 still false
+TAIL fellmere@1 gusty-offshore@7 12 seat 5 national leg 2 L deepest 8.6 still false
+TAIL fellmere@1 gusty-offshore@7 12 seat 6 club leg 2 R deepest 4.8 still false
+TAIL fellmere@1 gusty-offshore@7 12 seat 7 club leg 2 R deepest 5.8 still false
+TAIL fellmere@1 light-and-patchy@7 12 seat 0 national leg 2 L deepest 5.5 still false
+TAIL fellmere@1 light-and-patchy@7 12 seat 1 regional leg 2 R deepest 7.0 still false
+TAIL fellmere@1 light-and-patchy@7 12 seat 2 regional leg 2 L deepest 6.5 still false
+TAIL fellmere@1 light-and-patchy@7 12 seat 3 national leg 2 R deepest 6.2 still false
+TAIL fellmere@1 light-and-patchy@7 12 seat 4 club leg 2 R deepest 6.7 still false
+TAIL fellmere@1 light-and-patchy@7 12 seat 5 national leg 2 R deepest 6.3 still false
+TAIL fellmere@1 light-and-patchy@7 12 seat 6 club leg 2 R deepest 6.2 still false
+TAIL fellmere@1 light-and-patchy@7 12 seat 7 club leg 2 R deepest 7.9 still false
+TAIL hollin-bay@1 classic-oscillating@7 12 seat 0 national leg 2 L deepest 7.8 still false
+TAIL hollin-bay@1 classic-oscillating@7 12 seat 1 regional leg 2 L deepest 7.5 still false
+TAIL hollin-bay@1 classic-oscillating@7 12 seat 2 regional leg 2 R deepest 6.7 still false
+TAIL hollin-bay@1 classic-oscillating@7 12 seat 3 national leg 2 L deepest 6.5 still false
+TAIL hollin-bay@1 classic-oscillating@7 12 seat 4 club leg 2 L deepest 5.1 still false
+TAIL hollin-bay@1 classic-oscillating@7 12 seat 5 national leg 2 L deepest 6.5 still false
+TAIL hollin-bay@1 classic-oscillating@7 12 seat 6 club leg 2 R deepest 5.8 still false
+TAIL hollin-bay@1 classic-oscillating@7 12 seat 7 club leg 2 R deepest 7.0 still false
+TAIL hollin-bay@1 sea-breeze@7 12 seat 0 national leg 2 L deepest 8.0 still false
+TAIL hollin-bay@1 sea-breeze@7 12 seat 1 regional leg 2 R deepest 6.3 still false
+TAIL hollin-bay@1 sea-breeze@7 12 seat 2 regional leg 2 L deepest 4.9 still false
+TAIL hollin-bay@1 sea-breeze@7 12 seat 3 national leg 2 L deepest 6.9 still false
+TAIL hollin-bay@1 sea-breeze@7 12 seat 4 club leg 2 R deepest 10.2 still false
+TAIL hollin-bay@1 sea-breeze@7 12 seat 5 national leg 2 L deepest 14.2 still false
+TAIL hollin-bay@1 sea-breeze@7 12 seat 6 club leg 2 L deepest 8.2 still false
+TAIL hollin-bay@1 sea-breeze@7 12 seat 7 club leg 2 L deepest 8.4 still false
+TAIL saltings-reach@1 classic-oscillating@7 12 seat 0 national leg 2 L deepest 11.0 still false
+TAIL saltings-reach@1 classic-oscillating@7 12 seat 1 regional leg 2 R deepest 8.6 still false
+TAIL saltings-reach@1 classic-oscillating@7 12 seat 2 regional leg 2 R deepest 7.3 still false
+TAIL saltings-reach@1 classic-oscillating@7 12 seat 3 national leg 2 L deepest 7.2 still false
+TAIL saltings-reach@1 classic-oscillating@7 12 seat 4 club leg 2 R deepest 7.2 still false
+TAIL saltings-reach@1 classic-oscillating@7 12 seat 5 national leg 2 L deepest 9.6 still false
+TAIL saltings-reach@1 classic-oscillating@7 12 seat 6 club leg 2 R deepest 10.9 still false
+TAIL saltings-reach@1 classic-oscillating@7 12 seat 7 club leg 2 L deepest 12.3 still false
+TAIL saltings-reach@1 gusty-offshore@7 12 seat 0 national leg 2 R deepest 7.0 still false
+TAIL saltings-reach@1 gusty-offshore@7 12 seat 1 regional leg 2 R deepest 5.2 still false
+TAIL saltings-reach@1 gusty-offshore@7 12 seat 2 regional leg 2 R deepest 7.3 still false
+TAIL saltings-reach@1 gusty-offshore@7 12 seat 3 national leg 2 L deepest 9.0 still false
+TAIL saltings-reach@1 gusty-offshore@7 12 seat 4 club leg 2 R deepest 6.6 still false
+TAIL saltings-reach@1 gusty-offshore@7 12 seat 5 national leg 2 L deepest 10.1 still false
+TAIL saltings-reach@1 gusty-offshore@7 12 seat 6 club leg 2 R deepest 7.7 still false
+TAIL saltings-reach@1 gusty-offshore@7 12 seat 7 club leg 2 R deepest 6.4 still false
+TAIL dev-venue@7 classic-oscillating@7 13 seat 0 regional leg 2 R deepest 7.4 still false
+TAIL dev-venue@7 classic-oscillating@7 13 seat 1 national leg 2 L deepest 32.4 still false
+== dev-venue@7 classic-oscillating@7 s13 seat 1 tier national leg 2 mark L end t 262.6666666666667 deepest 32.4 last 10.2 gate L SIMD2<Double>(16.038661138704853, 62.79340211262485) R SIMD2<Double>(-32.49821521582933, 56.072417531132345)
+t  237.0 leg 2 st 0 al   19.1 up   88.5 twa  -153 spd  6.0 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 150/150@237 tap y clr y room y eva n
+t  237.5 leg 2 st 0 al   17.9 up   85.8 twa  -153 spd  6.0 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 150/150@237 tap y clr y room y eva n
+t  238.0 leg 2 st 0 al   16.6 up   83.1 twa  -152 spd  6.0 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 150/150@238 tap y clr y room y eva n
+t  238.5 leg 2 st 0 al   15.2 up   80.4 twa  -152 spd  6.0 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 150/150@238 tap y clr y room y eva n
+t  239.0 leg 2 st 0 al   13.9 up   77.7 twa  -153 spd  6.0 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 158/152@239 tap y clr y room y eva n
+t  239.5 leg 2 st 0 al   12.7 up   75.0 twa  -154 spd  6.0 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 159/152@239 tap y clr y room y eva n
+t  240.0 leg 2 st 0 al   11.4 up   72.3 twa  -154 spd  6.0 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 160/152@240 tap y clr y room y eva n
+t  240.5 leg 2 st 0 al   10.1 up   69.6 twa  -154 spd  5.9 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 160/152@240 tap y clr y room y eva n
+t  241.0 leg 2 st 0 al    8.8 up   67.0 twa  -153 spd  5.9 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 161/152@241 tap y clr y room y eva n
+t  241.5 leg 2 st 0 al    7.4 up   64.3 twa  -153 spd  5.9 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 162/152@241 tap y clr y room y eva n
+t  242.0 leg 2 st 0 al    6.0 up   61.7 twa  -153 spd  5.9 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 163/152@242 tap y clr y room y eva n
+t  242.5 leg 2 st 0 al    4.5 up   59.2 twa  -152 spd  5.9 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 164/152@242 tap y clr y room y eva n
+t  243.0 leg 2 st 0 al    3.0 up   56.6 twa  -152 spd  5.9 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 165/152@243 tap y clr y room y eva n
+t  243.5 leg 2 st 0 al    1.5 up   54.1 twa  -152 spd  5.9 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 166/152@243 tap n clr n room y eva n
+t  244.0 leg 2 st 0 al   -0.1 up   51.6 twa  -150 spd  5.9 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 167/152@244 tap n clr n room y eva n
+t  244.5 leg 2 st 0 al   -1.7 up   49.2 twa  -151 spd  5.9 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 169/152@244 tap y clr y room y eva n
+t  245.0 leg 2 st 0 al   -3.3 up   46.7 twa  -151 spd  5.9 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 170/152@245 tap y clr y room y eva n
+t  245.5 leg 2 st 0 al   -5.0 up   44.3 twa  -150 spd  5.9 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 172/152@245 tap y clr y room y eva n
+t  246.0 leg 2 st 0 al   -6.6 up   41.9 twa  -150 spd  5.9 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 174/152@246 tap y clr y room y eva n
+t  246.5 leg 2 st 0 al   -8.3 up   39.5 twa  -151 spd  5.9 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 176/152@246 tap y clr y room y eva n
+t  247.0 leg 2 st 0 al  -10.1 up   37.2 twa  -149 spd  5.8 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 177/152@247 tap y clr y room y eva n
+t  247.5 leg 2 st 0 al  -11.8 up   34.8 twa  -149 spd  5.8 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 177/152@247 tap y clr y room y eva n
+t  248.0 leg 2 st 0 al  -13.6 up   32.5 twa  -150 spd  5.8 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 177/152@248 tap y clr y room y eva n
+t  248.5 leg 2 st 0 al  -15.4 up   30.2 twa  -149 spd  5.8 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 177/152@248 tap y clr y room y eva n
+t  249.0 leg 2 st 0 al  -17.2 up   28.0 twa  -150 spd  5.8 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 125/125@249 tap n clr y room y eva n
+t  249.5 leg 2 st 0 al  -18.8 up   25.6 twa  -157 spd  5.8 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 121/121@249 tap n clr y room y eva n
+t  250.0 leg 2 st 0 al  -20.1 up   23.0 twa  -165 spd  5.7 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 117/117@250 tap n clr y room y eva n
+t  250.5 leg 2 st 0 al  -21.1 up   20.4 twa  -172 spd  5.6 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 113/113@250 tap n clr y room y eva n
+t  251.0 leg 2 st 0 al  -21.7 up   17.7 twa  -180 spd  5.5 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 109/109@251 tap n clr y room y eva y
+t  251.5 leg 2 st 0 al  -21.9 up   15.0 twa   173 spd  5.4 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 106/106@251 tap n clr y room y eva y
+t  252.0 leg 2 st 0 al  -21.9 up   12.4 twa   166 spd  5.2 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 102/102@252 tap y clr y room y eva y
+t  252.5 leg 2 st 0 al  -21.5 up    9.8 twa   158 spd  5.1 S plan S pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 99/99@252 tap n clr n room y eva n
+t  253.0 leg 2 st 0 al  -20.7 up    7.4 twa   151 spd  5.1 S plan S pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 95/95@253 tap n clr n room y eva n
+t  253.5 leg 2 st 0 al  -19.7 up    5.0 twa   144 spd  5.1 S plan S pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 92/92@253 tap n clr n room y eva n
+t  254.0 leg 2 st 0 al  -18.4 up    2.8 twa   136 spd  5.2 S plan S pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 89/89@254 tap n clr n room y eva n
+t  254.5 leg 2 st 0 al  -16.8 up    0.8 twa   129 spd  5.3 S plan S pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 85/85@254 tap n clr n room y eva n
+t  255.0 leg 2 st 1 al  -15.0 up   -1.1 twa   125 spd  5.3 S plan S pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 122/122@255 tap n clr n room y eva n
+t  255.5 leg 2 st 1 al  -13.4 up   -3.2 twa   140 spd  5.1 S plan S pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 115/115@255 tap n clr y room y eva n
+t  256.0 leg 2 st 1 al  -12.2 up   -5.5 twa   148 spd  5.1 S plan S pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 109/109@256 tap n clr y room y eva n
+t  256.5 leg 2 st 1 al  -11.4 up   -7.9 twa   155 spd  5.1 S plan S pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 103/103@256 tap n clr y room y eva n
+t  257.0 leg 2 st 1 al  -10.9 up  -10.4 twa   162 spd  5.1 S plan S pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 97/97@257 tap n clr y room y eva n
+t  257.5 leg 2 st 1 al  -10.7 up  -13.0 twa   170 spd  5.0 S plan S pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 91/91@257 tap n clr y room y eva n
+t  258.0 leg 2 st 1 al  -10.9 up  -15.5 twa   177 spd  5.0 S plan S pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 85/85@258 tap n clr y room y eva n
+t  258.5 leg 2 st 1 al  -11.3 up  -17.9 twa  -176 spd  4.9 S plan S pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 79/79@258 tap y clr y room y eva n
+t  259.0 leg 2 st 1 al  -12.0 up  -20.2 twa  -169 spd  4.8 S plan S pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 74/74@259 tap y clr y room y eva n
+t  259.5 leg 2 st 1 al  -13.0 up  -22.3 twa  -162 spd  4.7 S plan S pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 69/69@259 tap y clr y room y eva n
+t  260.0 leg 2 st 1 al  -14.2 up  -24.3 twa  -155 spd  4.6 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 64/64@260 tap y clr y room y eva n
+t  260.5 leg 2 st 1 al  -15.7 up  -26.1 twa  -148 spd  4.7 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 59/59@260 tap y clr y room y eva n
+t  261.0 leg 2 st 1 al  -17.4 up  -27.7 twa  -141 spd  4.8 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 53/53@261 tap y clr y room y eva n
+t  261.5 leg 2 st 1 al  -19.4 up  -29.2 twa  -134 spd  4.9 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  262.0 leg 2 st 1 al  -21.5 up  -30.4 twa  -127 spd  5.0 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  262.5 leg 2 st 1 al  -23.8 up  -31.4 twa  -120 spd  5.1 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  263.0 leg 3 st 0 al  -26.3 up  -32.0 twa  -113 spd  5.2 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  263.5 leg 3 st 0 al  -28.9 up  -32.4 twa  -106 spd  5.2 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  264.0 leg 3 st 0 al  -31.5 up  -32.4 twa   -98 spd  5.1 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  264.5 leg 3 st 0 al  -34.0 up  -32.1 twa   -91 spd  5.1 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  265.0 leg 3 st 0 al  -36.5 up  -31.5 twa   -84 spd  5.1 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  265.5 leg 3 st 0 al  -38.8 up  -30.7 twa   -77 spd  5.0 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  266.0 leg 3 st 0 al  -41.1 up  -29.5 twa   -69 spd  5.0 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  266.5 leg 3 st 0 al  -43.1 up  -28.0 twa   -62 spd  5.0 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  267.0 leg 3 st 0 al  -44.9 up  -26.4 twa   -55 spd  4.9 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  267.5 leg 3 st 0 al  -46.5 up  -24.5 twa   -47 spd  4.9 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  268.0 leg 3 st 0 al  -48.0 up  -22.6 twa   -46 spd  4.8 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  268.5 leg 3 st 0 al  -49.4 up  -20.6 twa   -45 spd  4.8 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  269.0 leg 3 st 0 al  -50.8 up  -18.7 twa   -45 spd  4.7 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  269.5 leg 3 st 0 al  -52.1 up  -16.8 twa   -44 spd  4.7 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  270.0 leg 3 st 0 al  -53.5 up  -14.9 twa   -44 spd  4.5 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  270.5 leg 3 st 0 al  -54.8 up  -13.1 twa   -45 spd  4.4 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  271.0 leg 3 st 0 al  -56.1 up  -11.4 twa   -45 spd  4.4 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  271.5 leg 3 st 0 al  -57.4 up   -9.6 twa   -44 spd  4.3 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  272.0 leg 3 st 0 al  -58.6 up   -7.9 twa   -43 spd  4.3 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  272.5 leg 3 st 0 al  -59.9 up   -6.1 twa   -43 spd  4.3 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  273.0 leg 3 st 0 al  -61.2 up   -4.4 twa   -44 spd  4.2 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  273.5 leg 3 st 0 al  -62.4 up   -2.8 twa   -44 spd  4.2 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  274.0 leg 3 st 0 al  -63.7 up   -1.1 twa   -43 spd  4.2 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  274.5 leg 3 st 0 al  -64.9 up    0.6 twa   -43 spd  4.1 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  275.0 leg 3 st 0 al  -66.1 up    2.2 twa   -43 spd  4.1 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  275.5 leg 3 st 0 al  -67.4 up    3.8 twa   -44 spd  4.1 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  276.0 leg 3 st 0 al  -68.7 up    5.4 twa   -44 spd  4.1 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  276.5 leg 3 st 0 al  -69.9 up    7.0 twa   -43 spd  4.0 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  277.0 leg 3 st 0 al  -71.1 up    8.6 twa   -43 spd  4.0 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+t  277.5 leg 3 st 0 al  -72.3 up   10.2 twa   -42 spd  4.0 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 48/48@261 tap y clr y room y eva n
+TAIL dev-venue@7 classic-oscillating@7 13 seat 2 regional leg 2 L deepest 6.9 still false
+TAIL dev-venue@7 classic-oscillating@7 13 seat 3 club leg 2 L deepest 5.5 still false
+TAIL dev-venue@7 classic-oscillating@7 13 seat 4 club leg 2 L deepest 7.4 still false
+TAIL dev-venue@7 classic-oscillating@7 13 seat 5 club leg 2 L deepest 6.6 still false
+TAIL dev-venue@7 classic-oscillating@7 13 seat 6 club leg 2 L deepest 4.9 still false
+TAIL dev-venue@7 classic-oscillating@7 13 seat 7 national leg 2 L deepest 7.6 still false
+TAIL dev-venue@7 gusty-offshore@7 13 seat 0 regional leg 2 L deepest 6.9 still false
+TAIL dev-venue@7 gusty-offshore@7 13 seat 1 national leg 2 L deepest 7.3 still false
+TAIL dev-venue@7 gusty-offshore@7 13 seat 2 regional leg 2 R deepest 7.1 still false
+TAIL dev-venue@7 gusty-offshore@7 13 seat 3 club leg 2 L deepest 6.4 still false
+TAIL dev-venue@7 gusty-offshore@7 13 seat 4 club leg 2 L deepest 4.9 still false
+TAIL dev-venue@7 gusty-offshore@7 13 seat 5 club leg 2 R deepest 16.6 still false
+TAIL dev-venue@7 gusty-offshore@7 13 seat 6 club leg 2 L deepest 7.8 still false
+TAIL dev-venue@7 gusty-offshore@7 13 seat 7 national leg 2 L deepest 6.4 still false
+TAIL dev-venue@7 light-and-patchy@7 13 seat 0 regional leg 2 L deepest 6.6 still false
+TAIL dev-venue@7 light-and-patchy@7 13 seat 1 national leg 2 L deepest 5.8 still false
+TAIL dev-venue@7 light-and-patchy@7 13 seat 2 regional leg 2 R deepest 6.6 still false
+TAIL dev-venue@7 light-and-patchy@7 13 seat 3 club leg 2 R deepest 7.4 still false
+TAIL dev-venue@7 light-and-patchy@7 13 seat 4 club leg 2 L deepest 5.9 still false
+TAIL dev-venue@7 light-and-patchy@7 13 seat 5 club leg 2 R deepest 7.0 still false
+TAIL dev-venue@7 light-and-patchy@7 13 seat 6 club leg 2 L deepest 15.3 still true
+TAIL dev-venue@7 light-and-patchy@7 13 seat 7 national leg 2 R deepest 5.5 still false
+TAIL dev-venue@7 sea-breeze@7 13 seat 0 regional leg 2 L deepest 40.6 still true
+== dev-venue@7 sea-breeze@7 s13 seat 0 tier regional leg 2 mark L end t 243.2 deepest 40.6 last -8.2 gate L SIMD2<Double>(16.038661138704853, 62.79340211262485) R SIMD2<Double>(-32.49821521582933, 56.072417531132345)
+t  221.0 leg 2 st 0 al   17.7 up   89.3 twa  -135 spd  7.6 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 138/138@221 tap y clr y room y eva n
+t  221.5 leg 2 st 0 al   15.3 up   86.3 twa  -135 spd  7.6 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 138/138@221 tap y clr y room y eva n
+t  222.0 leg 2 st 0 al   12.9 up   83.3 twa  -136 spd  7.6 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 138/138@222 tap y clr y room y eva n
+t  222.5 leg 2 st 0 al   10.5 up   80.4 twa  -134 spd  7.6 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 138/138@222 tap y clr y room y eva n
+t  223.0 leg 2 st 0 al    8.0 up   77.6 twa  -137 spd  7.6 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 160/154@223 tap y clr y room y eva n
+t  223.5 leg 2 st 0 al    5.8 up   74.5 twa  -145 spd  7.6 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 161/153@223 tap y clr y room y eva n
+t  224.0 leg 2 st 0 al    4.0 up   71.1 twa  -152 spd  7.5 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 163/154@224 tap y clr y room y eva n
+t  224.5 leg 2 st 0 al    2.2 up   67.8 twa  -148 spd  7.5 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 164/153@224 tap y clr y room y eva n
+t  225.0 leg 2 st 0 al    0.3 up   64.6 twa  -149 spd  7.5 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 166/154@225 tap y clr y room y eva n
+t  225.5 leg 2 st 0 al   -1.6 up   61.4 twa  -149 spd  7.5 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 167/153@225 tap y clr y room y eva n
+t  226.0 leg 2 st 0 al   -3.6 up   58.2 twa  -148 spd  7.5 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 169/153@226 tap y clr y room y eva n
+t  226.5 leg 2 st 0 al   -5.7 up   55.1 twa  -147 spd  7.4 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 171/153@226 tap y clr y room y eva n
+t  227.0 leg 2 st 0 al   -7.8 up   52.1 twa  -148 spd  7.4 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 174/154@227 tap y clr y room y eva n
+t  227.5 leg 2 st 0 al   -9.8 up   49.0 twa  -150 spd  7.4 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 176/153@227 tap y clr y room y eva n
+t  228.0 leg 2 st 0 al  -11.9 up   45.9 twa  -148 spd  7.4 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 177/153@228 tap y clr y room y eva n
+t  228.5 leg 2 st 0 al  -14.1 up   42.9 twa  -149 spd  7.4 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 177/153@228 tap y clr y room y eva n
+t  229.0 leg 2 st 0 al  -16.2 up   39.9 twa  -151 spd  7.4 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 177/153@229 tap y clr y room y eva n
+t  229.5 leg 2 st 0 al  -18.2 up   36.8 twa  -151 spd  7.3 P plan P pick L rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 177/153@229 tap y clr y room y eva n
+t  230.0 leg 2 st 0 al  -20.3 up   33.8 twa  -154 spd  7.3 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 130/130@230 tap n clr y room y eva n
+t  230.5 leg 2 st 0 al  -22.0 up   30.6 twa  -161 spd  7.2 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 126/126@230 tap n clr y room y eva n
+t  231.0 leg 2 st 0 al  -23.3 up   27.3 twa  -169 spd  7.1 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 121/121@231 tap n clr y room y eva n
+t  231.5 leg 2 st 0 al  -24.1 up   23.9 twa  -176 spd  7.0 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 117/117@231 tap n clr y room y eva n
+t  232.0 leg 2 st 0 al  -24.5 up   20.4 twa   176 spd  6.8 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 113/113@232 tap n clr y room y eva n
+t  232.5 leg 2 st 0 al  -24.5 up   17.1 twa   169 spd  6.7 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 109/109@232 tap n clr y room y eva y
+t  233.0 leg 2 st 0 al  -24.0 up   13.8 twa   162 spd  6.5 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 105/105@233 tap y clr y room y eva y
+t  233.5 leg 2 st 0 al  -23.2 up   10.7 twa   155 spd  6.4 S plan S pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 102/102@233 tap n clr n room y eva n
+t  234.0 leg 2 st 0 al  -22.0 up    7.7 twa   147 spd  6.4 S plan S pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 98/98@234 tap n clr n room y eva n
+t  234.5 leg 2 st 0 al  -20.4 up    4.9 twa   140 spd  6.5 S plan S pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 95/95@234 tap n clr n room y eva n
+t  235.0 leg 2 st 0 al  -18.5 up    2.3 twa   133 spd  6.5 S plan S pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 91/91@235 tap n clr n room y eva n
+t  235.5 leg 2 st 1 al  -16.2 up   -0.1 twa   126 spd  6.6 S plan S pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 88/88@235 tap n clr n room y eva n
+t  236.0 leg 2 st 1 al  -13.9 up   -2.3 twa   132 spd  6.5 S plan S pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 116/116@236 tap n clr n room y eva n
+t  236.5 leg 2 st 1 al  -12.2 up   -5.0 twa   146 spd  6.3 S plan S pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 108/108@236 tap n clr y room y eva n
+t  237.0 leg 2 st 1 al  -10.9 up   -7.9 twa   153 spd  6.3 S plan S pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 100/100@237 tap n clr y room y eva n
+t  237.5 leg 2 st 1 al  -10.0 up  -10.9 twa   161 spd  6.3 S plan S pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 93/93@237 tap n clr y room y eva n
+t  238.0 leg 2 st 1 al   -9.4 up  -14.0 twa   168 spd  6.3 S plan S pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 86/86@238 tap n clr y room y eva n
+t  238.5 leg 2 st 1 al   -9.3 up  -17.1 twa   175 spd  6.2 S plan S pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 79/79@238 tap n clr y room y eva n
+t  239.0 leg 2 st 1 al   -9.6 up  -20.2 twa  -178 spd  6.1 S plan S pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 73/73@239 tap n clr y room y eva n
+t  239.5 leg 2 st 1 al  -10.2 up  -23.1 twa  -171 spd  6.0 S plan S pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 67/67@239 tap y clr y room y eva n
+t  240.0 leg 2 st 1 al  -11.2 up  -25.9 twa  -164 spd  5.9 S plan S pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 61/61@240 tap y clr y room y eva n
+t  240.5 leg 2 st 1 al  -12.4 up  -28.5 twa  -157 spd  5.8 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 56/56@240 tap y clr y room y eva n
+t  241.0 leg 2 st 1 al  -14.0 up  -30.9 twa  -150 spd  5.9 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 51/51@241 tap y clr y room y eva n
+t  241.5 leg 2 st 1 al  -16.0 up  -33.2 twa  -143 spd  6.0 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap y clr y room y eva n
+t  242.0 leg 2 st 1 al  -18.2 up  -35.2 twa  -136 spd  6.1 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap y clr y room y eva n
+t  242.5 leg 2 st 1 al  -20.7 up  -36.9 twa  -129 spd  6.2 P plan P pick R rec n near y shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap y clr y room y eva n
+t  243.0 leg 2 st 1 al  -23.4 up  -38.4 twa  -122 spd  6.2 P plan P pick R rec n near y shd 0.99 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap y clr y room y eva n
+t  243.5 leg 3 st 0 al  -26.4 up  -39.5 twa  -115 spd  6.3 P plan P pick - rec n near n shd 0.98 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap y clr y room y eva n
+t  244.0 leg 3 st 0 al  -29.4 up  -40.2 twa  -108 spd  6.3 P plan P pick - rec n near n shd 0.98 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap y clr y room y eva n
+t  244.5 leg 3 st 0 al  -32.5 up  -40.6 twa  -101 spd  6.0 P plan P pick - rec n near n shd 0.97 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap y clr y room y eva n
+t  245.0 leg 3 st 0 al  -35.5 up  -40.5 twa   -93 spd  5.8 P plan P pick - rec n near n shd 0.96 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap y clr y room y eva n
+t  245.5 leg 3 st 0 al  -38.3 up  -40.1 twa   -86 spd  5.7 P plan P pick - rec n near n shd 0.97 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap y clr y room y eva n
+t  246.0 leg 3 st 0 al  -41.1 up  -39.4 twa   -79 spd  5.7 P plan P pick - rec n near n shd 0.98 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap y clr y room y eva n
+t  246.5 leg 3 st 0 al  -43.7 up  -38.3 twa   -71 spd  5.6 P plan P pick - rec n near n shd 0.99 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap y clr y room y eva n
+t  247.0 leg 3 st 0 al  -46.1 up  -36.9 twa   -64 spd  5.5 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap y clr y room y eva n
+t  247.5 leg 3 st 0 al  -48.3 up  -35.3 twa   -57 spd  5.4 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap y clr y room y eva n
+t  248.0 leg 3 st 0 al  -50.2 up  -33.4 twa   -49 spd  5.2 P plan P pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap y clr y room y eva n
+t  248.5 leg 3 st 0 al  -51.7 up  -31.4 twa   -37 spd  5.0 P plan S pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap n clr y room y eva n
+t  249.0 leg 3 st 0 al  -52.6 up  -29.2 twa   -21 spd  4.4 P plan S pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap n clr y room y eva n
+t  249.5 leg 3 st 0 al  -52.9 up  -27.2 twa    -6 spd  3.9 P plan S pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap n clr y room y eva n
+t  250.0 leg 3 st 0 al  -52.6 up  -25.4 twa     9 spd  3.4 S plan S pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap n clr y room y eva n
+t  250.5 leg 3 st 0 al  -52.0 up  -24.0 twa    23 spd  3.0 S plan S pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap n clr y room y eva n
+t  251.0 leg 3 st 0 al  -51.2 up  -22.8 twa    29 spd  2.7 S plan S pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap n clr y room y eva n
+t  251.5 leg 3 st 0 al  -50.4 up  -21.7 twa    34 spd  2.7 S plan S pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap n clr y room y eva n
+t  252.0 leg 3 st 0 al  -49.6 up  -20.7 twa    34 spd  2.7 S plan S pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap n clr y room y eva n
+t  252.5 leg 3 st 0 al  -48.7 up  -19.6 twa    34 spd  2.7 S plan S pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap n clr y room y eva n
+t  253.0 leg 3 st 0 al  -47.9 up  -18.6 twa    34 spd  2.7 S plan S pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap n clr y room y eva n
+t  253.5 leg 3 st 0 al  -47.0 up  -17.6 twa    34 spd  2.7 S plan S pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap n clr y room y eva n
+t  254.0 leg 3 st 0 al  -46.2 up  -16.5 twa    34 spd  2.7 S plan S pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap n clr y room y eva n
+t  254.5 leg 3 st 0 al  -45.3 up  -15.5 twa    33 spd  2.7 S plan S pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap n clr y room y eva n
+t  255.0 leg 3 st 0 al  -44.5 up  -14.4 twa    33 spd  2.7 S plan S pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap n clr y room y eva n
+t  255.5 leg 3 st 0 al  -43.7 up  -13.3 twa    33 spd  2.7 S plan S pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap n clr y room y eva n
+t  256.0 leg 3 st 0 al  -42.9 up  -12.3 twa    32 spd  2.7 S plan S pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap n clr y room y eva n
+t  256.5 leg 3 st 0 al  -42.1 up  -11.2 twa    31 spd  2.7 S plan S pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap n clr y room y eva n
+t  257.0 leg 3 st 0 al  -41.4 up  -10.1 twa    29 spd  2.5 S plan S pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap n clr y room y eva n
+t  257.5 leg 3 st 0 al  -40.7 up   -9.1 twa    29 spd  2.3 S plan S pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap n clr y room y eva n
+t  258.0 leg 3 st 0 al  -40.2 up   -8.2 twa    29 spd  2.1 S plan S pick - rec n near n shd 1.00 cur -0.00,0.00 Lrounds P pen 0 ask 47/47@241 tap n clr y room y eva n
+TAIL dev-venue@7 sea-breeze@7 13 seat 1 national leg 2 R deepest 27.6 still false
+TAIL dev-venue@7 sea-breeze@7 13 seat 2 regional leg 2 L deepest 6.9 still false
+TAIL dev-venue@7 sea-breeze@7 13 seat 3 club leg 2 R deepest 7.2 still false
+TAIL dev-venue@7 sea-breeze@7 13 seat 4 club leg 2 R deepest 16.9 still false
+TAIL dev-venue@7 sea-breeze@7 13 seat 5 club leg 2 R deepest 8.1 still false
+TAIL dev-venue@7 sea-breeze@7 13 seat 6 club leg 2 R deepest 4.8 still false
+TAIL dev-venue@7 sea-breeze@7 13 seat 7 national leg 2 L deepest 7.6 still false
+TAIL fellmere@1 gusty-offshore@7 13 seat 0 regional leg 2 R deepest 9.1 still false
+TAIL fellmere@1 gusty-offshore@7 13 seat 1 national leg 2 R deepest 8.8 still false
+TAIL fellmere@1 gusty-offshore@7 13 seat 2 regional leg 2 L deepest 5.9 still false
+TAIL fellmere@1 gusty-offshore@7 13 seat 3 club leg 2 R deepest 4.9 still false
+TAIL fellmere@1 gusty-offshore@7 13 seat 4 club leg 2 R deepest 7.3 still false
+TAIL fellmere@1 gusty-offshore@7 13 seat 5 club leg 2 L deepest 6.5 still false
+TAIL fellmere@1 gusty-offshore@7 13 seat 6 club leg 2 R deepest 6.7 still false
+TAIL fellmere@1 gusty-offshore@7 13 seat 7 national leg 2 L deepest 6.2 still false
+TAIL fellmere@1 light-and-patchy@7 13 seat 0 regional leg 2 R deepest 6.2 still false
+TAIL fellmere@1 light-and-patchy@7 13 seat 1 national leg 2 L deepest 5.4 still false
+TAIL fellmere@1 light-and-patchy@7 13 seat 2 regional leg 2 R deepest 6.4 still false
+TAIL fellmere@1 light-and-patchy@7 13 seat 3 club leg 2 L deepest 5.2 still false
+TAIL fellmere@1 light-and-patchy@7 13 seat 4 club leg 2 L deepest 6.9 still false
+TAIL fellmere@1 light-and-patchy@7 13 seat 5 club leg 2 R deepest 6.3 still false
+TAIL fellmere@1 light-and-patchy@7 13 seat 6 club leg 2 L deepest 6.9 still false
+TAIL fellmere@1 light-and-patchy@7 13 seat 7 national leg 2 L deepest 6.4 still false
+TAIL hollin-bay@1 classic-oscillating@7 13 seat 0 regional leg 2 L deepest 6.1 still false
+TAIL hollin-bay@1 classic-oscillating@7 13 seat 1 national leg 2 R deepest 6.7 still false
+TAIL hollin-bay@1 classic-oscillating@7 13 seat 2 regional leg 2 L deepest 4.7 still false
+TAIL hollin-bay@1 classic-oscillating@7 13 seat 3 club leg 2 R deepest 6.5 still false
+TAIL hollin-bay@1 classic-oscillating@7 13 seat 4 club leg 2 L deepest 7.0 still false
+TAIL hollin-bay@1 classic-oscillating@7 13 seat 5 club leg 2 L deepest 7.1 still false
+TAIL hollin-bay@1 classic-oscillating@7 13 seat 6 club leg 2 L deepest 7.1 still false
+TAIL hollin-bay@1 classic-oscillating@7 13 seat 7 national leg 2 L deepest 7.2 still false
+TAIL hollin-bay@1 sea-breeze@7 13 seat 0 regional leg 2 R deepest 7.3 still false
+TAIL hollin-bay@1 sea-breeze@7 13 seat 1 national leg 2 R deepest 7.0 still false
+TAIL hollin-bay@1 sea-breeze@7 13 seat 2 regional leg 2 R deepest 8.4 still false
+TAIL hollin-bay@1 sea-breeze@7 13 seat 3 club leg 2 L deepest 8.8 still false
+TAIL hollin-bay@1 sea-breeze@7 13 seat 4 club leg 2 R deepest 6.6 still false
+TAIL hollin-bay@1 sea-breeze@7 13 seat 5 club leg 2 R deepest 6.9 still false
+TAIL hollin-bay@1 sea-breeze@7 13 seat 6 club leg 2 R deepest 7.3 still false
+TAIL hollin-bay@1 sea-breeze@7 13 seat 7 national leg 2 L deepest 7.7 still false
+TAIL saltings-reach@1 classic-oscillating@7 13 seat 0 regional leg 2 L deepest 7.2 still false
+TAIL saltings-reach@1 classic-oscillating@7 13 seat 1 national leg 2 R deepest 7.6 still false
+TAIL saltings-reach@1 classic-oscillating@7 13 seat 2 regional leg 2 L deepest 7.7 still false
+TAIL saltings-reach@1 classic-oscillating@7 13 seat 3 club leg 2 L deepest 8.6 still false
+TAIL saltings-reach@1 classic-oscillating@7 13 seat 4 club leg 2 L deepest 6.4 still false
+TAIL saltings-reach@1 classic-oscillating@7 13 seat 5 club leg 2 L deepest 7.8 still false
+TAIL saltings-reach@1 classic-oscillating@7 13 seat 6 club leg 2 R deepest 9.4 still false
+TAIL saltings-reach@1 classic-oscillating@7 13 seat 7 national leg 2 L deepest 6.5 still false
+TAIL saltings-reach@1 gusty-offshore@7 13 seat 0 regional leg 2 R deepest 7.6 still false
+TAIL saltings-reach@1 gusty-offshore@7 13 seat 1 national leg 2 L deepest 9.5 still false
+TAIL saltings-reach@1 gusty-offshore@7 13 seat 2 regional leg 2 L deepest 10.1 still false
+TAIL saltings-reach@1 gusty-offshore@7 13 seat 3 club leg 2 L deepest 6.2 still false
+TAIL saltings-reach@1 gusty-offshore@7 13 seat 4 club leg 2 L deepest 10.3 still false
+TAIL saltings-reach@1 gusty-offshore@7 13 seat 5 club leg 2 L deepest 9.7 still false
+TAIL saltings-reach@1 gusty-offshore@7 13 seat 6 club leg 2 R deepest 7.9 still false
+TAIL saltings-reach@1 gusty-offshore@7 13 seat 7 national leg 2 L deepest 9.2 still false
+TAIL dev-venue@7 classic-oscillating@7 14 seat 0 national leg 2 L deepest 7.2 still false
+TAIL dev-venue@7 classic-oscillating@7 14 seat 1 club leg 2 R deepest 7.2 still false
+TAIL dev-venue@7 classic-oscillating@7 14 seat 2 national leg 2 R deepest 6.0 still false
+TAIL dev-venue@7 classic-oscillating@7 14 seat 3 regional leg 2 L deepest 10.4 still false
+TAIL dev-venue@7 classic-oscillating@7 14 seat 4 club leg 2 L deepest 5.1 still false
+TAIL dev-venue@7 classic-oscillating@7 14 seat 5 regional leg 2 L deepest 7.5 still false
+TAIL dev-venue@7 classic-oscillating@7 14 seat 6 club leg 2 R deepest 7.8 still false
+TAIL dev-venue@7 classic-oscillating@7 14 seat 7 national leg 2 L deepest 7.4 still false
+TAIL dev-venue@7 gusty-offshore@7 14 seat 0 national leg 2 L deepest 7.2 still false
+TAIL dev-venue@7 gusty-offshore@7 14 seat 1 club leg 2 L deepest 13.3 still false
+TAIL dev-venue@7 gusty-offshore@7 14 seat 2 national leg 2 L deepest 6.9 still false
+TAIL dev-venue@7 gusty-offshore@7 14 seat 3 regional leg 2 L deepest 5.8 still false
+TAIL dev-venue@7 gusty-offshore@7 14 seat 4 club leg 2 L deepest 6.5 still false
+TAIL dev-venue@7 gusty-offshore@7 14 seat 5 regional leg 2 R deepest 9.5 still false
+TAIL dev-venue@7 gusty-offshore@7 14 seat 6 club leg 2 L deepest 6.3 still false
+TAIL dev-venue@7 gusty-offshore@7 14 seat 7 national leg 2 L deepest 6.6 still false
+TAIL dev-venue@7 light-and-patchy@7 14 seat 0 national leg 2 L deepest 6.9 still false
+TAIL dev-venue@7 light-and-patchy@7 14 seat 1 club leg 2 R deepest 6.9 still false
+TAIL dev-venue@7 light-and-patchy@7 14 seat 2 national leg 2 R deepest 5.5 still false
+TAIL dev-venue@7 light-and-patchy@7 14 seat 3 regional leg 2 L deepest 6.6 still false
+TAIL dev-venue@7 light-and-patchy@7 14 seat 4 club leg 2 L deepest 7.8 still false
+TAIL dev-venue@7 light-and-patchy@7 14 seat 5 regional leg 2 L deepest 6.0 still false
+TAIL dev-venue@7 light-and-patchy@7 14 seat 6 club leg 2 L deepest 6.7 still false
+TAIL dev-venue@7 light-and-patchy@7 14 seat 7 national leg 2 R deepest 6.7 still false
+TAIL dev-venue@7 sea-breeze@7 14 seat 0 national leg 2 L deepest 5.6 still false
+TAIL dev-venue@7 sea-breeze@7 14 seat 1 club leg 2 L deepest 8.5 still false
+TAIL dev-venue@7 sea-breeze@7 14 seat 2 national leg 2 L deepest 6.6 still false
+TAIL dev-venue@7 sea-breeze@7 14 seat 3 regional leg 2 L deepest 21.4 still false
+TAIL dev-venue@7 sea-breeze@7 14 seat 4 club leg 2 R deepest 6.9 still false
+TAIL dev-venue@7 sea-breeze@7 14 seat 5 regional leg 2 L deepest 8.9 still false
+TAIL dev-venue@7 sea-breeze@7 14 seat 6 club leg 2 L deepest 6.9 still false
+TAIL dev-venue@7 sea-breeze@7 14 seat 7 national leg 2 L deepest 9.0 still false
+TAIL fellmere@1 gusty-offshore@7 14 seat 0 national leg 2 R deepest 5.9 still false
+TAIL fellmere@1 gusty-offshore@7 14 seat 1 club leg 2 R deepest 5.2 still false
+TAIL fellmere@1 gusty-offshore@7 14 seat 2 national leg 2 L deepest 8.0 still false
+TAIL fellmere@1 gusty-offshore@7 14 seat 3 regional leg 2 L deepest 7.5 still false
+TAIL fellmere@1 gusty-offshore@7 14 seat 4 club leg 2 L deepest 8.7 still false
+TAIL fellmere@1 gusty-offshore@7 14 seat 5 regional leg 2 R deepest 5.1 still false
+TAIL fellmere@1 gusty-offshore@7 14 seat 6 club leg 2 L deepest 7.5 still false
+TAIL fellmere@1 gusty-offshore@7 14 seat 7 national leg 2 L deepest 8.3 still false
+TAIL fellmere@1 light-and-patchy@7 14 seat 0 national leg 2 R deepest 5.8 still false
+TAIL fellmere@1 light-and-patchy@7 14 seat 1 club leg 2 L deepest 6.3 still false
+TAIL fellmere@1 light-and-patchy@7 14 seat 2 national leg 2 L deepest 6.2 still false
+TAIL fellmere@1 light-and-patchy@7 14 seat 3 regional leg 2 R deepest 7.4 still false
+TAIL fellmere@1 light-and-patchy@7 14 seat 4 club leg 2 R deepest 6.6 still false
+TAIL fellmere@1 light-and-patchy@7 14 seat 5 regional leg 2 R deepest 12.3 still false
+TAIL fellmere@1 light-and-patchy@7 14 seat 6 club leg 2 R deepest 7.0 still false
+TAIL fellmere@1 light-and-patchy@7 14 seat 7 national leg 2 L deepest 5.6 still false
+TAIL hollin-bay@1 classic-oscillating@7 14 seat 0 national leg 2 L deepest 6.1 still false
+TAIL hollin-bay@1 classic-oscillating@7 14 seat 1 club leg 2 R deepest 7.3 still false
+TAIL hollin-bay@1 classic-oscillating@7 14 seat 2 national leg 2 L deepest 6.9 still false
+TAIL hollin-bay@1 classic-oscillating@7 14 seat 3 regional leg 2 L deepest 4.6 still false
+TAIL hollin-bay@1 classic-oscillating@7 14 seat 4 club leg 2 L deepest 5.4 still false
+TAIL hollin-bay@1 classic-oscillating@7 14 seat 5 regional leg 2 L deepest 6.3 still false
+TAIL hollin-bay@1 classic-oscillating@7 14 seat 6 club leg 2 R deepest 7.0 still false
+TAIL hollin-bay@1 classic-oscillating@7 14 seat 7 national leg 2 R deepest 7.6 still false
+TAIL hollin-bay@1 sea-breeze@7 14 seat 0 national leg 2 L deepest 6.8 still false
+TAIL hollin-bay@1 sea-breeze@7 14 seat 1 club leg 2 R deepest 9.9 still false
+TAIL hollin-bay@1 sea-breeze@7 14 seat 2 national leg 2 L deepest 6.7 still false
+TAIL hollin-bay@1 sea-breeze@7 14 seat 3 regional leg 2 R deepest 6.5 still false
+TAIL hollin-bay@1 sea-breeze@7 14 seat 4 club leg 2 R deepest 6.3 still false
+TAIL hollin-bay@1 sea-breeze@7 14 seat 5 regional leg 2 L deepest 5.9 still false
+TAIL hollin-bay@1 sea-breeze@7 14 seat 6 club leg 2 L deepest 45.5 still false
+== hollin-bay@1 sea-breeze@7 s14 seat 6 tier club leg 2 mark L end t 271.23333333333335 deepest 45.5 last 17.9 gate L SIMD2<Double>(-36.099133977476505, -53.824738978244945) R SIMD2<Double>(11.893662388454258, -63.7086398770957)
+t  212.5 leg 2 st 0 al    7.9 up   89.3 twa  -146 spd  8.2 P plan P pick - rec n near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 173/155@212 tap y clr y room y eva n
+t  213.0 leg 2 st 0 al    6.2 up   85.5 twa  -153 spd  8.2 P plan P pick - rec n near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 173/155@213 tap y clr y room y eva n
+t  213.5 leg 2 st 0 al    4.8 up   81.7 twa  -152 spd  8.1 P plan P pick - rec n near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 173/155@213 tap y clr y room y eva n
+t  214.0 leg 2 st 0 al    3.2 up   78.0 twa  -151 spd  8.1 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 161/156@214 tap y clr y room y eva n
+t  214.5 leg 2 st 0 al    1.6 up   74.3 twa  -150 spd  8.1 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 161/155@214 tap y clr y room y eva n
+t  215.0 leg 2 st 0 al   -0.0 up   70.6 twa  -149 spd  8.1 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 162/156@215 tap y clr y room y eva n
+t  215.5 leg 2 st 0 al   -1.7 up   66.9 twa  -149 spd  8.1 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 162/155@215 tap y clr y room y eva n
+t  216.0 leg 2 st 0 al   -3.4 up   63.2 twa  -149 spd  8.1 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 163/155@216 tap y clr y room y eva n
+t  216.5 leg 2 st 0 al   -5.1 up   59.5 twa  -148 spd  8.1 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 164/155@216 tap y clr y room y eva n
+t  217.0 leg 2 st 0 al   -6.9 up   55.9 twa  -148 spd  8.1 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 165/155@217 tap y clr y room y eva n
+t  217.5 leg 2 st 0 al   -8.6 up   52.2 twa  -148 spd  8.1 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 166/155@217 tap y clr y room y eva n
+t  218.0 leg 2 st 0 al  -10.4 up   48.6 twa  -148 spd  8.1 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 168/156@218 tap y clr y room y eva n
+t  218.5 leg 2 st 0 al  -12.2 up   44.9 twa  -148 spd  8.1 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 169/155@218 tap y clr y room y eva n
+t  219.0 leg 2 st 0 al  -13.9 up   41.3 twa  -148 spd  8.1 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 171/155@219 tap y clr y room y eva n
+t  219.5 leg 2 st 0 al  -15.7 up   37.6 twa  -146 spd  8.1 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 173/155@219 tap y clr y room y eva y
+t  220.0 leg 2 st 0 al  -18.0 up   34.6 twa  -126 spd  7.1 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 177/155@220 tap y clr y room y eva y
+t  220.5 leg 2 st 0 al  -20.9 up   32.7 twa  -112 spd  6.8 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 177/155@220 tap y clr y room y eva n
+t  221.0 leg 2 st 0 al  -23.9 up   31.1 twa  -114 spd  7.0 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 177/155@221 tap n clr n room y eva n
+t  221.5 leg 2 st 0 al  -27.0 up   29.4 twa  -113 spd  7.1 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 177/155@221 tap n clr n room y eva n
+t  222.0 leg 2 st 0 al  -30.0 up   27.4 twa  -121 spd  7.1 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 177/155@222 tap n clr n room y eva n
+t  222.5 leg 2 st 0 al  -32.7 up   25.1 twa  -128 spd  7.2 P plan S pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 156/156@222 tap n clr y room y eva n
+t  223.0 leg 2 st 0 al  -35.1 up   22.4 twa  -135 spd  7.3 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 148/148@223 tap n clr y room y eva n
+t  223.5 leg 2 st 0 al  -37.2 up   19.4 twa  -143 spd  7.4 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 141/141@223 tap n clr y room y eva n
+t  224.0 leg 2 st 0 al  -39.0 up   16.2 twa  -150 spd  7.4 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 134/134@224 tap n clr y room y eva n
+t  224.5 leg 2 st 0 al  -40.3 up   12.7 twa  -157 spd  7.4 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 127/127@224 tap n clr y room y eva n
+t  225.0 leg 2 st 0 al  -41.2 up    9.1 twa  -163 spd  7.4 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 120/120@225 tap n clr y room y eva n
+t  225.5 leg 2 st 0 al  -42.1 up    5.6 twa  -157 spd  7.3 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 112/112@225 tap n clr y room y eva n
+t  226.0 leg 2 st 0 al  -43.2 up    2.0 twa  -160 spd  7.3 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 105/105@226 tap n clr y room y eva n
+t  226.5 leg 2 st 0 al  -44.2 up   -1.5 twa  -160 spd  7.3 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 97/97@226 tap n clr y room y eva n
+t  227.0 leg 2 st 0 al  -45.4 up   -4.9 twa  -148 spd  7.0 P plan P pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 97/97@226 tap n clr y room y eva n
+t  227.5 leg 2 st 0 al  -47.4 up   -7.3 twa  -124 spd  5.8 P plan P pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 97/97@226 tap n clr y room y eva n
+t  228.0 leg 2 st 0 al  -49.8 up   -8.4 twa  -100 spd  4.9 P plan P pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 97/97@226 tap y clr y room y eva n
+t  228.5 leg 2 st 0 al  -52.1 up   -8.5 twa   -81 spd  4.5 P plan S pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 97/97@226 tap n clr y room y eva n
+t  229.0 leg 2 st 0 al  -54.4 up   -8.3 twa   -83 spd  4.7 P plan S pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 97/97@226 tap n clr y room y eva n
+t  229.5 leg 2 st 0 al  -56.9 up   -8.3 twa   -90 spd  4.9 P plan S pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 97/97@226 tap n clr y room y eva n
+t  230.0 leg 2 st 0 al  -59.3 up   -8.7 twa   -97 spd  5.1 P plan S pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 97/97@226 tap n clr y room y eva n
+t  230.5 leg 2 st 0 al  -61.8 up   -9.3 twa  -104 spd  5.1 P plan P pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 48/48@230 tap n clr y room y eva n
+t  231.0 leg 2 st 0 al  -64.2 up  -10.3 twa  -112 spd  5.1 P plan P pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 50/50@231 tap n clr y room y eva n
+t  231.5 leg 2 st 0 al  -66.4 up  -11.6 twa  -119 spd  5.1 P plan P pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 51/51@231 tap y clr y room y eva n
+t  232.0 leg 2 st 0 al  -68.5 up  -13.1 twa  -126 spd  5.1 P plan P pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 51/51@232 tap y clr y room y eva n
+t  232.5 leg 2 st 0 al  -70.3 up  -14.9 twa  -133 spd  5.1 P plan P pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 51/51@232 tap y clr y room y eva n
+t  233.0 leg 2 st 0 al  -71.9 up  -16.8 twa  -141 spd  5.0 P plan P pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 51/51@233 tap y clr y room y eva n
+t  233.5 leg 2 st 0 al  -73.3 up  -18.9 twa  -148 spd  4.9 P plan P pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 50/50@233 tap y clr y room y eva n
+t  234.0 leg 2 st 0 al  -74.3 up  -21.2 twa  -155 spd  4.8 P plan P pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 49/49@234 tap y clr y room y eva n
+t  234.5 leg 2 st 0 al  -75.0 up  -23.4 twa  -163 spd  4.7 P plan P pick L rec y near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 48/48@234 tap y clr y room y eva n
+t  235.0 leg 2 st 0 al  -75.4 up  -25.7 twa  -170 spd  4.6 P plan S pick L rec y near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  235.5 leg 2 st 0 al  -75.6 up  -28.0 twa  -177 spd  4.6 P plan S pick L rec y near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  236.0 leg 2 st 0 al  -75.4 up  -30.3 twa   175 spd  4.5 P plan S pick L rec y near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  236.5 leg 2 st 0 al  -75.0 up  -32.4 twa   168 spd  4.4 P plan S pick L rec y near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  237.0 leg 2 st 0 al  -74.3 up  -34.5 twa   160 spd  4.2 P plan S pick L rec y near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  237.5 leg 2 st 0 al  -73.4 up  -36.4 twa   153 spd  4.2 S plan S pick L rec y near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  238.0 leg 2 st 0 al  -72.3 up  -38.1 twa   145 spd  4.2 S plan S pick L rec y near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  238.5 leg 2 st 0 al  -70.9 up  -39.7 twa   138 spd  4.3 S plan S pick L rec y near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  239.0 leg 2 st 0 al  -69.3 up  -41.2 twa   130 spd  4.3 S plan S pick L rec y near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  239.5 leg 2 st 0 al  -67.5 up  -42.5 twa   123 spd  4.5 S plan S pick L rec y near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  240.0 leg 2 st 0 al  -65.5 up  -43.6 twa   115 spd  4.9 S plan S pick L rec y near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  240.5 leg 2 st 0 al  -63.1 up  -44.6 twa   108 spd  5.2 S plan S pick L rec y near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  241.0 leg 2 st 0 al  -60.6 up  -45.2 twa   100 spd  5.3 S plan S pick L rec y near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  241.5 leg 2 st 0 al  -57.9 up  -45.5 twa    93 spd  5.4 S plan S pick L rec y near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  242.0 leg 2 st 0 al  -55.2 up  -45.5 twa    85 spd  5.5 S plan S pick L rec y near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  242.5 leg 2 st 0 al  -52.4 up  -45.2 twa    78 spd  5.6 S plan S pick L rec y near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  243.0 leg 2 st 0 al  -49.7 up  -44.5 twa    70 spd  5.6 S plan S pick L rec y near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  243.5 leg 2 st 0 al  -47.1 up  -43.4 twa    60 spd  5.6 S plan S pick L rec y near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  244.0 leg 2 st 0 al  -44.8 up  -41.9 twa    53 spd  5.5 S plan S pick L rec y near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  244.5 leg 2 st 0 al  -42.5 up  -40.4 twa    56 spd  5.5 S plan S pick L rec y near n shd 0.99 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  245.0 leg 2 st 0 al  -40.1 up  -39.0 twa    55 spd  5.5 S plan S pick L rec y near y shd 0.99 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  245.5 leg 2 st 0 al  -37.9 up  -37.3 twa    47 spd  5.4 S plan S pick L rec y near y shd 0.99 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  246.0 leg 2 st 0 al  -35.9 up  -35.6 twa    48 spd  5.3 S plan S pick L rec y near y shd 0.99 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  246.5 leg 2 st 0 al  -33.9 up  -34.0 twa    48 spd  5.2 S plan S pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  247.0 leg 2 st 0 al  -31.9 up  -32.3 twa    48 spd  5.1 S plan S pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  247.5 leg 2 st 0 al  -29.9 up  -30.7 twa    48 spd  5.1 S plan S pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  248.0 leg 2 st 0 al  -27.9 up  -29.0 twa    47 spd  5.1 S plan S pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  248.5 leg 2 st 0 al  -26.0 up  -27.4 twa    47 spd  5.1 S plan S pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  249.0 leg 2 st 0 al  -24.1 up  -25.7 twa    47 spd  5.1 S plan S pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  249.5 leg 2 st 0 al  -22.1 up  -24.0 twa    46 spd  5.1 S plan S pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  250.0 leg 2 st 0 al  -20.2 up  -22.3 twa    46 spd  5.1 S plan S pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  250.5 leg 2 st 0 al  -18.4 up  -20.6 twa    45 spd  5.1 S plan S pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  251.0 leg 2 st 0 al  -16.5 up  -18.9 twa    45 spd  5.1 S plan S pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap y clr y room y eva n
+t  251.5 leg 2 st 0 al  -14.7 up  -17.2 twa    45 spd  5.1 S plan S pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap n clr n room y eva n
+t  252.0 leg 2 st 0 al  -12.9 up  -15.4 twa    45 spd  5.0 S plan P pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap n clr n room y eva n
+t  252.5 leg 2 st 0 al  -11.1 up  -13.7 twa    45 spd  5.0 S plan P pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap n clr y room y eva n
+t  253.0 leg 2 st 0 al   -9.3 up  -11.9 twa    43 spd  5.0 S plan P pick L rec y near y shd 0.95 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap n clr y room y eva n
+t  253.5 leg 2 st 0 al   -7.7 up  -10.1 twa    43 spd  4.6 S plan P pick L rec y near y shd 0.64 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap n clr y room y eva n
+t  254.0 leg 2 st 0 al   -6.1 up   -8.5 twa    43 spd  4.3 S plan P pick L rec y near y shd 0.81 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap n clr y room y eva n
+t  254.5 leg 2 st 0 al   -4.7 up   -6.9 twa    43 spd  4.3 S plan P pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 47/47@235 tap n clr y room y eva n
+t  255.0 leg 2 st 0 al   -3.3 up   -5.4 twa    43 spd  4.3 S plan S pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 48/48@255 tap n clr y room y eva n
+t  255.5 leg 2 st 0 al   -1.8 up   -3.8 twa    41 spd  4.3 S plan S pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 51/51@255 tap n clr y room y eva n
+t  256.0 leg 2 st 0 al   -0.7 up   -2.0 twa    26 spd  4.0 S plan S pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 54/54@256 tap n clr y room y eva n
+t  256.5 leg 2 st 0 al   -0.1 up   -0.3 twa    11 spd  3.4 S plan S pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 56/56@256 tap n clr y room y eva n
+t  257.0 leg 2 st 0 al   -0.1 up    1.3 twa    -4 spd  3.0 P plan P pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 58/58@257 tap n clr y room y eva n
+t  257.5 leg 2 st 0 al   -0.4 up    2.6 twa   -20 spd  2.6 P plan P pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 60/60@257 tap n clr y room y eva n
+t  258.0 leg 2 st 0 al   -1.0 up    3.6 twa   -35 spd  2.3 P plan P pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 60/60@258 tap n clr y room y eva n
+t  258.5 leg 2 st 0 al   -1.9 up    4.5 twa   -49 spd  2.4 P plan P pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 61/61@258 tap n clr y room y eva n
+t  259.0 leg 2 st 0 al   -2.9 up    5.2 twa   -56 spd  2.7 P plan P pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 61/61@259 tap y clr y room y eva n
+t  259.5 leg 2 st 0 al   -4.2 up    5.9 twa   -61 spd  3.1 P plan P pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 61/61@259 tap y clr y room y eva n
+t  260.0 leg 2 st 0 al   -5.7 up    6.6 twa   -62 spd  3.4 P plan P pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 60/60@260 tap y clr y room y eva n
+t  260.5 leg 2 st 0 al   -7.3 up    7.3 twa   -61 spd  3.7 P plan P pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 60/60@260 tap y clr y room y eva n
+t  261.0 leg 2 st 0 al   -9.0 up    8.1 twa   -61 spd  3.9 P plan P pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 60/60@261 tap y clr y room y eva n
+t  261.5 leg 2 st 0 al  -10.8 up    9.0 twa   -60 spd  4.2 P plan P pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 59/59@261 tap y clr y room y eva n
+t  262.0 leg 2 st 0 al  -12.8 up   10.0 twa   -60 spd  4.4 P plan P pick L rec y near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 59/59@262 tap y clr y room y eva n
+t  262.5 leg 2 st 0 al  -14.8 up   10.9 twa   -68 spd  4.4 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 171/171@262 tap y clr y room y eva n
+t  263.0 leg 2 st 0 al  -16.8 up   11.1 twa   -91 spd  3.9 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 177/177@263 tap y clr y room y eva n
+t  263.5 leg 2 st 0 al  -18.5 up   10.5 twa  -115 spd  3.4 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 177/177@263 tap y clr y room y eva n
+t  264.0 leg 2 st 0 al  -19.7 up    9.5 twa  -139 spd  2.8 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 177/177@264 tap n clr n room y eva y
+t  264.5 leg 2 st 0 al  -20.2 up    8.4 twa  -163 spd  2.3 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 177/177@264 tap n clr n room y eva y
+t  265.0 leg 2 st 0 al  -20.2 up    7.3 twa  -176 spd  2.1 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 177/177@265 tap n clr n room y eva n
+t  265.5 leg 2 st 0 al  -20.2 up    6.3 twa  -172 spd  2.1 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 177/177@265 tap n clr n room y eva y
+t  266.0 leg 2 st 0 al  -20.3 up    5.2 twa  -173 spd  2.1 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 152/152@266 tap n clr n room y eva n
+t  266.5 leg 2 st 0 al  -20.3 up    4.2 twa  -173 spd  2.1 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 148/148@266 tap n clr n room y eva n
+t  267.0 leg 2 st 0 al  -20.4 up    3.2 twa  -168 spd  2.1 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 144/144@267 tap n clr n room y eva y
+t  267.5 leg 2 st 0 al  -20.4 up    2.1 twa  -176 spd  2.0 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 137/137@267 tap n clr n room y eva n
+t  268.0 leg 2 st 0 al  -20.4 up    1.1 twa  -175 spd  2.1 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 131/131@268 tap n clr n room y eva n
+t  268.5 leg 2 st 0 al  -20.5 up    0.1 twa  -160 spd  2.1 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 121/121@268 tap n clr n room y eva y
+t  269.0 leg 2 st 1 al  -20.8 up   -0.9 twa  -149 spd  2.2 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 114/114@269 tap n clr n room y eva y
+t  269.5 leg 2 st 1 al  -21.4 up   -2.0 twa  -143 spd  2.4 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 111/111@269 tap n clr n room y eva n
+t  270.0 leg 2 st 1 al  -22.0 up   -3.1 twa  -140 spd  2.7 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 108/108@270 tap n clr n room y eva n
+t  270.5 leg 2 st 1 al  -22.9 up   -4.2 twa  -132 spd  2.9 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 105/105@270 tap n clr n room y eva n
+t  271.0 leg 2 st 1 al  -24.0 up   -5.1 twa  -109 spd  2.7 P plan P pick L rec n near y shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 102/102@271 tap n clr n room y eva n
+t  271.5 leg 3 st 0 al  -25.3 up   -5.5 twa   -93 spd  2.8 P plan P pick - rec n near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 102/102@271 tap n clr n room y eva n
+t  272.0 leg 3 st 0 al  -26.6 up   -5.5 twa   -69 spd  2.5 P plan P pick - rec n near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 102/102@271 tap n clr n room y eva n
+t  272.5 leg 3 st 0 al  -27.8 up   -5.1 twa   -59 spd  2.8 P plan P pick - rec n near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 102/102@271 tap n clr n room y eva n
+t  273.0 leg 3 st 0 al  -29.2 up   -4.5 twa   -58 spd  3.1 P plan P pick - rec n near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 102/102@271 tap n clr n room y eva n
+t  273.5 leg 3 st 0 al  -30.7 up   -3.9 twa   -58 spd  3.5 P plan P pick - rec n near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 102/102@271 tap n clr n room y eva n
+t  274.0 leg 3 st 0 al  -32.4 up   -3.2 twa   -58 spd  3.7 P plan P pick - rec n near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 102/102@271 tap n clr n room y eva n
+t  274.5 leg 3 st 0 al  -34.2 up   -2.5 twa   -59 spd  4.0 P plan P pick - rec n near n shd 0.99 cur 0.00,-0.00 Lrounds P pen 0 ask 102/102@271 tap n clr n room y eva n
+t  275.0 leg 3 st 0 al  -36.1 up   -1.8 twa   -60 spd  4.2 P plan P pick - rec n near n shd 0.95 cur 0.00,-0.00 Lrounds P pen 0 ask 102/102@271 tap y clr y room y eva n
+t  275.5 leg 3 st 0 al  -38.1 up   -1.1 twa   -60 spd  4.4 P plan P pick - rec n near n shd 0.95 cur 0.00,-0.00 Lrounds P pen 0 ask 102/102@271 tap y clr y room y eva n
+t  276.0 leg 3 st 0 al  -40.2 up   -0.3 twa   -61 spd  4.6 P plan P pick - rec n near n shd 0.97 cur 0.00,-0.00 Lrounds P pen 0 ask 102/102@271 tap y clr y room y eva n
+t  276.5 leg 3 st 0 al  -42.5 up    0.5 twa   -62 spd  4.7 P plan P pick - rec n near n shd 0.98 cur 0.00,-0.00 Lrounds P pen 0 ask 102/102@271 tap y clr y room y eva n
+t  277.0 leg 3 st 0 al  -44.7 up    1.2 twa   -63 spd  4.9 P plan P pick - rec n near n shd 0.94 cur 0.00,-0.00 Lrounds P pen 0 ask 102/102@271 tap y clr y room y eva n
+t  277.5 leg 3 st 0 al  -47.1 up    2.0 twa   -64 spd  5.0 P plan P pick - rec n near n shd 0.96 cur 0.00,-0.00 Lrounds P pen 0 ask 102/102@271 tap y clr y room y eva n
+t  278.0 leg 3 st 0 al  -49.5 up    2.8 twa   -65 spd  5.2 P plan P pick - rec n near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 102/102@271 tap y clr y room y eva n
+t  278.5 leg 3 st 0 al  -52.0 up    3.6 twa   -65 spd  5.3 P plan P pick - rec n near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 102/102@271 tap y clr y room y eva n
+t  279.0 leg 3 st 0 al  -54.5 up    4.5 twa   -62 spd  5.4 P plan P pick - rec n near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 102/102@271 tap y clr y room y eva n
+t  279.5 leg 3 st 0 al  -57.1 up    5.5 twa   -64 spd  5.5 P plan P pick - rec n near n shd 0.99 cur 0.00,-0.00 Lrounds P pen 0 ask 102/102@271 tap y clr y room y eva n
+t  280.0 leg 3 st 0 al  -59.7 up    6.4 twa   -65 spd  5.6 P plan P pick - rec n near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 102/102@271 tap y clr y room y eva n
+t  280.5 leg 3 st 0 al  -62.3 up    7.4 twa   -65 spd  5.7 P plan P pick - rec n near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 102/102@271 tap y clr y room y eva n
+t  281.0 leg 3 st 0 al  -65.1 up    8.3 twa   -65 spd  5.8 P plan P pick - rec n near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 102/102@271 tap y clr y room y eva n
+t  281.5 leg 3 st 0 al  -67.8 up    9.2 twa   -65 spd  5.8 P plan P pick - rec n near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 102/102@271 tap y clr y room y eva n
+t  282.0 leg 3 st 0 al  -70.6 up   10.1 twa   -65 spd  5.9 P plan P pick - rec n near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 102/102@271 tap y clr y room y eva n
+t  282.5 leg 3 st 0 al  -73.4 up   11.1 twa   -65 spd  5.9 P plan P pick - rec n near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 102/102@271 tap y clr y room y eva n
+t  283.0 leg 3 st 0 al  -76.2 up   12.0 twa   -64 spd  6.0 P plan P pick - rec n near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 102/102@271 tap y clr y room y eva n
+t  283.5 leg 3 st 0 al  -79.0 up   13.0 twa   -64 spd  6.0 P plan P pick - rec n near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 102/102@271 tap y clr y room y eva n
+t  284.0 leg 3 st 0 al  -81.9 up   13.9 twa   -64 spd  6.0 P plan P pick - rec n near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 102/102@271 tap y clr y room y eva n
+t  284.5 leg 3 st 0 al  -84.7 up   14.9 twa   -64 spd  6.1 P plan P pick - rec n near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 102/102@271 tap y clr y room y eva n
+t  285.0 leg 3 st 0 al  -87.6 up   15.9 twa   -64 spd  6.1 P plan P pick - rec n near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 102/102@271 tap y clr y room y eva n
+t  285.5 leg 3 st 0 al  -90.5 up   16.9 twa   -64 spd  6.1 P plan P pick - rec n near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 102/102@271 tap y clr y room y eva n
+t  286.0 leg 3 st 0 al  -93.4 up   17.9 twa   -63 spd  6.1 P plan P pick - rec n near n shd 1.00 cur 0.00,-0.00 Lrounds P pen 0 ask 102/102@271 tap y clr y room y eva n
+TAIL hollin-bay@1 sea-breeze@7 14 seat 7 national leg 2 L deepest 6.3 still false
+TAIL saltings-reach@1 classic-oscillating@7 14 seat 0 national leg 2 R deepest 12.3 still false
+TAIL saltings-reach@1 classic-oscillating@7 14 seat 1 club leg 2 R deepest 5.3 still false
+TAIL saltings-reach@1 classic-oscillating@7 14 seat 2 national leg 2 L deepest 7.0 still false
+TAIL saltings-reach@1 classic-oscillating@7 14 seat 3 regional leg 2 L deepest 12.6 still false
+TAIL saltings-reach@1 classic-oscillating@7 14 seat 4 club leg 2 R deepest 8.0 still false
+TAIL saltings-reach@1 classic-oscillating@7 14 seat 5 regional leg 2 R deepest 6.0 still false
+TAIL saltings-reach@1 classic-oscillating@7 14 seat 6 club leg 2 L deepest 5.6 still false
+TAIL saltings-reach@1 classic-oscillating@7 14 seat 7 national leg 2 R deepest 13.2 still false
+TAIL saltings-reach@1 gusty-offshore@7 14 seat 0 national leg 2 L deepest 7.2 still false
+TAIL saltings-reach@1 gusty-offshore@7 14 seat 1 club leg 2 L deepest 4.6 still false
+TAIL saltings-reach@1 gusty-offshore@7 14 seat 2 national leg 2 R deepest 6.7 still false
+TAIL saltings-reach@1 gusty-offshore@7 14 seat 3 regional leg 2 L deepest 6.8 still false
+TAIL saltings-reach@1 gusty-offshore@7 14 seat 4 club leg 2 L deepest 4.8 still false
+TAIL saltings-reach@1 gusty-offshore@7 14 seat 5 regional leg 2 R deepest 7.9 still false
+TAIL saltings-reach@1 gusty-offshore@7 14 seat 6 club leg 2 L deepest 5.7 still false
+TAIL saltings-reach@1 gusty-offshore@7 14 seat 7 national leg 2 L deepest 7.3 still false
+TAIL dev-venue@7 classic-oscillating@7 15 seat 0 regional leg 2 L deepest 6.6 still false
+TAIL dev-venue@7 classic-oscillating@7 15 seat 1 regional leg 2 L deepest 7.4 still false
+TAIL dev-venue@7 classic-oscillating@7 15 seat 2 club leg 2 R deepest 4.7 still false
+TAIL dev-venue@7 classic-oscillating@7 15 seat 3 club leg 2 L deepest 5.0 still false
+TAIL dev-venue@7 classic-oscillating@7 15 seat 4 regional leg 2 R deepest 7.1 still false
+TAIL dev-venue@7 classic-oscillating@7 15 seat 5 club leg 2 R deepest 7.0 still false
+TAIL dev-venue@7 classic-oscillating@7 15 seat 6 club leg 2 L deepest 8.5 still false
+TAIL dev-venue@7 classic-oscillating@7 15 seat 7 club leg 2 L deepest 7.7 still false
+TAIL dev-venue@7 gusty-offshore@7 15 seat 0 regional leg 2 R deepest 7.2 still false
+TAIL dev-venue@7 gusty-offshore@7 15 seat 1 regional leg 2 L deepest 7.2 still false
+TAIL dev-venue@7 gusty-offshore@7 15 seat 2 club leg 2 R deepest 6.5 still false
+TAIL dev-venue@7 gusty-offshore@7 15 seat 3 club leg 2 L deepest 6.7 still false
+TAIL dev-venue@7 gusty-offshore@7 15 seat 4 regional leg 2 L deepest 8.1 still false
+TAIL dev-venue@7 gusty-offshore@7 15 seat 5 club leg 2 L deepest 11.4 still false
+TAIL dev-venue@7 gusty-offshore@7 15 seat 6 club leg 2 R deepest 7.0 still false
+TAIL dev-venue@7 gusty-offshore@7 15 seat 7 club leg 2 R deepest 6.6 still false
+TAIL dev-venue@7 light-and-patchy@7 15 seat 0 regional leg 2 L deepest 4.4 still false
+TAIL dev-venue@7 light-and-patchy@7 15 seat 1 regional leg 2 L deepest 5.9 still false
+TAIL dev-venue@7 light-and-patchy@7 15 seat 2 club leg 2 R deepest 6.9 still false
+TAIL dev-venue@7 light-and-patchy@7 15 seat 3 club leg 2 R deepest 7.5 still false
+TAIL dev-venue@7 light-and-patchy@7 15 seat 4 regional leg 2 R deepest 6.8 still false
+TAIL dev-venue@7 light-and-patchy@7 15 seat 5 club leg 2 L deepest 6.9 still false
+TAIL dev-venue@7 light-and-patchy@7 15 seat 6 club leg 2 L deepest 7.0 still false
+TAIL dev-venue@7 light-and-patchy@7 15 seat 7 club leg 2 L deepest 7.2 still false
+TAIL dev-venue@7 sea-breeze@7 15 seat 0 regional leg 2 R deepest 4.7 still false
+TAIL dev-venue@7 sea-breeze@7 15 seat 1 regional leg 2 L deepest 7.1 still false
+TAIL dev-venue@7 sea-breeze@7 15 seat 2 club leg 2 R deepest 6.2 still false
+TAIL dev-venue@7 sea-breeze@7 15 seat 3 club leg 2 L deepest 11.1 still false
+TAIL dev-venue@7 sea-breeze@7 15 seat 4 regional leg 2 R deepest 8.0 still false
+TAIL dev-venue@7 sea-breeze@7 15 seat 5 club leg 2 L deepest 8.7 still false
+TAIL dev-venue@7 sea-breeze@7 15 seat 6 club leg 2 R deepest 6.3 still false
+TAIL dev-venue@7 sea-breeze@7 15 seat 7 club leg 2 R deepest 8.0 still false
+TAIL fellmere@1 gusty-offshore@7 15 seat 0 regional leg 2 R deepest 6.7 still false
+TAIL fellmere@1 gusty-offshore@7 15 seat 1 regional leg 2 R deepest 6.9 still false
+TAIL fellmere@1 gusty-offshore@7 15 seat 2 club leg 2 R deepest 6.4 still false
+TAIL fellmere@1 gusty-offshore@7 15 seat 3 club leg 2 L deepest 7.0 still false
+TAIL fellmere@1 gusty-offshore@7 15 seat 4 regional leg 2 R deepest 8.9 still false
+TAIL fellmere@1 gusty-offshore@7 15 seat 5 club leg 2 R deepest 7.6 still false
+TAIL fellmere@1 gusty-offshore@7 15 seat 6 club leg 2 L deepest 6.5 still false
+TAIL fellmere@1 gusty-offshore@7 15 seat 7 club leg 2 L deepest 10.6 still false
+TAIL fellmere@1 light-and-patchy@7 15 seat 0 regional leg 2 R deepest 5.7 still false
+TAIL fellmere@1 light-and-patchy@7 15 seat 1 regional leg 2 L deepest 6.4 still false
+TAIL fellmere@1 light-and-patchy@7 15 seat 2 club leg 2 R deepest 6.6 still false
+TAIL fellmere@1 light-and-patchy@7 15 seat 3 club leg 2 R deepest 7.6 still false
+TAIL fellmere@1 light-and-patchy@7 15 seat 4 regional leg 2 L deepest 6.4 still false
+TAIL fellmere@1 light-and-patchy@7 15 seat 5 club leg 2 R deepest 5.5 still false
+TAIL fellmere@1 light-and-patchy@7 15 seat 6 club leg 2 R deepest 4.3 still false
+TAIL fellmere@1 light-and-patchy@7 15 seat 7 club leg 2 L deepest 5.3 still false
+TAIL hollin-bay@1 classic-oscillating@7 15 seat 0 regional leg 2 L deepest 4.4 still false
+TAIL hollin-bay@1 classic-oscillating@7 15 seat 1 regional leg 2 R deepest 5.7 still false
+TAIL hollin-bay@1 classic-oscillating@7 15 seat 2 club leg 2 R deepest 6.8 still false
+TAIL hollin-bay@1 classic-oscillating@7 15 seat 3 club leg 2 R deepest 6.3 still false
+TAIL hollin-bay@1 classic-oscillating@7 15 seat 4 regional leg 2 R deepest 7.5 still false
+TAIL hollin-bay@1 classic-oscillating@7 15 seat 5 club leg 2 R deepest 8.2 still false
+TAIL hollin-bay@1 classic-oscillating@7 15 seat 6 club leg 2 R deepest 8.6 still false
+TAIL hollin-bay@1 classic-oscillating@7 15 seat 7 club leg 2 R deepest 6.4 still false
+TAIL hollin-bay@1 sea-breeze@7 15 seat 0 regional leg 2 R deepest 8.4 still false
+TAIL hollin-bay@1 sea-breeze@7 15 seat 1 regional leg 2 L deepest 6.2 still false
+TAIL hollin-bay@1 sea-breeze@7 15 seat 2 club leg 2 R deepest 8.0 still false
+TAIL hollin-bay@1 sea-breeze@7 15 seat 3 club leg 2 L deepest 6.1 still false
+TAIL hollin-bay@1 sea-breeze@7 15 seat 4 regional leg 2 R deepest 6.8 still false
+TAIL hollin-bay@1 sea-breeze@7 15 seat 5 club leg 2 L deepest 15.7 still false
+TAIL hollin-bay@1 sea-breeze@7 15 seat 6 club leg 2 R deepest 8.1 still false
+TAIL hollin-bay@1 sea-breeze@7 15 seat 7 club leg 2 R deepest 7.7 still false
+TAIL saltings-reach@1 classic-oscillating@7 15 seat 0 regional leg 2 R deepest 7.2 still false
+TAIL saltings-reach@1 classic-oscillating@7 15 seat 1 regional leg 2 L deepest 6.4 still false
+TAIL saltings-reach@1 classic-oscillating@7 15 seat 2 club leg 2 R deepest 6.2 still false
+TAIL saltings-reach@1 classic-oscillating@7 15 seat 3 club leg 2 R deepest 18.2 still false
+TAIL saltings-reach@1 classic-oscillating@7 15 seat 4 regional leg 2 R deepest 9.1 still false
+TAIL saltings-reach@1 classic-oscillating@7 15 seat 5 club leg 2 L deepest 5.5 still false
+TAIL saltings-reach@1 classic-oscillating@7 15 seat 6 club leg 2 R deepest 6.9 still false
+TAIL saltings-reach@1 classic-oscillating@7 15 seat 7 club leg 2 L deepest 7.3 still false
+TAIL saltings-reach@1 gusty-offshore@7 15 seat 0 regional leg 2 R deepest 6.3 still false
+TAIL saltings-reach@1 gusty-offshore@7 15 seat 1 regional leg 2 L deepest 7.4 still false
+TAIL saltings-reach@1 gusty-offshore@7 15 seat 2 club leg 2 R deepest 6.9 still false
+TAIL saltings-reach@1 gusty-offshore@7 15 seat 3 club leg 2 R deepest 11.4 still false
+TAIL saltings-reach@1 gusty-offshore@7 15 seat 4 regional leg 2 L deepest 7.6 still false
+TAIL saltings-reach@1 gusty-offshore@7 15 seat 5 club leg 2 L deepest 8.7 still false
+TAIL saltings-reach@1 gusty-offshore@7 15 seat 6 club leg 2 R deepest 7.6 still false
+TAIL saltings-reach@1 gusty-offshore@7 15 seat 7 club leg 2 R deepest 9.5 still false
+TAIL dev-venue@7 classic-oscillating@7 16 seat 0 club leg 2 L deepest 7.9 still false
+TAIL dev-venue@7 classic-oscillating@7 16 seat 1 club leg 2 R deepest 6.1 still false
+TAIL dev-venue@7 classic-oscillating@7 16 seat 2 club leg 2 R deepest 10.9 still false
+TAIL dev-venue@7 classic-oscillating@7 16 seat 3 regional leg 2 L deepest 7.8 still false
+TAIL dev-venue@7 classic-oscillating@7 16 seat 4 club leg 2 R deepest 8.9 still false
+TAIL dev-venue@7 classic-oscillating@7 16 seat 5 regional leg 2 L deepest 7.2 still false
+TAIL dev-venue@7 classic-oscillating@7 16 seat 6 national leg 2 R deepest 7.2 still false
+TAIL dev-venue@7 classic-oscillating@7 16 seat 7 national leg 2 L deepest 7.5 still false
+TAIL dev-venue@7 gusty-offshore@7 16 seat 0 club leg 2 L deepest 4.5 still false
+TAIL dev-venue@7 gusty-offshore@7 16 seat 1 club leg 2 L deepest 7.9 still false
+TAIL dev-venue@7 gusty-offshore@7 16 seat 2 club leg 2 R deepest 5.6 still false
+TAIL dev-venue@7 gusty-offshore@7 16 seat 3 regional leg 2 L deepest 7.6 still false
+TAIL dev-venue@7 gusty-offshore@7 16 seat 4 club leg 2 L deepest 6.1 still false
+TAIL dev-venue@7 gusty-offshore@7 16 seat 5 regional leg 2 L deepest 6.0 still false
+TAIL dev-venue@7 gusty-offshore@7 16 seat 6 national leg 2 L deepest 9.3 still false
+TAIL dev-venue@7 gusty-offshore@7 16 seat 7 national leg 2 R deepest 18.1 still false
+TAIL dev-venue@7 light-and-patchy@7 16 seat 0 club leg 2 R deepest 5.0 still false
+TAIL dev-venue@7 light-and-patchy@7 16 seat 1 club leg 2 R deepest 5.9 still false
+TAIL dev-venue@7 light-and-patchy@7 16 seat 2 club leg 2 L deepest 8.3 still false
+TAIL dev-venue@7 light-and-patchy@7 16 seat 3 regional leg 2 L deepest 7.3 still false
+TAIL dev-venue@7 light-and-patchy@7 16 seat 4 club leg 2 R deepest 7.8 still false
+TAIL dev-venue@7 light-and-patchy@7 16 seat 5 regional leg 2 L deepest 7.6 still false
+TAIL dev-venue@7 light-and-patchy@7 16 seat 6 national leg 2 R deepest 4.8 still false
+TAIL dev-venue@7 light-and-patchy@7 16 seat 7 national leg 2 L deepest 6.8 still false
+TAIL dev-venue@7 sea-breeze@7 16 seat 0 club leg 2 L deepest 6.9 still false
+TAIL dev-venue@7 sea-breeze@7 16 seat 1 club leg 2 L deepest 7.9 still false
+TAIL dev-venue@7 sea-breeze@7 16 seat 2 club leg 2 L deepest 7.1 still false
+TAIL dev-venue@7 sea-breeze@7 16 seat 3 regional leg 2 L deepest 17.7 still false
+TAIL dev-venue@7 sea-breeze@7 16 seat 4 club leg 2 R deepest 8.0 still false
+TAIL dev-venue@7 sea-breeze@7 16 seat 5 regional leg 2 L deepest 8.7 still false
+TAIL dev-venue@7 sea-breeze@7 16 seat 6 national leg 2 R deepest 6.3 still false
+TAIL dev-venue@7 sea-breeze@7 16 seat 7 national leg 2 L deepest 7.7 still false
+TAIL fellmere@1 gusty-offshore@7 16 seat 0 club leg 2 R deepest 7.9 still false
+TAIL fellmere@1 gusty-offshore@7 16 seat 1 club leg 2 L deepest 7.8 still false
+TAIL fellmere@1 gusty-offshore@7 16 seat 2 club leg 2 R deepest 6.9 still false
+TAIL fellmere@1 gusty-offshore@7 16 seat 3 regional leg 2 R deepest 8.4 still false
+TAIL fellmere@1 gusty-offshore@7 16 seat 4 club leg 2 L deepest 8.2 still false
+TAIL fellmere@1 gusty-offshore@7 16 seat 5 regional leg 2 L deepest 9.8 still false
+TAIL fellmere@1 gusty-offshore@7 16 seat 6 national leg 2 L deepest 9.8 still false
+TAIL fellmere@1 gusty-offshore@7 16 seat 7 national leg 2 L deepest 7.9 still false
+TAIL fellmere@1 light-and-patchy@7 16 seat 0 club leg 2 L deepest 5.8 still false
+TAIL fellmere@1 light-and-patchy@7 16 seat 1 club leg 2 R deepest 7.1 still false
+TAIL fellmere@1 light-and-patchy@7 16 seat 2 club leg 2 R deepest 8.0 still false
+TAIL fellmere@1 light-and-patchy@7 16 seat 3 regional leg 2 L deepest 7.1 still false
+TAIL fellmere@1 light-and-patchy@7 16 seat 4 club leg 2 R deepest 6.6 still false
+TAIL fellmere@1 light-and-patchy@7 16 seat 6 national leg 2 R deepest 5.7 still false
+TAIL fellmere@1 light-and-patchy@7 16 seat 7 national leg 2 L deepest 5.9 still false
+TAIL hollin-bay@1 classic-oscillating@7 16 seat 0 club leg 2 R deepest 6.9 still false
+TAIL hollin-bay@1 classic-oscillating@7 16 seat 1 club leg 2 L deepest 6.9 still false
+TAIL hollin-bay@1 classic-oscillating@7 16 seat 2 club leg 2 L deepest 16.6 still false
+TAIL hollin-bay@1 classic-oscillating@7 16 seat 3 regional leg 2 R deepest 7.8 still false
+TAIL hollin-bay@1 classic-oscillating@7 16 seat 4 club leg 2 L deepest 6.1 still false
+TAIL hollin-bay@1 classic-oscillating@7 16 seat 5 regional leg 2 R deepest 7.8 still false
+TAIL hollin-bay@1 classic-oscillating@7 16 seat 6 national leg 2 R deepest 7.5 still false
+TAIL hollin-bay@1 classic-oscillating@7 16 seat 7 national leg 2 L deepest 7.6 still false
+TAIL hollin-bay@1 sea-breeze@7 16 seat 0 club leg 2 R deepest 8.2 still false
+TAIL hollin-bay@1 sea-breeze@7 16 seat 1 club leg 2 L deepest 8.0 still false
+TAIL hollin-bay@1 sea-breeze@7 16 seat 2 club leg 2 L deepest 6.0 still false
+TAIL hollin-bay@1 sea-breeze@7 16 seat 3 regional leg 2 L deepest 7.0 still false
+TAIL hollin-bay@1 sea-breeze@7 16 seat 4 club leg 2 R deepest 8.1 still false
+TAIL hollin-bay@1 sea-breeze@7 16 seat 5 regional leg 2 R deepest 7.7 still false
+TAIL hollin-bay@1 sea-breeze@7 16 seat 6 national leg 2 L deepest 9.7 still false
+TAIL hollin-bay@1 sea-breeze@7 16 seat 7 national leg 2 L deepest 6.3 still false
+TAIL saltings-reach@1 classic-oscillating@7 16 seat 0 club leg 2 L deepest 7.4 still false
+TAIL saltings-reach@1 classic-oscillating@7 16 seat 1 club leg 2 R deepest 7.8 still false
+TAIL saltings-reach@1 classic-oscillating@7 16 seat 2 club leg 2 L deepest 5.7 still false
+TAIL saltings-reach@1 classic-oscillating@7 16 seat 3 regional leg 2 L deepest 8.6 still false
+TAIL saltings-reach@1 classic-oscillating@7 16 seat 4 club leg 2 R deepest 16.8 still false
+TAIL saltings-reach@1 classic-oscillating@7 16 seat 5 regional leg 2 L deepest 5.5 still false
+TAIL saltings-reach@1 classic-oscillating@7 16 seat 6 national leg 2 L deepest 6.1 still false
+TAIL saltings-reach@1 classic-oscillating@7 16 seat 7 national leg 2 L deepest 6.4 still false
+TAIL saltings-reach@1 gusty-offshore@7 16 seat 0 club leg 2 L deepest 5.0 still false
+TAIL saltings-reach@1 gusty-offshore@7 16 seat 1 club leg 2 R deepest 8.6 still false
+TAIL saltings-reach@1 gusty-offshore@7 16 seat 2 club leg 2 L deepest 6.9 still false
+TAIL saltings-reach@1 gusty-offshore@7 16 seat 3 regional leg 2 L deepest 9.7 still false
+TAIL saltings-reach@1 gusty-offshore@7 16 seat 4 club leg 2 R deepest 9.0 still false
+TAIL saltings-reach@1 gusty-offshore@7 16 seat 5 regional leg 2 R deepest 12.3 still false
+TAIL saltings-reach@1 gusty-offshore@7 16 seat 6 national leg 2 L deepest 5.9 still false
+TAIL saltings-reach@1 gusty-offshore@7 16 seat 7 national leg 2 L deepest 7.4 still false

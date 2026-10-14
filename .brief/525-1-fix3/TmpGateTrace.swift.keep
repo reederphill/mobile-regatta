@@ -1,0 +1,129 @@
+@testable import BotSuite
+import Foundation
+@testable import RegattaBots
+import RegattaCore
+import Testing
+
+// TEMPORARY (#525 fix round 3): per-second traces of still-below gate roundings. Not committed.
+@Suite struct TmpGateTrace {
+    struct Row { var t: Double; var line: String }
+
+    @Test func trace() throws {
+        let env = ProcessInfo.processInfo.environment
+        let spec = env["TRACE_CELLS"] ?? ""
+        let out = env["TRACE_OUT"] ?? "/tmp/trace.txt"
+        var text = ""
+        let args = (env["TRACE_ARGS"] ?? "--tier-mix mixed --fleet-size 8 --seeds 16").split(separator: " ").map(String.init)
+        let options = try BotSuiteOptions(arguments: ["--profile-mix", "live", "--laps", "2"] + args)
+        let matrix = try options.matrix()
+        if spec == "all" {
+            for cell in matrix.cells { text += sail(cell) }
+        } else {
+            for item in spec.split(separator: ";") {
+                let p = item.split(separator: ",").map(String.init)
+                let (venue, conditions, seed) = (p[0], p[1], UInt64(p[2])!)
+                guard let cell = matrix.cells.first(where: { $0.venue == venue && $0.conditions == conditions && $0.seed == seed })
+                else { text += "== no cell \(item)\n"; continue }
+                text += sail(cell)
+            }
+        }
+        try text.write(toFile: out, atomically: true, encoding: .utf8)
+    }
+
+    func sail(_ cell: BotRaceCell) -> String {
+        let setup = try! BotRaceHarness.raceSetup(for: cell)
+        let race = try! Race(setup: setup, files: BotRaceHarness.raceFiles(for: cell, setup: setup),
+                             mode: .authoritative(windSeed: BotRaceHarness.windSeed(for: cell.seed)))
+        let tiers = setup.seats.indices.map { cell.tierMix.tier(ofSeat: $0, raceSeed: setup.raceSeed) }
+        var controllers = SeatControllers(tiers.indices.map {
+            .bot(cell.tierMix.driver(seat: $0, raceSeed: setup.raceSeed, profile: cell.profile(ofSeat: $0)))
+        })
+        let c = race.course
+        var rows = Array(repeating: [Row](), count: tiers.count)
+        // seat -> [(leg, endTick, gate)]
+        var ends = Array(repeating: [(leg: Int, end: Int, left: Bool)](), count: tiers.count)
+        var lastLeg = race.boats.map(\.legIndex)
+        func gateOf(_ leg: Int) -> (CourseLayout.Mark, CourseLayout.Mark, Vec2)? {
+            guard c.legs.indices.contains(leg), case .round(let i) = c.legs[leg], case .gate(let l, let r) = c.elements[i]
+            else { return nil }
+            return (l, r, c.targetPosition(for: c.legs[leg]))
+        }
+        let lastTick = cell.capSecondsAfterGun * Race.tickRate
+        while !race.isOver && race.tick < lastTick {
+            controllers.drive(race)
+            race.step()
+            _ = race.drainEvents()
+            for s in race.boats.indices {
+                let b = race.boats[s]
+                if b.legIndex != lastLeg[s], let g = gateOf(lastLeg[s]) {
+                    let left = (g.0.position - b.position).length <= (g.1.position - b.position).length
+                    ends[s].append((lastLeg[s], race.tick, left))
+                }
+                lastLeg[s] = b.legIndex
+                guard race.tick % (Race.tickRate / 2) == 0 else { continue }
+                // gate leg or within 40 s after one
+                var gleg: Int?
+                if gateOf(b.legIndex) != nil { gleg = b.legIndex }
+                if let e = ends[s].last, race.tick - e.end <= 40 * Race.tickRate { gleg = e.leg }
+                guard let leg = gleg, let g = gateOf(leg) else { continue }
+                let up = c.upwind
+                let above = up.dot(b.position - g.2)
+                guard above < 90 else { continue }
+                let along = (g.1.position - g.0.position).normalized.dot(b.position - g.2)
+                let wind = race.groundWind(at: b.position).direction
+                let twa = rad2deg(wrapAngle(wind - b.heading))
+                let brain = controllers[s].driver!.brain
+                let pick = brain.gatePick.map { $0.left ? "L" : "R" } ?? "-"
+                let stage = b.roundingStage
+                let flow = race.current.sample(b.position, tick: race.tick)
+                let sv = race.seatView(for: s)
+                let rounds = BotBrain.roundingTack(g.0, centre: g.2, sv.own, sv)
+                let line = String(format: "t %6.1f leg %d st %d al %6.1f up %6.1f twa %5.0f spd %4.1f %@ plan %@ pick %@ rec %@ near %@ shd %.2f cur %4.2f,%4.2f Lrounds %@ pen %d ask %.0f/%.0f@%.0f tap %@ clr %@ room %@ eva %@",
+                                  Double(race.tick) / Double(Race.tickRate), b.legIndex, stage, along, above, twa, b.speed,
+                                  b.tack == .starboard ? "S" : "P", brain.plannedTack == .starboard ? "S" : "P", pick,
+                                  brain.gateRecovering ? "y" : "n", brain.isNearHerMark ? "y" : "n", b.shadow,
+                                  flow.dot((g.1.position - g.0.position).normalized), flow.dot(up),
+                                  rounds == .starboard ? "S" : "P", b.penaltyTurnsOwed, rad2deg(brain.planingAimed.asked), rad2deg(brain.planingAimed.sailed), brain.planingAimed.time, brain.canTap(sv.own, sv, byHand: true) ? "y" : "n", brain.isClearToTurn(sv.own, sv) ? "y" : "n", brain.hasGybeRoom(sv.own, sv) ? "y" : "n", brain.evasion(sv.own, sv, desired: b.heading) != nil ? "y" : "n")
+                rows[s].append(Row(t: Double(race.tick) / Double(Race.tickRate), line: line))
+            }
+        }
+        var text = ""
+        for s in race.boats.indices {
+            for e in ends[s] {
+                guard let g = gateOf(e.leg) else { continue }
+                // depth 15 s after the leg's end
+                let tEnd = Double(e.end) / Double(Race.tickRate)
+                let near = rows[s].filter { $0.t <= tEnd + 15 && $0.t >= tEnd - 120 }
+                // deepest and still-below from the rows' "up" value
+                let ups = near.compactMap { r -> Double? in
+                    let parts = r.line.split(separator: " ", omittingEmptySubsequences: true)
+                    guard let i = parts.firstIndex(of: "up") else { return nil }
+                    return Double(parts[i + 1])
+                }
+                let deepest = -(ups.min() ?? 0)
+                let lastUp = ups.last ?? 0
+                text += "TAIL \(cell.venue) \(cell.conditions) \(cell.seed) seat \(s) \(tiers[s]) leg \(e.leg) \(e.left ? "L" : "R") deepest \(String(format: "%.1f", deepest)) still \(lastUp < -1)\n"
+                guard deepest > 30 else { continue }
+                text += "== \(cell.venue) \(cell.conditions) s\(cell.seed) seat \(s) tier \(tiers[s]) leg \(e.leg) mark \(e.left ? "L" : "R") end t \(tEnd) deepest \(String(format: "%.1f", deepest)) last \(lastUp) gate L \(g.0.position) R \(g.1.position)\n"
+                for r in near where r.t >= tEnd - 90 { text += r.line + "\n" }
+            }
+        }
+        return text
+    }
+}
+
+@Suite struct TmpPackSide {
+    @Test func whichMarkIsUnderThePack() throws {
+        for offset in [-6.0, 6.0] {
+            let cell = PackCell(seed: 1, layout: PackLayout(current: false, size: 5, offset: offset, gybes: .same), tierMix: .national,
+                                above: PackScenario.defaultAbove)
+            let (race, _, poses) = try PackScenario.placedRace(cell)
+            let g = try PackScenario.Geometry(race)
+            guard case .gate(let left, let right) = race.course.elements[CourseLayout.gateIndex] else { return }
+            let mean = poses.map { ($0.position - g.gate).dot(g.along) }.reduce(0, +) / Double(poses.count)
+            let dl = poses.map { ($0.position - left.position).length }.reduce(0, +) / Double(poses.count)
+            let dr = poses.map { ($0.position - right.position).length }.reduce(0, +) / Double(poses.count)
+            print("PACKSIDE offset \(offset): mean along(left->right) \(mean), to left \(dl), to right \(dr)")
+        }
+    }
+}

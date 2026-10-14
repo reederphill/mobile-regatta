@@ -1,0 +1,21 @@
+### pack: boats rounding the same mark on base and on W, stats on the same boats
+  r1   near (mark under the pack, offset +-6)   n=1160 | base extra 27.5 deepest 9.81 p90 18.4 still 55 overshoot 46 | r1 extra 26.2 deepest 9.35 p90 17.2 still 49 overshoot 37 | deepest diff -0.46 (SE 0.15)
+  r1   far (offset +-6)                         n=301 | base extra 36.7 deepest 8.12 p90 10.1 still 3 overshoot 22 | r1 extra 32.3 deepest 8.54 p90 14.6 still 7 overshoot 21 | deepest diff +0.41 (SE 0.30)
+  r1   offset 0                                 n=796 | base extra 31.1 deepest 8.68 p90 15.8 still 26 overshoot 31 | r1 extra 30.7 deepest 8.72 p90 16.1 still 22 overshoot 33 | deepest diff +0.04 (SE 0.15)
+  head near (mark under the pack, offset +-6)   n=1183 | base extra 27.4 deepest 9.52 p90 17.4 still 50 overshoot 39 | head extra 24.7 deepest 8.97 p90 16.3 still 48 overshoot 19 | deepest diff -0.55 (SE 0.16)
+  head far (offset +-6)                         n=286 | base extra 41.0 deepest 7.75 p90 9.8 still 2 overshoot 29 | head extra 33.1 deepest 7.62 p90 10.6 still 2 overshoot 27 | deepest diff -0.13 (SE 0.28)
+  head offset 0                                 n=752 | base extra 29.9 deepest 8.55 p90 15.4 still 27 overshoot 22 | head extra 27.2 deepest 8.01 p90 13.0 still 19 overshoot 16 | deepest diff -0.54 (SE 0.17)
+### pack6: boats rounding the same mark on base and on W, stats on the same boats
+  r1   near (mark under the pack, offset +-6)   n=432 | base extra 31.5 deepest 9.79 p90 19.1 still 25 overshoot 15 | r1 extra 29.7 deepest 9.28 p90 17.2 still 24 overshoot 10 | deepest diff -0.51 (SE 0.29)
+  r1   far (offset +-6)                         n=135 | base extra 37.3 deepest 8.09 p90 12.2 still 2 overshoot 11 | r1 extra 33.3 deepest 8.66 p90 15.7 still 3 overshoot 10 | deepest diff +0.58 (SE 0.44)
+  r1   offset 0                                 n=303 | base extra 35.5 deepest 8.54 p90 14.4 still 11 overshoot 12 | r1 extra 35.1 deepest 8.93 p90 16.6 still 14 overshoot 11 | deepest diff +0.39 (SE 0.27)
+  head near (mark under the pack, offset +-6)   n=433 | base extra 31.8 deepest 9.58 p90 18.8 still 22 overshoot 15 | head extra 27.9 deepest 8.92 p90 16.3 still 22 overshoot 6 | deepest diff -0.66 (SE 0.29)
+  head far (offset +-6)                         n=133 | base extra 42.8 deepest 7.62 p90 9.8 still 1 overshoot 16 | head extra 36.9 deepest 7.79 p90 12.3 still 1 overshoot 14 | deepest diff +0.17 (SE 0.43)
+  head offset 0                                 n=286 | base extra 34.2 deepest 8.44 p90 14.4 still 10 overshoot 9 | head extra 30.9 deepest 8.04 p90 12.6 still 9 overshoot 5 | deepest diff -0.41 (SE 0.25)
+### packmixed: boats rounding the same mark on base and on W, stats on the same boats
+  r1   near (mark under the pack, offset +-6)   n=1101 | base extra 26.8 deepest 9.47 p90 17.5 still 59 overshoot 42 | r1 extra 25.7 deepest 9.41 p90 16.7 still 61 overshoot 30 | deepest diff -0.06 (SE 0.14)
+  r1   far (offset +-6)                         n=352 | base extra 29.3 deepest 7.76 p90 11.5 still 6 overshoot 19 | r1 extra 26.9 deepest 8.09 p90 13.5 still 12 overshoot 17 | deepest diff +0.34 (SE 0.22)
+  r1   offset 0                                 n=739 | base extra 32.2 deepest 8.48 p90 15.4 still 27 overshoot 29 | r1 extra 31.4 deepest 8.52 p90 16.1 still 23 overshoot 27 | deepest diff +0.04 (SE 0.14)
+  head near (mark under the pack, offset +-6)   n=1121 | base extra 26.2 deepest 9.19 p90 16.6 still 56 overshoot 27 | head extra 24.1 deepest 8.73 p90 15.2 still 57 overshoot 10 | deepest diff -0.47 (SE 0.13)
+  head far (offset +-6)                         n=335 | base extra 31.8 deepest 7.90 p90 12.6 still 8 overshoot 17 | head extra 27.5 deepest 7.92 p90 13.1 still 11 overshoot 17 | deepest diff +0.02 (SE 0.26)
+  head offset 0                                 n=740 | base extra 31.6 deepest 8.38 p90 13.7 still 27 overshoot 24 | head extra 29.4 deepest 8.12 p90 12.8 still 28 overshoot 22 | deepest diff -0.26 (SE 0.19)
