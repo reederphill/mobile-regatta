@@ -60,6 +60,12 @@ extension BotBrain {
     /// Metres above the line that point lies (#510 R, set by hand on 80 races).
     static let gateRecoverUp = 20.0
 
+    /// Seconds after a gate's leg ends that the beat's first tack is held (#523), so a boat that never gets
+    /// close-hauled (a refused luff) is not held to it for good.
+    static let gateExitSeconds = 25.0
+    /// Radians off her upwind groove at which she counts as close-hauled on the rounding tack and the window ends.
+    static let gateExitHauled = deg2rad(4)
+
     /// The gate of the leg she is racing: its marks, left and right looking downwind, and the centre of its line.
     struct Gate {
         var left: CourseLayout.Mark
@@ -184,6 +190,10 @@ extension BotBrain {
             return navigate(b, to: near.position + outwards * Self.gateRecoverOutside + up * Self.gateRecoverUp, view)
         }
         guard above < Self.gatePickRange, above > -Self.gateRecoverBelow else { return nil }
+        // From the pick on she is near her mark of her leg, as inside `PlaningTable.markRange`: no gybe deferred for
+        // speed and a refused turn holds the closest course to her point (#523; `navigate` below notes it by its
+        // distance to her point, and from 80 m the pick wanted the other gybe while neither rule held).
+        defer { isNearHerMark = true }
 
         let l = gateOption(left: true, gate, b, view), r = gateOption(left: false, gate, b, view)
         let held = gatePick.flatMap { $0.leg == b.legIndex ? $0.left : nil }
@@ -212,5 +222,32 @@ extension BotBrain {
         isAtHerGate = mine.distance < PlaningTable.gateRange
         let angle = min(mine.offWind, Self.gateMaxAngle)
         return downwindAim(b, view, aim: Aim(angle: angle, tack: b.tack, tolerance: Self.reachTolerance), nearMark: true)
+    }
+}
+
+extension BotBrain {
+    /// Opens and closes the window in which the beat off a gate starts on the rounding tack (`gateExit`, #523): it
+    /// opens on the first tick of the leg after a gate's, on the tack that rounds the gate's nearer mark in one luff
+    /// (`roundingTack`: port off the left mark, starboard off the right), and ends when she is close-hauled on it,
+    /// `gateExitSeconds` on, or when she is no longer on that leg.
+    mutating func updateGateExit(_ b: SeatView.OwnBoat, _ view: SeatView) {
+        let c = view.course
+        if let exit = gateExit {
+            let up = grooveAngle(.upwind, b, view)
+            let hauled = b.tack == exit.tack && abs(sailingAngle(b)) <= up + Self.gateExitHauled
+            if exit.leg != b.legIndex || view.time >= exit.until || hauled || b.status != .racing { gateExit = nil }
+            return
+        }
+        // The first tick of the leg after her pick's gate: where she is is the leg's end of that gate.
+        guard b.status == .racing, let pick = gatePick, pick.leg == b.legIndex - 1, c.legs.indices.contains(b.legIndex),
+              case .round(let next) = c.legs[b.legIndex], c.elements.indices.contains(next),
+              case .round(let index) = c.legs[pick.leg], case .gate(let left, let right) = c.elements[index] else { return }
+        if case .gate = c.elements[next] { return }
+        let centre = c.targetPosition(for: c.legs[pick.leg])
+        let leftIsNearer = (left.position - b.position).length <= (right.position - b.position).length
+        let mark = leftIsNearer ? left : right
+        gatePick = nil
+        let tack = Self.roundingTack(mark, centre: centre, b, view)
+        gateExit = (b.legIndex, tack, view.time + Self.gateExitSeconds)
     }
 }
