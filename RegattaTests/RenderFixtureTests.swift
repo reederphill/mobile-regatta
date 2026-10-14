@@ -163,7 +163,8 @@ import UIKit
     /// shot's): `rules-call` draws two rule-call lines (yours under rule 10 and one more, whichever rule, their boats
     /// apart), the arc counting your started turn's complete deadline and glows;
     /// `rules-penalty` your unstarted turn's arc, both glows and the HUD's live Turn notice. Both show a backwind wedge
-    /// (#377). Every older fixture draws no rule cue, so its reference doesn't move.
+    /// (#377). `rules-penalty-glow` (#517, unfiltered) draws another boat taking a penalty: her halo shown
+    /// (orange, `RuleCueTests`), no arc of yours. Every older fixture draws no rule cue, so its reference doesn't move.
     @Test func ruleFixturesShowTheRuleCues() throws {
         func session(_ name: String) throws -> GameSession {
             let (fixture, log) = try RenderFixture.load(named: name, in: Self.fixtures)
@@ -202,6 +203,12 @@ import UIKit
         let turn = try #require(penalty.notice?.kind == .penalty ? penalty.notice?.text : nil)
         #expect(turn.hasPrefix("Turn · ") && turn.contains(" / "), "\(turn)")
         #expect(Self.wedgesOnScreen(penalty.scene) >= 1, "no backwind wedge in view")
+
+        let glow = try session("rules-penalty-glow")
+        let orange = glow.scene.shownGlows.indices.filter { glow.scene.shownGlows[$0]?.kind == .takingAPenalty }
+        #expect(!orange.isEmpty, "no boat taking a penalty in glow range")
+        #expect(orange.allSatisfy { glow.scene.shownHalos[$0] != nil }, "her halo is hidden")
+        #expect(glow.scene.ruleCueSummary.hasSuffix("arc=0"), "\(glow.scene.ruleCueSummary)")
 
         for name in ["prestart", "fleet", "cues", "hud-prestart", "hud-racing"] {
             let older = try session(name)
@@ -371,7 +378,7 @@ import UIKit
         // Every scene log sails the default class (#466): after a default switch `scripts/record-fixtures.sh --record`
         // re-records them all, and CI's renders of the new framing are the owner's to adopt (#354).
         #expect(log.header.setup.boatClass == RaceFiles.defaults.boatClass.ref)
-        for scene in ["rules-call", "rules-penalty", "cues", "rules-turn", "rules-turn-gybe", "planing"] {
+        for scene in ["rules-call", "rules-penalty", "cues", "rules-penalty-glow", "rules-turn", "rules-turn-gybe", "planing"] {
             let (_, sceneLog) = try RenderFixture.load(named: scene, in: Self.fixtures)
             #expect(sceneLog.header.setup.boatClass == RaceFiles.defaults.boatClass.ref, "\(scene)")
         }

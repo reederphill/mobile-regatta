@@ -3,7 +3,7 @@ import Testing
 @testable import RegattaCore
 
 /// Boats put together for rule 43.1(a) and 18.2(d) (#93): `IncidentFixture`'s race (ilca-dinghy@3 in a steady
-/// 10 kn from the course's axis, no current, the default rules fleet-rules@6) with as many seats as a test needs,
+/// 10 kn from the course's axis, no current, the default rules fleet-rules@7) with as many seats as a test needs,
 /// each boat placed where it says. Placing imports a snapshot, so the umpire records their track from then on.
 enum CompelledFixture {
     typealias F = IncidentFixture

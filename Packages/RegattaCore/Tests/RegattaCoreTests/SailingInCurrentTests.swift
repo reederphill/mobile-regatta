@@ -17,18 +17,21 @@ func steadyCurrent(knots: Double, towards bearing: Double) -> CurrentField {
 /// A race of `seats` humans in `current`, stepped 10 ticks into its sequence so every boat has her
 /// winds, then with its world edited by `place`. `wind` replaces the keyed wind over the ground, as
 /// `Race.init(setup:files:mode:current:wind:)` says. Every boat is let go where she's placed: her autohelm
-/// engages on the next step, on the angle she sails then (ADR 0007). The race is at `venue` if one is given.
+/// engages on the next step, on the angle she sails then (ADR 0007). The race is at `venue` if one is given, and
+/// under `rules` (the default rules configuration without).
 func placedRace(seats: Int = 2, current: CurrentField, seed: UInt64 = 3, wind: ((_ tick: Int) -> GroundWind)? = nil,
                 boatClass: FileRef? = nil, boatClassFile: BoatClassFile? = nil, venue: VenueFile? = nil,
-                _ place: (inout WorldSnapshot, Race) -> Void) throws -> Race {
+                rules: RulesConfigFile? = nil, _ place: (inout WorldSnapshot, Race) -> Void) throws -> Race {
     // ilca-dinghy@3 unless told otherwise: the schema-2 class these tests' expectations (`Fixtures.boatClass()`) come from.
     // A `boatClassFile` (a tuned copy, say) is sailed from the race's own catalog.
     let boatClass = try boatClassFile?.ref ?? boatClass ?? BoatClassFile.bundled(id: Fixtures.classID, version: Fixtures.version).ref
     var catalog = RaceFileCatalog()
     if let boatClassFile { try catalog.boatClasses.add(boatClassFile) }
     let venue = try venue.map { try catalog.venues.add($0) } ?? RaceFiles.defaults.venue.ref
+    if let rules { try catalog.rulesConfigurations.add(rules) }
     let setup = try RaceSetup(raceSeed: RaceSeed(seed), seats: Array(repeating: .human, count: seats), laps: 2,
-                              startSequenceTicks: 60 * Race.tickRate, boatClass: boatClass, venue: venue)
+                              startSequenceTicks: 60 * Race.tickRate, boatClass: boatClass, venue: venue,
+                              rulesConfiguration: rules?.ref ?? RaceFiles.defaults.rulesConfiguration.ref)
     let race = try Race(setup: setup, files: RaceFiles(resolving: setup, from: catalog),
                         mode: .authoritative(windSeed: WindSeed(seed &* 0x9E37_79B9_7F4A_7C15 &+ 1)), current: current,
                         wind: wind)
@@ -189,7 +192,7 @@ func placedRace(seats: Int = 2, current: CurrentField, seed: UInt64 = 3, wind: (
                 #expect((moved - boat.velocityOverGround).length < 1e-9, "seat \(seat)")
             }
         }
-        // She turned (fleet-rules@6, the default since #490, keeps no turned angle: the heading says it).
+        // She turned (fleet-rules@7, the default since #517, keeps no turned angle: the heading says it).
         #expect(abs(wrapAngle(race.boats[2].heading - turningFrom)) > deg2rad(10))
     }
 

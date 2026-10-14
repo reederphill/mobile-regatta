@@ -30,7 +30,7 @@ import RegattaCore
     /// the gate (`running`); the wind there, and the best upwind and downwind in it.
     /// The class the scripted encounters' water sails (`Water`): the default, or a pinned one a test binds (#437).
     @TaskLocal static var waterClass: FileRef = RaceFiles.defaults.boatClass.ref
-    /// The rules the scripted encounters' water races under (`Water`): the default (fleet-rules@6 since #490), or the
+    /// The rules the scripted encounters' water races under (`Water`): the default (fleet-rules@7 since #517), or the
     /// version a test pins (`.onSixRules`, #488; `.onFiveRules`, the full circle).
     @TaskLocal static var waterRules: FileRef = RaceFiles.defaults.rulesConfiguration.ref
 
@@ -1449,5 +1449,329 @@ import RegattaCore
         brain.seen = [nil, BotBrain.Seen(time: view.time - 0.1, heading: other.heading - BotBrain.guardTurnRate * 0.1,
                                          speed: other.speed)]
         #expect(!brain.tapIsClear(b, view), "bearing away across her tack")
+    }
+
+    // MARK: - #517: give a turning boat her circle
+
+    /// The water seat 1 means to turn in (`tackTowardsATurningBoat`): beating up the first beat, to tack; running down
+    /// to the gate, to gybe; or beating below the line 40 s before the gun, to tack.
+    enum TurnWater { case beating, running, beforeTheGun }
+
+    /// Seat 1 beating on starboard, meaning to tack (in `water`: or running on starboard, meaning to gybe, or before
+    /// her start); seat 0 `along` hull lengths up the line her tack would sail and `ahead` up her own course (or
+    /// `offset` metres from her, if given), on `heading` (the port beat's unless given: sailing away up that line) at
+    /// `speed` (0.6 of close-hauled speed unless given). `turning`: seat 0 has just tacked as the first crossing of a
+    /// penalty turn and owes the gybe (`midTurnScene`'s boat, rule 21.2); else she owes nothing. Seat 0 is racing, or
+    /// before her start with seat 1, unless `status` is given.
+    static func tackTowardsATurningBoat(seed: UInt64, along: Double, ahead: Double, turning: Bool = true,
+                                        heading: Double? = nil, status: BoatStatus? = nil, speed: Double? = nil,
+                                        offset: Vec2? = nil, water kind: TurnWater = .beating) throws -> Race {
+        let water = switch kind {
+        case .beating: Water(seed: seed)
+        case .running: Water(seed: seed, running: true)
+        case .beforeTheGun: Water(seed: seed, toGun: 40, below: 12)
+        }
+        let own: BoatStatus = kind == .beforeTheGun ? .prestart : .racing
+        let from = kind == .running ? water.run(.starboard) : water.beat(.starboard)
+        let onto = kind == .running ? water.run(.port) : water.beat(.port)
+        let forward = Vec2.heading(from), tacked = Vec2.heading(onto)
+        return try place(water, [
+            Placement(position: water.centre + (offset ?? tacked * water.length * along + forward * water.length * ahead),
+                      heading: heading ?? water.beat(.port), speed: speed ?? water.up.speed * 0.6, status: status ?? own),
+            Placement(position: water.centre, heading: from, speed: kind == .running ? water.down.speed : water.up.speed,
+                      status: own),
+        ]) { snapshot in
+            guard turning else { return }
+            snapshot.seats[0].boat.penaltyTurnsOwed = 1
+            snapshot.seats[0].boat.penaltyClockTick = snapshot.tick - RulesConfig.ticks(5)
+            snapshot.seats[0].boat.penaltyFirstCrossing = .tack
+            // Bearing away from port close-hauled, to the gybe: to starboard.
+            snapshot.seats[0].boat.penaltyDirection = 1
+        }
+    }
+
+    /// Seat 1's look before her tack or gybe as `race` stands, for a skill-1 bot (the cautious bot's with `caution`):
+    /// whether it is clear (`BotBrain.tapIsClear`), seat 0 as she sees her, the closest her tack's track and the sailing
+    /// after it come to where seat 0 is (`circleApproach`), the closest the tap's line comes to seat 0 sailed straight
+    /// on at her velocity (every bot's reckoning before #517, and still), and the gap between them now, metres; the
+    /// circle seat 0 is to her with the clearance round it (`need`, nil unless seat 0 is taking a penalty), and whether
+    /// she can begin the turn now (`BotBrain.canTap`, by hand: the gate of a tap and of a hand turn's start).
+    static func lookBeforeHerTack(_ race: Race, caution: BotBrain.Caution? = nil) throws
+        -> (isClear: Bool, other: SeatView.OtherBoat, circle: Double, straight: Double, gap: Double, need: Double?,
+            canTurn: Bool) {
+        let view = race.seatView(for: 1)
+        let b = view.own
+        let other = try #require(view.others.first { $0.seat == 0 })
+        let brain = BotBrain(style: Self.skill1, caution: caution)
+        let need = brain.penaltyCircleRadius(of: other, b, view).map { $0 + view.boatClass.hull.length * brain.tapClearanceLengths }
+        let heading = 2 * b.windDirection - b.heading
+        let lookahead = (other.tack == .starboard ? BotBrain.tapOntoPortLookahead : BotBrain.tapLookahead) * brain.tapLookaheadScale
+        let straight = BotBrain.closestApproach(of: other, to: b, heading: heading, speed: b.speed * BotBrain.tapSpeedShare,
+                                                lookahead: lookahead)
+        return (brain.tapIsClear(b, view), other, brain.circleApproach(to: other, b, heading: heading), straight,
+                (other.position - b.position).length, need, brain.canTap(b, view, byHand: true))
+    }
+
+    /// Sails `race` for `seconds`, seat 1 meaning to tack onto port and seat 0 sailing her own race (a turn she owes),
+    /// both at skill 1: the view seat 1 put her helm over for the tack on (or tapped it on) and the seconds until she
+    /// did, her least speed and the most her heading left its first while she hadn't, the closest the boats came, and
+    /// every event; and of seat 0 while seat 1 hadn't: whether she was taking her penalty at every tick
+    /// (`Boat.isTakingPenalty`), and the most her heading left its first (the turn she made on the water). `planned`
+    /// nil: seat 1 means no turn, and sails her own tack on.
+    static func sailToHerTack(_ race: Race, seconds: Double, planned: Tack? = .port)
+        -> (began: (view: SeatView, seconds: Double)?, leastSpeed: Double, mostOffCourse: Double, closest: Double,
+            kinds: [RaceEvent.Kind], tookPenalty: Bool, turned: Double) {
+        var pilots = [Pilot(seat: 0, plannedTack: nil, race: race), Pilot(seat: 1, plannedTack: planned, race: race)]
+        var began: (view: SeatView, seconds: Double)?
+        let first = race.boats[1].heading, start = race.tick
+        var leastSpeed = race.boats[1].speed, mostOffCourse = 0.0
+        var closest = (race.boats[0].position - race.boats[1].position).length
+        var kinds: [RaceEvent.Kind] = []
+        let firstOfTurning = race.boats[0].heading
+        var tookPenalty = true, turned = 0.0
+        for _ in 0..<Int(seconds * Double(Race.tickRate)) where !race.isOver {
+            _ = pilots[0].drive(race)
+            let view = race.seatView(for: 1)
+            if let decision = pilots[1].drive(race), began == nil, pilots[1].brain.handTurn != nil || decision.tap != nil {
+                began = (view, Double(race.tick - start) / Double(Race.tickRate))
+            }
+            race.step()
+            if began == nil {
+                leastSpeed = min(leastSpeed, race.boats[1].speed)
+                mostOffCourse = max(mostOffCourse, abs(wrapAngle(race.boats[1].heading - first)))
+                tookPenalty = tookPenalty && race.boats[0].isTakingPenalty
+                turned = max(turned, abs(wrapAngle(race.boats[0].heading - firstOfTurning)))
+            }
+            closest = min(closest, (race.boats[0].position - race.boats[1].position).length)
+            kinds += race.drainEvents().map(\.kind)
+        }
+        return (began, leastSpeed, mostOffCourse, closest, kinds, tookPenalty, turned)
+    }
+
+    /// #517, "give a turning boat her circle" (the owner's incident of 2026-10-13: a boat tacked into a boat turning a
+    /// penalty, who had no way to avoid her and was called 21.2). Seat 0 is turning a penalty up the line seat 1's tack
+    /// would sail, sailing away up it: clear by the straight-line reckoning every bot made, sailed on at her velocity,
+    /// but she is slow and circling, and the tack and the sailing after it pass through the water she turns in. Seat 1
+    /// holds the tack: she never puts her helm over while her track crosses the circle, where seat 0 then is. Held off
+    /// it she sails on, on her course at her speed (no orderly bots), and nobody is called.
+    @Test func holdsATackThroughTheCircleOfABoatTakingAPenalty() throws {
+        for seed: UInt64 in [3, 9, 18] {
+            let race = try Self.tackTowardsATurningBoat(seed: seed, along: 2.9, ahead: 1.8)
+            let length = race.boatClass.hull.length
+            let brain = BotBrain(style: Self.skill1)
+            let look = try Self.lookBeforeHerTack(race)
+            let view = race.seatView(for: 1)
+            #expect(look.other.rightOfWay == RightOfWay(keepClear: 0, rule: .takingAPenalty), "seed \(seed)")
+            let radius = try #require(brain.penaltyCircleRadius(of: look.other, view.own, view), "seed \(seed)")
+            let need = radius + length * BotBrain.tapClearance
+            #expect(look.gap <= BotBrain.tapRange && look.gap > need, "seed \(seed): \(look.gap) m off, circle \(need) m")
+            #expect(look.straight >= length * BotBrain.tapClearance, "seed \(seed): clear by the straight-line reckoning")
+            #expect(look.circle < need, "seed \(seed): her track crosses the circle: \(look.circle) of \(need) m")
+            #expect(!look.isClear, "seed \(seed): the tack isn't clear")
+
+            // "And the sailing after it": seat 0 further up that line, beyond the tack itself.
+            let further = try Self.lookBeforeHerTack(Self.tackTowardsATurningBoat(seed: seed, along: 5.5, ahead: 0))
+            let tack = view.own.speed * BotBrain.tapSpeedShare * BotBrain.tapLookahead
+            #expect(further.gap - tack >= need && further.gap <= BotBrain.tapRange, "seed \(seed): the tack alone is clear")
+            #expect(further.circle < need && !further.isClear, "seed \(seed): the sailing after it isn't")
+
+            let speed = race.boats[1].speed
+            let sailed = Self.sailToHerTack(race, seconds: 14)
+            #expect(Self.calls(sailed.kinds).isEmpty, "seed \(seed): \(Self.calls(sailed.kinds))")
+            #expect(sailed.closest > length * BotBrain.tapClearance, "seed \(seed): came within \(sailed.closest) m")
+            // Held: without the circle she puts her helm over at her first decision.
+            #expect((sailed.began?.seconds ?? .infinity) > 2, "seed \(seed): tacked after \(sailed.began?.seconds ?? -1) s")
+            // Sailing on meanwhile: her course, her speed.
+            #expect(sailed.leastSpeed > speed * 0.9, "seed \(seed): slowed to \(sailed.leastSpeed) of \(speed) m/s")
+            #expect(sailed.mostOffCourse < deg2rad(8), "seed \(seed): \(rad2deg(sailed.mostOffCourse))° off her course")
+            // Seat 0 is sailed by her own bot, which turns the penalty the scene has her owe: all the while the tack
+            // is held she is taking it (rule 21.2), and turning on the water, bearing away for her gybe.
+            #expect(sailed.tookPenalty, "seed \(seed): seat 0 taking her penalty while the tack is held")
+            #expect(sailed.turned > deg2rad(60), "seed \(seed): seat 0 turned \(rad2deg(sailed.turned))° meanwhile")
+            // And she tacks with seat 0 still turning, her track out of the circle.
+            let began = try #require(sailed.began, "seed \(seed): she never tacked")
+            let other = try #require(began.view.others.first { $0.seat == 0 })
+            #expect(other.rightOfWay == RightOfWay(keepClear: 0, rule: .takingAPenalty),
+                    "seed \(seed): seat 0 still taking her penalty as she tacked, after \(began.seconds) s")
+            let around = try #require(brain.penaltyCircleRadius(of: other, began.view.own, began.view), "seed \(seed)")
+            let b = began.view.own
+            let approach = brain.circleApproach(to: other, b, heading: 2 * b.windDirection - b.heading)
+            #expect(approach >= around + length * BotBrain.tapClearance,
+                    "seed \(seed): tacked \(approach) m off a circle of \(around) m")
+        }
+    }
+
+    /// #517: and she tacks as soon as her track clears the circle, with seat 0 still turning in it: the tack is held
+    /// off, never given up, and she waits on nothing else. With no circle there she tacks at once: seat 0 in the same
+    /// water with her turn served, seat 0 turning beyond the circle's reach of her track, and a returning boat (rule
+    /// 21.1), who sails a course and is weighed sailing on at her velocity as every boat was.
+    @Test func tacksOnceHerTrackClearsABoatTakingAPenalty() throws {
+        for seed: UInt64 in [3, 9, 18] {
+            let held = try Self.tackTowardsATurningBoat(seed: seed, along: 2.9, ahead: 1.8)
+            let length = held.boatClass.hull.length
+            let brain = BotBrain(style: Self.skill1)
+            let first = held.seatView(for: 1)
+            let turning = try #require(first.others.first { $0.seat == 0 })
+            let radius = try #require(brain.penaltyCircleRadius(of: turning, first.own, first), "seed \(seed)")
+            let need = radius + length * BotBrain.tapClearance
+            #expect(try !Self.lookBeforeHerTack(held).isClear, "seed \(seed): held at first")
+            let sailed = Self.sailToHerTack(held, seconds: 14)
+            let began = try #require(sailed.began, "seed \(seed): she never tacked")
+            #expect(began.seconds > 2, "seed \(seed): held at first, tacked after \(began.seconds) s")
+            let other = try #require(began.view.others.first { $0.seat == 0 })
+            #expect(other.rightOfWay == RightOfWay(keepClear: 0, rule: .takingAPenalty),
+                    "seed \(seed): seat 0 still turning as she tacked, after \(began.seconds) s")
+            #expect(Self.calls(sailed.kinds).isEmpty, "seed \(seed): \(Self.calls(sailed.kinds))")
+
+            // Her turn served: the same water, no circle.
+            let served = try Self.tackTowardsATurningBoat(seed: seed, along: 2.9, ahead: 1.8, turning: false)
+            var look = try Self.lookBeforeHerTack(served)
+            #expect(look.other.rightOfWay?.rule != .takingAPenalty, "seed \(seed)")
+            #expect(look.circle < need && look.isClear, "seed \(seed): turn served, clear")
+            #expect((Self.sailToHerTack(served, seconds: 3).began?.seconds ?? .infinity) < 0.5, "seed \(seed): turn served")
+
+            // Turning, beyond the circle's reach of her track.
+            let beyond = try Self.tackTowardsATurningBoat(seed: seed, along: 2.9, ahead: -4.5)
+            look = try Self.lookBeforeHerTack(beyond)
+            #expect(look.other.rightOfWay?.rule == .takingAPenalty && look.gap <= BotBrain.tapRange, "seed \(seed)")
+            #expect(look.circle >= need && look.isClear, "seed \(seed): beyond the circle, clear")
+            #expect((Self.sailToHerTack(beyond, seconds: 3).began?.seconds ?? .infinity) < 0.5, "seed \(seed): beyond it")
+
+            // A returning boat (rule 21.1) running off below the line her tack would sail: inside what the circle of a
+            // boat taking a penalty would be, and clear sailed on at her velocity.
+            let water = Water(seed: seed)
+            let returning = try Self.tackTowardsATurningBoat(seed: seed, along: 2.9, ahead: -1.2, turning: false,
+                                                             heading: water.wind + .pi, status: .ocs)
+            look = try Self.lookBeforeHerTack(returning)
+            #expect(look.other.rightOfWay == RightOfWay(keepClear: 0, rule: .returningToStart), "seed \(seed)")
+            #expect(look.circle < need && look.straight >= length * BotBrain.tapClearance, "seed \(seed)")
+            #expect(look.isClear, "seed \(seed): a returning boat, clear")
+            #expect((Self.sailToHerTack(returning, seconds: 3).began?.seconds ?? .infinity) < 0.5, "seed \(seed): returning")
+        }
+    }
+
+    /// #517: a gybe is held off as a tack is. Seat 1 running on starboard, meaning to gybe; seat 0 taking her penalty
+    /// up the line the gybe would sail, slow, clear by the straight-line reckoning. Seat 1 holds the gybe, running on
+    /// at the speed she would run at meaning no gybe at all, and gybes with seat 0 still turning once her track is out
+    /// of the circle. With seat 0's turn served she gybes at once.
+    ///
+    /// Off the wind her track is longer than on it, and reaches the circle of a boat beyond `BotBrain.tapRange`: that
+    /// boat is looked at too, as far off as the range and her circle with its clearance.
+    @Test func holdsAGybeThroughTheCircleOfABoatTakingAPenalty() throws {
+        for seed: UInt64 in [3, 9, 18] {
+            let scene = { try Self.tackTowardsATurningBoat(seed: seed, along: 5, ahead: 1, turning: $0, water: .running) }
+            let race = try scene(true)
+            let clear = race.boatClass.hull.length * BotBrain.tapClearance
+            #expect(race.boats[1].twa > .pi / 2, "seed \(seed): running")
+            let look = try Self.lookBeforeHerTack(race)
+            let need = try #require(look.need, "seed \(seed): seat 0 taking a penalty")
+            #expect(look.gap <= BotBrain.tapRange && look.gap > need, "seed \(seed): \(look.gap) m off, circle \(need) m")
+            #expect(look.straight >= clear, "seed \(seed): clear by the straight-line reckoning, \(look.straight) m")
+            #expect(look.circle < need, "seed \(seed): her track crosses the circle: \(look.circle) of \(need) m")
+            #expect(!look.isClear && !look.canTurn, "seed \(seed): the gybe isn't clear")
+
+            let sailed = Self.sailToHerTack(race, seconds: 10)
+            let began = try #require(sailed.began, "seed \(seed): she never gybed")
+            #expect(began.seconds > 1.5, "seed \(seed): gybed after \(began.seconds) s")
+            #expect(sailed.tookPenalty, "seed \(seed): seat 0 taking her penalty while the gybe is held")
+            let other = try #require(began.view.others.first { $0.seat == 0 })
+            #expect(other.rightOfWay == RightOfWay(keepClear: 0, rule: .takingAPenalty), "seed \(seed): and as she gybed")
+            #expect(Self.calls(sailed.kinds).isEmpty, "seed \(seed): \(Self.calls(sailed.kinds))")
+            #expect(sailed.closest > clear, "seed \(seed): came within \(sailed.closest) m")
+            // Running on meanwhile as she would meaning no gybe: her course, and the same speed (no orderly bots).
+            let running = Self.sailToHerTack(try scene(true), seconds: began.seconds, planned: nil)
+            #expect(sailed.leastSpeed >= running.leastSpeed - 0.01,
+                    "seed \(seed): slowed to \(sailed.leastSpeed) m/s, \(running.leastSpeed) m/s running on")
+            #expect(sailed.mostOffCourse < deg2rad(8), "seed \(seed): \(rad2deg(sailed.mostOffCourse))° off her course")
+
+            // Her turn served: the same water, no circle.
+            let served = try Self.lookBeforeHerTack(scene(false))
+            #expect(served.need == nil && served.isClear && served.canTurn, "seed \(seed): turn served, clear")
+            #expect((Self.sailToHerTack(try scene(false), seconds: 3).began?.seconds ?? .infinity) < 0.5, "seed \(seed): turn served")
+
+            // Beyond `tapRange`, her circle within reach of the gybe's track.
+            let far = try Self.lookBeforeHerTack(Self.tackTowardsATurningBoat(seed: seed, along: 9.2, ahead: 0, water: .running))
+            #expect(far.gap > BotBrain.tapRange && far.gap <= BotBrain.tapRange + need, "seed \(seed): \(far.gap) m off")
+            #expect(far.circle < need && !far.isClear, "seed \(seed): the track reaches her circle: \(far.circle) of \(need) m")
+            // And beyond the range and the circle no boat is looked at.
+            let beyond = try Self.lookBeforeHerTack(Self.tackTowardsATurningBoat(seed: seed, along: 11.5, ahead: 0, water: .running))
+            #expect(beyond.gap > BotBrain.tapRange + need && beyond.isClear, "seed \(seed): \(beyond.gap) m off")
+        }
+    }
+
+    /// #517: and before her start (`tapIsClear` is her look there too, #280). Seat 1 beating below the line 40 s before
+    /// the gun, seat 0 taking a penalty up the line her tack would sail, sailing away up it: the tack is refused for
+    /// the circle, and clear with seat 0's turn served.
+    @Test func holdsATackBeforeHerStartThroughTheCircleOfABoatTakingAPenalty() throws {
+        for seed: UInt64 in [3, 9, 18] {
+            let scene = { try Self.tackTowardsATurningBoat(seed: seed, along: 4, ahead: 0, turning: $0, water: .beforeTheGun) }
+            let race = try scene(true)
+            #expect(race.boats.allSatisfy { $0.status == .prestart }, "seed \(seed)")
+            let clear = race.boatClass.hull.length * BotBrain.tapClearance
+            let look = try Self.lookBeforeHerTack(race)
+            #expect(look.other.rightOfWay == RightOfWay(keepClear: 0, rule: .takingAPenalty), "seed \(seed)")
+            let need = try #require(look.need, "seed \(seed)")
+            #expect(look.gap <= BotBrain.tapRange && look.gap > need, "seed \(seed): \(look.gap) m off, circle \(need) m")
+            #expect(look.straight >= clear, "seed \(seed): clear by the straight-line reckoning, \(look.straight) m")
+            #expect(look.circle < need, "seed \(seed): her track crosses the circle: \(look.circle) of \(need) m")
+            #expect(!look.isClear && !look.canTurn, "seed \(seed): the tack isn't clear")
+            let served = try Self.lookBeforeHerTack(scene(false))
+            #expect(served.need == nil && served.isClear && served.canTurn, "seed \(seed): turn served, clear")
+        }
+    }
+
+    /// #517: the cautious bot (#104) gives the circle more. Her clearance round it is wider (`tapClearanceLengths`) and
+    /// the tack's part of her track longer (`tapLookaheadScale`), both by `Caution.clearanceFactor` as for any boat;
+    /// the circle's radius (the class's penalty turn) and the sailing after the tack (`penaltyCircleAfter`) are the
+    /// same for every bot. Seat 0 taking her penalty far enough up the line of the tack that a skill-1 bot's track
+    /// stops short of her circle: the cautious bot's doesn't, and she holds the tack.
+    @Test func cautiousBotHoldsATackThroughTheCircleOfABoatTakingAPenalty() throws {
+        for seed: UInt64 in [3, 9, 18] {
+            let scene = { try Self.tackTowardsATurningBoat(seed: seed, along: 7.7, ahead: 0, turning: $0) }
+            let race = try scene(true)
+            let length = race.boatClass.hull.length, speed = race.boats[1].speed
+            let factor = BotBrain.Caution.standard.clearanceFactor
+            let plain = try Self.lookBeforeHerTack(race), cautious = try Self.lookBeforeHerTack(race, caution: .standard)
+            let need = try #require(plain.need, "seed \(seed)"), wider = try #require(cautious.need, "seed \(seed)")
+            #expect(plain.gap <= BotBrain.tapRange, "seed \(seed): \(plain.gap) m off")
+            #expect(abs(wider - need - length * BotBrain.tapClearance * (factor - 1)) < 1e-9, "seed \(seed): the clearance only")
+            let further = speed * BotBrain.tapSpeedShare * BotBrain.tapLookahead * (factor - 1)
+            // To centimetres: seat 0 is up the water's port beat, a touch off the line of the tack in seat 1's own wind.
+            #expect(abs(plain.circle - cautious.circle - further) < 0.05, "seed \(seed): the tack's part of the track only")
+            #expect(plain.circle >= need && plain.isClear, "seed \(seed): a skill-1 bot's track stops short of the circle")
+            #expect(cautious.straight >= length * BotBrain.tapClearance * factor, "seed \(seed): clear by the straight-line reckoning")
+            #expect(cautious.circle < wider, "seed \(seed): hers crosses it: \(cautious.circle) of \(wider) m")
+            #expect(!cautious.isClear && !cautious.canTurn, "seed \(seed): the cautious bot's tack isn't clear")
+            let served = try Self.lookBeforeHerTack(scene(false), caution: .standard)
+            #expect(served.need == nil && served.isClear && served.canTurn, "seed \(seed): turn served, clear")
+        }
+    }
+
+    /// #517, the ruling of 2026-10-13: a boat taking a penalty is a circle of water and a boat sailed on, both. Between
+    /// her tack and her gybe she is reaching, not circling in place. Seat 0 taking her penalty, beam reaching on
+    /// starboard at the line seat 1's tack would sail, to meet her on it 5 s on (inside `tapOntoPortLookahead`), her
+    /// circle clear of the track: the tack is refused, as it is with her turn served, and as it was before #517.
+    @Test func refusesATackAcrossABoatTakingAPenaltyReachingAtHerTrack() throws {
+        for seed: UInt64 in [3, 9, 18] {
+            let water = Water(seed: seed)
+            let need = try #require(try Self.lookBeforeHerTack(Self.tackTowardsATurningBoat(seed: seed, along: 2.9, ahead: 1.8)).need)
+            let tacked = Vec2.heading(water.beat(.port))
+            let reach = water.heading(.starboard, .pi / 2), reaching = Vec2.heading(reach)
+            // Her speed: from 1.5 m outside the circle's reach of the track to the track in `meet` seconds.
+            let meet = 5.0
+            let speed = (need + 1.5) / (meet * abs(reaching.dot(tacked.rightPerp)))
+            let offset = tacked * (water.up.speed * BotBrain.tapSpeedShare * meet) - reaching * (speed * meet)
+            let scene = { try Self.tackTowardsATurningBoat(seed: seed, along: 0, ahead: 0, turning: $0, heading: reach,
+                                                           speed: speed, offset: offset) }
+            let look = try Self.lookBeforeHerTack(scene(true))
+            #expect(look.other.rightOfWay == RightOfWay(keepClear: 0, rule: .takingAPenalty), "seed \(seed)")
+            #expect(look.other.tack == .starboard && look.gap <= BotBrain.tapRange, "seed \(seed): \(look.gap) m off")
+            #expect(speed < water.up.speed * 1.2, "seed \(seed): reaching at \(speed) m/s")
+            #expect(look.circle >= need, "seed \(seed): her track is out of the circle: \(look.circle) of \(need) m")
+            #expect(look.straight < water.length * BotBrain.tapClearance, "seed \(seed): she sails into the tack: \(look.straight) m")
+            #expect(!look.isClear && !look.canTurn, "seed \(seed): the tack isn't clear")
+            let served = try Self.lookBeforeHerTack(scene(false))
+            #expect(served.need == nil && !served.isClear, "seed \(seed): nor with her turn served")
+        }
     }
 }

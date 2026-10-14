@@ -44,8 +44,10 @@ public struct UmpireState: Sendable, Equatable {
         recorder.record(tick: tick, boats: boats, inputs: inputs, overlaps: overlaps, capacity: ticks)
     }
 
-    /// Seats `a` and `b`'s recorded track, oldest first through the newest tick recorded; nil before any.
-    public func track(_ a: Int, _ b: Int) -> PairTrack? { recorder.track(a, b) }
+    /// Seats `a` and `b`'s recorded track, oldest first through the newest tick recorded, over the last `ticks`
+    /// ticks (every tick recorded, if there are fewer or without `ticks`); nil before any. Every call but rule 21.2's
+    /// look-back (#517) is judged on the last `RulesConfig.Escape.windowTicks`.
+    public func track(_ a: Int, _ b: Int, last ticks: Int? = nil) -> PairTrack? { recorder.track(a, b, last: ticks) }
 
     /// Forgets the recorded track and the rule 17 records read from it: after an import (`Race.importSnapshot`) the
     /// boats' past isn't the one it holds.

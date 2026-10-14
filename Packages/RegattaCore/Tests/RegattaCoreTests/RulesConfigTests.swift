@@ -248,8 +248,8 @@ import Testing
         #expect(throws: needsSchema4) {
             try RulesConfigFile(data: Self.tampered(#""schemaVersion": 4"#, #""schemaVersion": 3"#, version: 4))
         }
-        #expect(throws: DataFileError.unsupportedSchemaVersion(kind: kind, found: 7, supported: [1, 2, 3, 4, 5, 6])) {
-            try RulesConfigFile(data: Self.tampered(#""schemaVersion": 5"#, #""schemaVersion": 7"#))
+        #expect(throws: DataFileError.unsupportedSchemaVersion(kind: kind, found: 8, supported: [1, 2, 3, 4, 5, 6, 7])) {
+            try RulesConfigFile(data: Self.tampered(#""schemaVersion": 5"#, #""schemaVersion": 8"#))
         }
     }
 
@@ -435,13 +435,13 @@ import Testing
     }
 
     /// fleet-rules@6 (schema 6, #487) is @5 with a `tackAndGybe` penalty turn: completed within 40 s of its clock, no
-    /// start deadline (`start` is `complete`) and no started turn; every other value the same. It is the default (#490).
+    /// start deadline (`start` is `complete`) and no started turn; every other value the same. It was the default from #490 to #517.
     /// @1 to @5 still parse as before: a `fullCircle` turn.
     @Test func fleetRulesSixParsesTackAndGybe() throws {
         let v5 = try RulesConfigFile.bundled(id: "fleet-rules", version: 5)
         let v6 = try RulesConfigFile.bundled(id: "fleet-rules", version: 6)
         #expect(v6.header.schemaVersion == 6)
-        #expect(v6.ref == RaceFiles.defaults.rulesConfiguration.ref && v6.ref == Race.defaultRulesConfiguration.ref)
+        #expect(v6.ref != RaceFiles.defaults.rulesConfiguration.ref)
         let penalty = v6.content.raceFormat.penalty
         #expect(penalty == RulesConfig.Penalty(start: 40, complete: 40, startedTurn: 0, stackedPenaltyDeadlines: .sequential,
                                                turn: .tackAndGybe))
@@ -488,6 +488,67 @@ import Testing
         }
         #expect(throws: DataFileError.malformed(kind: kind, reason: "a fullCircle penalty needs raceFormat.penalty.startSeconds")) {
             try RulesConfigFile(data: Self.tampered(turn, "", version: 6))
+        }
+    }
+
+    /// fleet-rules@7 (schema 7, #517) is @6 with the look-back towards a boat taking a penalty: 8 s, a builder value;
+    /// every other value the same. It is the default (#517). The umpire records the boats long enough to hold it, with the tick
+    /// before its first; every other call is still judged on the last 62 ticks. @1 to @6 still parse with none.
+    @Test func fleetRulesSevenParsesThePenaltyLookBack() throws {
+        let v6 = try RulesConfigFile.bundled(id: "fleet-rules", version: 6)
+        let v7 = try RulesConfigFile.bundled(id: "fleet-rules", version: 7)
+        #expect(v7.header.schemaVersion == 7)
+        #expect(v7.ref == RaceFiles.defaults.rulesConfiguration.ref && v7.ref == Race.defaultRulesConfiguration.ref)
+        #expect(v7.content.incidents.escape.penaltyLookBack == 8)
+        #expect(v7.content.incidents.escape.windowTicks == 62 && v7.content.incidents.escape.recordedTicks == 242)
+        for version in 1...6 {
+            let escape = try RulesConfigFile.bundled(id: "fleet-rules", version: version).content.incidents.escape
+            #expect(escape.penaltyLookBack == nil && escape.recordedTicks == escape.windowTicks, "\(version)")
+        }
+        #expect(v6.content.incidents.escape.recordedTicks == 62)
+        var incidents = v7.content.incidents
+        incidents.escape.penaltyLookBack = nil
+        #expect(incidents == v6.content.incidents)
+        #expect(v7.content.raceFormat == v6.content.raceFormat && v7.content.zone == v6.content.zone)
+        #expect(v7.content.markRoomGiven == v6.content.markRoomGiven && v7.content.onABeat == v6.content.onABeat)
+        let lookBack = "/incidents/escape/penaltyLookBackSeconds"
+        #expect(v7.content.builderValues.contains(lookBack)
+            && v7.content.builderValues.filter { $0 != lookBack } == v6.content.builderValues)
+        #expect(v7.header.placeholders == v6.header.placeholders)
+    }
+
+    /// The look-back is schema 7's: required there, a positive whole number of ticks, refused before it.
+    @Test func penaltyLookBackNeedsSchema7() throws {
+        let kind = RulesConfig.kind
+        let field = #""penaltyLookBackSeconds": 8"#
+        let longer = try RulesConfigFile(data: Self.tampered(field, #""penaltyLookBackSeconds": 10"#, version: 7))
+        #expect(longer.content.incidents.escape.penaltyLookBack == 10 && longer.content.incidents.escape.recordedTicks == 302)
+        // Shorter than the horizon, the umpire still records the window every other call reads.
+        let shorter = try RulesConfigFile(data: Self.tampered(field, #""penaltyLookBackSeconds": 1"#, version: 7))
+        #expect(shorter.content.incidents.escape.recordedTicks == 62)
+        for (bad, reason) in [("0", "must be positive"), ("-8", "must be positive"),
+                              ("8.01", "must be a whole number of ticks (1/30 s)")] {
+            #expect(throws: DataFileError.invalidContent(
+                kind: kind, id: "fleet-rules", reason: "incidents.escape.penaltyLookBackSeconds " + reason)) {
+                try RulesConfigFile(data: Self.tampered(field, #""penaltyLookBackSeconds": "# + bad, version: 7))
+            }
+        }
+        // Schema 7 without it (and without its builder value, which would point at nothing).
+        var text = try #require(String(data: try Self.tampered(",\n      " + field, "", version: 7), encoding: .utf8))
+        text = text.replacingOccurrences(of: "\n    \"/incidents/escape/penaltyLookBackSeconds\",", with: "")
+        #expect(!text.contains(#""penaltyLookBackSeconds""#) && !text.contains(#"/penaltyLookBackSeconds""#))
+        #expect(throws: DataFileError.malformed(kind: kind, reason: "schema 7 needs incidents.escape.penaltyLookBackSeconds")) {
+            try RulesConfigFile(data: Data(text.utf8))
+        }
+        // Before schema 7 with it: @6 given the field, or @7 claiming schema 6.
+        let needsSchema7 = DataFileError.invalidContent(
+            kind: kind, id: "fleet-rules", reason: "incidents.escape.penaltyLookBackSeconds needs schema 7")
+        #expect(throws: needsSchema7) {
+            try RulesConfigFile(data: Self.tampered(#""changesCourseDegreesPerSecond": 12"#,
+                                                    #""changesCourseDegreesPerSecond": 12, "# + field, version: 6))
+        }
+        #expect(throws: needsSchema7) {
+            try RulesConfigFile(data: Self.tampered(#""schemaVersion": 7"#, #""schemaVersion": 6"#, version: 7))
         }
     }
 }
@@ -582,7 +643,7 @@ import Testing
 
     /// A short scripted race's index, entry by entry (#94): a contact the umpire calls, a touch again inside the
     /// incident, a protest 5 s after and one with no incident. Pinned as JSON, integers and strings only, so it
-    /// reads the same on every platform. Under the default fleet-rules@6 (#490) the call's start deadline is its
+    /// reads the same on every platform. Under the default fleet-rules@7 (#517, as @6 from #490) the call's start deadline is its
     /// complete deadline (one 40 s limit).
     @Test func scriptedIndexIsPinned() throws {
         let race = try IncidentFixture.race()

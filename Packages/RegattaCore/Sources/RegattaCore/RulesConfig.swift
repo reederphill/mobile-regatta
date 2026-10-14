@@ -33,7 +33,10 @@ public struct RulesConfig: DataFileContent {
     /// Schema 6 (#487) adds what a penalty turn is (`Penalty.turn`, absent `fullCircle`); a `tackAndGybe` file has
     /// no start deadline (`startSeconds`) and no started turn (`startedTurnDegrees`). A schema-1 to -5 file means
     /// `fullCircle`.
-    public static let supportedSchemaVersions = [1, 2, 3, 4, 5, 6]
+    /// Schema 7 (#517) adds how far back the 16.1 test looks for the right-of-way boat's turn in a rule 21.2 incident
+    /// (`Escape.penaltyLookBack`); a schema-1 to -6 file has none (nil), and such an incident looks `Escape.horizon`
+    /// back, like any other.
+    public static let supportedSchemaVersions = [1, 2, 3, 4, 5, 6, 7]
 
     public var incidents: Incidents
     /// The rule 18 zone.
@@ -124,12 +127,24 @@ public struct RulesConfig: DataFileContent {
         /// Builder value. Nil in a schema-1 to -3 file: no escape simulation runs, so rules 15 and 16.1 are
         /// never called (`EscapeSimulation`).
         public var changesCourse: Double?
+        /// Seconds back from an incident whose obligation is rule 21.2 that the 16.1 test looks for where the
+        /// right-of-way boat's turn began (schema 7, #517; `EscapeSimulation`). Builder value. Nil in a schema-1 to
+        /// -6 file: such an incident looks `horizon` back, like any other.
+        public var penaltyLookBack: Double?
 
-        /// Ticks the umpire records each boat for (`UmpireState`): enough for a simulation from the tick
-        /// after the first it looks back to, a course change `horizon` and `startTickOffset` before the
-        /// incident or right of way acquired `initially` before it, and the tick before that to compare.
-        public var recordedTicks: Int {
+        /// Ticks of each pair's track every call but rule 21.2's look-back is judged on (`UmpireState.track`): enough
+        /// for a simulation from the tick after the first it looks back to, a course change `horizon` and
+        /// `startTickOffset` before the incident or right of way acquired `initially` before it, and the tick before
+        /// that to compare.
+        public var windowTicks: Int {
             max(RulesConfig.ticks(horizon) + startTickOffset + 1, RulesConfig.ticks(initially) + 2)
+        }
+
+        /// Ticks the umpire records each boat for (`UmpireState`): `windowTicks`, and with a look-back (schema 7,
+        /// #517) enough to hold it too, with the tick before its first to compare and to hold her course from.
+        public var recordedTicks: Int {
+            guard let penaltyLookBack else { return windowTicks }
+            return max(windowTicks, RulesConfig.ticks(penaltyLookBack) + 2)
         }
     }
 
@@ -278,7 +293,7 @@ public struct RulesConfig: DataFileContent {
 
     public init(fileData: Data, header: DataFileHeader) throws {
         switch header.schemaVersion {
-        case 1, 2, 3, 4, 5, 6:
+        case 1, 2, 3, 4, 5, 6, 7:
             // Duplicate keys were already refused by `DataFile`, so every parse below reads the same file.
             let document = try JSONDecoder().decode(RulesConfigSchema.self, from: fileData)
             try document.rejectUnknownFields(in: fileData)
@@ -302,9 +317,9 @@ public struct RulesConfig: DataFileContent {
 
 public typealias RulesConfigFile = DataFile<RulesConfig>
 
-// MARK: - Schemas 1 to 6
+// MARK: - Schemas 1 to 7
 
-/// The rules configuration file, schema versions 1 to 6, as written. Documented in `docs/rules-file.md`.
+/// The rules configuration file, schema versions 1 to 7, as written. Documented in `docs/rules-file.md`.
 /// Schema 2 is schema 1 plus `raceFormat.startRow.minimumSpacingHullLengths` (#85): required in schema 2
 /// and later, refused in schema 1. Schema 3 is schema 2 plus `raceFormat.penalty.stackedPenaltyDeadlines`
 /// (#89): required in schema 3 and later, refused before it. Schema 4 is schema 3 plus
@@ -312,6 +327,7 @@ public typealias RulesConfigFile = DataFile<RulesConfig>
 /// Schema 5 is schema 4 plus `incidents.properCourse` (#345): required in schema 5, refused before it.
 /// Schema 6 is schema 5 plus `raceFormat.penalty.turn` (#487): optional (absent `fullCircle`), refused before it; a
 /// `tackAndGybe` penalty drops `startSeconds` and `startedTurnDegrees`, which every other penalty requires.
+/// Schema 7 is schema 6 plus `incidents.escape.penaltyLookBackSeconds` (#517): required in schema 7, refused before it.
 struct RulesConfigSchema: Decodable {
     let schemaVersion: Int
     let id: String
@@ -379,9 +395,12 @@ struct RulesConfigSchema: Decodable {
         let initiallySeconds: Double
         /// Schema 4.
         let changesCourseDegreesPerSecond: Double?
+        /// Schema 7.
+        let penaltyLookBackSeconds: Double?
 
         enum CodingKeys: String, CodingKey, CaseIterable {
             case horizonSeconds, candidates, startTickOffset, initiallySeconds, changesCourseDegreesPerSecond
+            case penaltyLookBackSeconds
         }
     }
 
@@ -503,7 +522,7 @@ struct RulesConfigSchema: Decodable {
         }
     }
 
-    /// Every field schemas 1 to 6 have, from each type's `CodingKeys`, so it can't drift from the decoder.
+    /// Every field schemas 1 to 7 have, from each type's `CodingKeys`, so it can't drift from the decoder.
     static let fields: FieldTree = .object(CodingKeys.self, [
         .incidents: .object(Incidents.CodingKeys.self, [
             .nearMissSweep: .object(NearMissSweep.CodingKeys.self),
@@ -525,7 +544,7 @@ struct RulesConfigSchema: Decodable {
     ])
 
     /// Validates the file and converts it to code units. Throws `DataFileError.invalidContent`, or `malformed`
-    /// for a schema-2 to -6 file without a field its schema requires.
+    /// for a schema-2 to -7 file without a field its schema requires.
     func rulesConfig(id: String, schemaVersion: Int, fileData: Data) throws -> RulesConfig {
         func check(_ condition: Bool, _ reason: @autoclosure () -> String) throws {
             if !condition { throw DataFileError.invalidContent(kind: RulesConfig.kind, id: id, reason: reason()) }
@@ -646,6 +665,17 @@ struct RulesConfigSchema: Decodable {
         } else {
             try check(escape.changesCourseDegreesPerSecond == nil, "incidents.escape.changesCourseDegreesPerSecond needs schema 4")
         }
+        // Schema 7's look-back towards a boat taking a penalty: required in schema 7, refused before it, where a rule
+        // 21.2 incident looks the horizon back like any other.
+        if schemaVersion >= 7 {
+            guard let lookBack = escape.penaltyLookBackSeconds else {
+                throw DataFileError.malformed(
+                    kind: RulesConfig.kind, reason: "schema \(schemaVersion) needs incidents.escape.penaltyLookBackSeconds")
+            }
+            try duration(lookBack, "incidents.escape.penaltyLookBackSeconds")
+        } else {
+            try check(escape.penaltyLookBackSeconds == nil, "incidents.escape.penaltyLookBackSeconds needs schema 7")
+        }
 
         // Schema 3's stacking of penalty deadlines: required in schema 3 and later, refused before it, where it
         // is `fromCall`.
@@ -705,7 +735,7 @@ struct RulesConfigSchema: Decodable {
                                      stepTicks: sweep.stepTicks, clearance: HullLengths(sweep.clearanceHullLengths)),
                 escape: .init(horizon: escape.horizonSeconds, candidates: candidates,
                               startTickOffset: escape.startTickOffset, initially: escape.initiallySeconds,
-                              changesCourse: changesCourse),
+                              changesCourse: changesCourse, penaltyLookBack: escape.penaltyLookBackSeconds),
                 separation: HullLengths(incidents.separationHullLengths),
                 lastPointOfCertainty: incidents.lastPointOfCertaintySeconds,
                 properCourse: properCourse),

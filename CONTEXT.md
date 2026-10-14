@@ -48,7 +48,7 @@ What a right-of-way boat that has just acquired right of way (rule 15) or change
 _Avoid_: space, time to react
 
 **Escape simulation**:
-The umpire's test of room: the keep-clear boat's candidate inputs sailed on with the real boat dynamics for 2 s against the right-of-way boat's recorded track. If none keeps her clear, room wasn't given.
+The umpire's test of room: the keep-clear boat's candidate inputs sailed on with the real boat dynamics for 2 s against the right-of-way boat's recorded track. If none keeps her clear, room wasn't given. Under fleet-rules@7 a boat that turns into a boat taking a penalty (21.2) takes the call (16.1) when her held course, from where her turn began up to 8 s back, would have stayed clear, with no escape sailed.
 _Avoid_: avoidance check, track projection
 
 **Proper course**:
@@ -368,7 +368,7 @@ The race HUD's two figures, a pair centred in the bottom row ([#460](https://git
 _Avoid_: dials, gauges, AWA/AWS
 
 **Right-of-way glow**:
-The wordless halo round another boat that says who keeps clear: red on a boat you must keep clear of, green on a boat that must keep clear of you. It fades in from nothing as she comes within a short range, to full strength close in; mark-room shows the same way within that range, a boat owing it red and the boat owed it green (mark-room has no notice of its own, and the umpire's calls don't change: rule 18 isn't right of way), and a ghost has none. Online the glows are the server umpire's, mark-room included. The core's `RightOfWayGlyph` is its red/green kind (the name dates from when these were a ⚠ and a chevron).
+The wordless halo round another boat that says who keeps clear: red on a boat you must keep clear of, green on a boat that must keep clear of you. A boat taking a penalty (rule 21.2) glows orange instead of green to every other boat: she can't get out of your way quickly, so give her room; her own view keeps every boat red, and a returning boat (21.1) keeps green. It fades in from nothing as she comes within a short range, to full strength close in; mark-room shows the same way within that range, a boat owing it red and the boat owed it green (mark-room has no notice of its own, and the umpire's calls don't change: rule 18 isn't right of way), and a ghost has none. Online the glows are the server umpire's, mark-room included. The core's `RightOfWayGlyph` has the red and green kinds and `takingAPenalty`, the orange one (the name dates from when these were a ⚠ and a chevron).
 _Avoid_: boat label, rights icon, glyph
 
 **Penalty arc**:

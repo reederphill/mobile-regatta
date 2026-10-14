@@ -4,12 +4,13 @@ import XCTest
 /// The rule cues (#123) on the fleet bot race in course-up: `rules-call` a few seconds after two calls, with their
 /// orange dashed lines and rule-number badges, your penalty arc counting the complete deadline and red glows round the
 /// boats you keep clear of while turning (21.2); `rules-penalty` before your turn is started, the arc counting the
-/// start deadline, red and green glows, and the HUD's "Turn" notice. Those two through every vision filter (#22) in
+/// start deadline, red and green glows, and the HUD's "Turn" notice; `rules-penalty-glow` (#517) another boat taking a
+/// penalty, her glow orange in place of green. The first two through every vision filter (#22) in
 /// `RenderFixtureFilterUITests`; fleet-rules@6's arc with its tack and gybe marks (#489) unfiltered. In a file of its
 /// own beside `RenderFixtureUITests`, as the cues' are.
 extension RenderFixtureUITests {
     @objc @MainActor func testRuleCuesMatchReferences() throws {
-        try assertAllMatchReferences(["rules-call", "rules-penalty"])
+        try assertAllMatchReferences(["rules-call", "rules-penalty", "rules-penalty-glow"])
     }
 
     /// The fleet-rules@6 penalty arc (#489) on its own scenes: `rules-turn` just called (one 40 s countdown, the tack

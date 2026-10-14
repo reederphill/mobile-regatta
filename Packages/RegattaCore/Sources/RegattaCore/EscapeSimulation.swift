@@ -137,8 +137,16 @@ public struct PairTrack: Sendable, Equatable {
 /// (`ProperCourseRecord`), the leeward boat is sailed on her proper course instead of her own (`verdict`). Rule 18.2
 /// (#93) is judged on it too, given the pair's rule 18 record (`MarkRoomRecord`): whether the boat owing mark-room
 /// could have given it (`markRoomVerdict`).
+///
+/// Towards a boat taking a penalty (rule 21.2) under a rules configuration with a look-back (schema 7, #517), rule
+/// 16.1 is judged over the pair's longer track (`penaltyTrack`), from where the right-of-way boat's turn began
+/// (`penaltyRoomVerdict`): by her held course alone, with no escape sailed. Every other call reads `track` alone,
+/// so none of them moves with the look-back.
 public struct EscapeSimulation: Sendable {
-    public let track: PairTrack
+    public private(set) var track: PairTrack
+    /// The pair's track as far back as rule 21.2's look-back reaches (`RulesConfig.Escape.recordedTicks`, #517),
+    /// through the same tick as `track`: nil for none, and the look-back reads `track`.
+    public let penaltyTrack: PairTrack?
     public let escape: RulesConfig.Escape
     /// `escape.changesCourse`, radians a second.
     public let changesCourse: Double
@@ -154,11 +162,12 @@ public struct EscapeSimulation: Sendable {
 
     /// Nil for a rules configuration with no "changes course" test (schema 1 to 3): no escape simulation.
     /// `properCourse` is the pair's rule 17 record (`UmpireState.properCourse(_:)`), and `markRoom` its rule 18
-    /// record (`UmpireState.markRoom(_:)`), if any.
-    public init?(track: PairTrack, rules: RulesConfig, boatClass: BoatClass, properCourse: ProperCourseRecord? = nil,
-                 markRoom: MarkRoomRecord? = nil) {
+    /// record (`UmpireState.markRoom(_:)`), if any; `penaltyTrack` the pair's longer track for rule 21.2's look-back.
+    public init?(track: PairTrack, penaltyTrack: PairTrack? = nil, rules: RulesConfig, boatClass: BoatClass,
+                 properCourse: ProperCourseRecord? = nil, markRoom: MarkRoomRecord? = nil) {
         guard let changesCourse = rules.incidents.escape.changesCourse else { return nil }
         self.track = track
+        self.penaltyTrack = penaltyTrack
         escape = rules.incidents.escape
         self.changesCourse = changesCourse
         sweep = rules.incidents.nearMissSweep
@@ -187,6 +196,8 @@ public struct EscapeSimulation: Sendable {
     ///   before it (first seen in the step to now, so no tick to answer in before it: clear of that course
     ///   now, and an escape from now, #273). Without that, the keep-clear boat was failing to keep clear
     ///   anyway, and her course change (avoiding contact, say) took nothing from her.
+    /// - Rule 16.1 when `obligation` is rule 21.2, under a rules configuration with a look-back (#517): judged from
+    ///   where the right-of-way boat's turn began instead (`penaltyRoomVerdict`).
     func verdict(_ obligation: Verdict, course: CourseLayout) -> Verdict {
         let keepClear = obligation.offender, rightOfWay = obligation.victim
         let last = track.count - 1
@@ -216,6 +227,12 @@ public struct EscapeSimulation: Sendable {
             return Verdict(rule: .acquiringRightOfWay, offender: rightOfWay, victim: keepClear, exonerated: [keepClear])
         }
 
+        if obligation.rule == .takingAPenalty, let lookBack = escape.penaltyLookBack {
+            let long = penaltyTrack ?? track
+            guard long.seats == track.seats else { return nil }
+            return over(long).penaltyRoomVerdict(obligation, lookBack: RulesConfig.ticks(lookBack), course: course)
+        }
+
         let first = max(acquired ?? 1, last - horizon - offset + 1, 1)
         guard first <= last, let change = (first...last).first(where: { turnRate(of: rightOfWay, at: $0) > changesCourse })
         else { return nil }
@@ -224,6 +241,83 @@ public struct EscapeSimulation: Sendable {
               canEscape(keepClear, from: start, of: rightOfWay, heldFrom: change - 1)
         else { return nil }
         return Verdict(rule: .changingCourse, offender: rightOfWay, victim: keepClear, exonerated: [keepClear])
+    }
+
+    /// This simulation over `track` in place of its own.
+    private func over(_ track: PairTrack) -> EscapeSimulation {
+        var simulation = self
+        simulation.track = track
+        return simulation
+    }
+
+    /// Rule 16.1 towards a boat taking a penalty (#517), on this simulation's track: `obligation` is rule 21.2, which
+    /// switches Section A off between the pair, so the right-of-way boat has right of way through a whole tack, and
+    /// a hand tack lasts longer than `escape.horizon`. So the test looks back to where her turn began, and asks what
+    /// rule 44.2's "well clear" does (World Sailing Case 149): a boat that was well clear when she began her penalty
+    /// may continue it, and a boat that afterwards turns onto a collision course with her takes the call.
+    ///
+    /// - Her turn is the latest run of ticks on which she turned faster than `changesCourse`, was tacking, or her
+    ///   boom crossed (`isTurning`), and the straight sailing after it through now. It reaches no further back than
+    ///   `lookBack` ticks before now. With no such tick she held her course, and the penalty was begun in her path:
+    ///   nil.
+    /// - A turn still running at the look-back's far end (or the track's) began out of sight, and so did the course
+    ///   she held before it: nil, as for a turn wholly beyond the look-back.
+    /// - A turn under way on the tick rule 21.2 began to bind the keep-clear boat (she turned through the step to
+    ///   it) had her in a position to interfere when the penalty began, so the keep-clear boat wasn't well clear: nil.
+    /// - Rule 16.1 on her, the keep-clear boat exonerated, when she would have stayed clear had she held her course
+    ///   from the tick before the turn (`heldCourseStaysClear`). There is no escape test on the keep-clear boat: she
+    ///   may continue her penalty.
+    /// - Otherwise nil, and rule 21.2 stands: her held course would have met the boat taking a penalty anyway.
+    private func penaltyRoomVerdict(_ obligation: Verdict, lookBack: Int, course: CourseLayout) -> Verdict? {
+        let keepClear = obligation.offender, rightOfWay = obligation.victim
+        let last = track.count - 1
+        let hull = boatClass.hull
+        func binds(_ k: Int) -> Bool {
+            Rules.obligation(track.boat(track.seats.low, k), track.boat(track.seats.high, k),
+                             overlapped: track.overlapped[k], course: course, hull: hull)
+                == Verdict(rule: .takingAPenalty, offender: keepClear, victim: rightOfWay)
+        }
+        let earliest = max(last - lookBack, 1)
+        var change: Int?
+        var k = last
+        while k >= earliest, binds(k) {
+            if isTurning(rightOfWay, at: k) {
+                change = k
+            } else if change != nil {
+                break
+            }
+            k -= 1
+        }
+        // The walk stopped on the tick before the turn's first only if `k` is within the look-back and bound. Past the
+        // look-back (or the track) she was still turning, and the course she held before the turn isn't on record;
+        // on a tick that isn't bound, 21.2 began on the turn's first, the turn under way. Nil either way.
+        guard let change, k >= earliest, binds(k),
+              heldCourseStaysClear(rightOfWay, heldFrom: change - 1, of: keepClear)
+        else { return nil }
+        return Verdict(rule: .changingCourse, offender: rightOfWay, victim: keepClear, exonerated: [keepClear])
+    }
+
+    /// Whether `seat`, had she held her course from tick `k` (`path(of:heldFrom:over:)`), would have left `other` on
+    /// her recorded track clear of her on every tick from `k` through now, as the umpire calls it (`keepsClear`: no
+    /// contact, and no hit by `seat`'s near-miss sweep). Her hull and her sweep are built tick by tick, as `keepsClear`
+    /// builds them everywhere else: one tick's moved along her course would differ from them in the last bits.
+    private func heldCourseStaysClear(_ seat: Int, heldFrom k: Int, of other: Int) -> Bool {
+        let outline = boatClass.hull.outline
+        let ticks = k...(track.count - 1)
+        let held = path(of: seat, heldFrom: k, over: ticks)
+        return zip(ticks, held).allSatisfy { tick, ahead in
+            var swept: RulesConfig.NearMissSweep.Swept?
+            let boat = track.boat(other, tick)
+            return keepsClear(boat, hull: boat.hull(outline: outline), of: ahead, hull: ahead.hull(outline: outline),
+                              swept: &swept)
+        }
+    }
+
+    /// Whether `seat` was turning through the step to tick `k` (k ≥ 1), as rule 21.2's look-back reads a turn (#517):
+    /// faster than `changesCourse`, tacking, or her boom crossed (a gybe).
+    private func isTurning(_ seat: Int, at k: Int) -> Bool {
+        let before = track.recorded(seat, k - 1), after = track.recorded(seat, k)
+        return turnRate(of: seat, at: k) > changesCourse || after.isTacking || after.state.boomSide != before.state.boomSide
     }
 
     /// Rule 18.2 (#93): mark-room is not right of way (Case 25), so it matters only when Section A (or rule 21)
@@ -638,11 +732,12 @@ struct EscapeRecorder: Sendable, Equatable {
         count = min(count + 1, capacity)
     }
 
-    /// Seats `a` and `b`'s track over every tick recorded, through the newest; nil if nothing is.
-    func track(_ a: Int, _ b: Int) -> PairTrack? {
+    /// Seats `a` and `b`'s track over the last `ticks` ticks recorded (every one, if there are fewer or without
+    /// `ticks`), through the newest; nil if nothing is.
+    func track(_ a: Int, _ b: Int, last ticks: Int? = nil) -> PairTrack? {
         guard count > 0, boats.indices.contains(a), boats.indices.contains(b) else { return nil }
         let pair = SeatPair(a, b)
-        let slots = (newestTick - count + 1...newestTick).map(slot)
+        let slots = (newestTick - min(count, max(ticks ?? count, 1)) + 1...newestTick).map(slot)
         let index = OverlapTracker.index(pair.low, pair.high, seats: boats.count)
         return PairTrack(seats: pair, low: slots.map { boats[pair.low][$0] }, high: slots.map { boats[pair.high][$0] },
                          overlapped: slots.map { overlaps[$0][index] })

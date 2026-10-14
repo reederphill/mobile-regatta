@@ -382,6 +382,8 @@ final class GameScene: SKScene {
     var penaltyMarksSummary: String { ruleCues?.marksSummary ?? "none" }
     /// The right-of-way glow each seat shows, for tests.
     var shownGlows: [RightOfWayGlow?] { ruleCues?.glows ?? [] }
+    /// Each seat's right-of-way halo as drawn, nil where hidden (#517: orange on a boat taking a penalty), for tests.
+    var shownHalos: [(colour: UIColor, alpha: CGFloat)?] { boatNodes.map(\.shownRightOfWayHalo) }
     /// Whether a hint's leader line shows (#129), for tests.
     var showsHintLeader: Bool { hintLeader.isShowing }
 

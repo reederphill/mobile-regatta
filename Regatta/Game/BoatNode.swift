@@ -18,8 +18,8 @@ final class BoatNode: SKNode {
     private let hullGroup = SKNode()
     private let heelShadow: SKSpriteNode
     private let glow: SKSpriteNode?
-    /// The right-of-way glow (#123): a white halo tinted red or green and faded by `setRightOfWayGlow`, under the
-    /// hull. Your own boat never has one.
+    /// The right-of-way glow (#123): a white halo tinted red, green or orange and faded by `setRightOfWayGlow`,
+    /// under the hull. Your own boat never has one.
     private let rightOfWayGlow: SKSpriteNode
     private let sail: SKSpriteNode
     private let ppm: CGFloat
@@ -146,15 +146,24 @@ final class BoatNode: SKNode {
     }
 
     /// Lights or puts out her right-of-way glow (#123): red where you keep clear of her, green where she keeps clear
-    /// of you, `glow.intensity` of `style.glowMaxAlpha`. Nil hides it.
+    /// of you, orange where she is taking a penalty (#517), `glow.intensity` of `style.glowMaxAlpha`. Nil hides it.
     func setRightOfWayGlow(_ glow: RightOfWayGlow?, style: BoatStyle) {
         guard let glow else {
             rightOfWayGlow.isHidden = true
             return
         }
-        rightOfWayGlow.color = (glow.kind == .giveWay ? CuePalette.giveWayRed : CuePalette.hasRightGreen).uiColor
+        switch glow.kind {
+        case .giveWay: rightOfWayGlow.color = CuePalette.giveWayRed.uiColor
+        case .hasRight: rightOfWayGlow.color = CuePalette.hasRightGreen.uiColor
+        case .takingAPenalty: rightOfWayGlow.color = CuePalette.orange.uiColor
+        }
         rightOfWayGlow.alpha = CGFloat(glow.intensity * style.glowMaxAlpha)
         rightOfWayGlow.isHidden = false
+    }
+
+    /// Her right-of-way halo's colour and alpha as drawn, nil while hidden, for tests.
+    var shownRightOfWayHalo: (colour: UIColor, alpha: CGFloat)? {
+        rightOfWayGlow.isHidden ? nil : (rightOfWayGlow.color, rightOfWayGlow.alpha)
     }
 
     /// Heel (#22): the hull drawn narrower and a drop shadow offset to leeward (the boom's side, except by the lee).
