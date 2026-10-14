@@ -3,7 +3,7 @@ import Testing
 @testable import RegattaCore
 
 /// Two boats put together for the umpire's tests (#88): a two-seat race (`placedRace`, ilca-dinghy@3) in a
-/// steady 10 kn wind from the course's axis, with no current.
+/// steady 10 kn wind from the course's axis, with no current, under the default rules or the `rules` a test names.
 enum IncidentFixture {
     static let noCurrent = CurrentField(current: nil, tideStateAtGun: 0)
     static let speed = 3.0
@@ -13,10 +13,10 @@ enum IncidentFixture {
         GroundWind(direction: wrapAngle(race.course.axis), speed: metresPerSecond(knots: knots))
     }
 
-    static func race() throws -> Race {
-        let probe = try placedRace(current: noCurrent) { _, _ in }
+    static func race(rules: RulesConfigFile? = nil) throws -> Race {
+        let probe = try placedRace(current: noCurrent, rules: rules) { _, _ in }
         let wind = wind(probe)
-        return try placedRace(current: noCurrent, wind: { _ in wind }) { _, _ in }
+        return try placedRace(current: noCurrent, wind: { _ in wind }, rules: rules) { _, _ in }
     }
 
     /// A prediction of `race` (`Race.Mode.prediction`) in the same wind, holding its world.

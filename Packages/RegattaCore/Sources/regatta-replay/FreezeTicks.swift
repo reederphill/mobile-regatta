@@ -56,8 +56,12 @@ struct FreezeTickRow: Decodable {
     /// the class's floor factor times her sail's backwind level (#437: a downwind leg after the first finish has none).
     var sailsWorkingInView: Int?
     /// The right-of-way glows you see in glow range (`RightOfWayGlyph`, #123), each of these kinds at least once:
-    /// "giveWay" (red, you keep clear), "hasRight" (green).
+    /// "giveWay" (red, you keep clear), "hasRight" (green), "takingAPenalty" (the orange ring, #517).
     var glows: [String]?
+    /// Those glows count only within this many hull lengths of you, centre to centre (default the glow range,
+    /// `RightOfWayGlyph.defaultRangeHulls`, where a glow is still nothing): closer in, where it is drawn near full
+    /// strength (#517: `rules-ring`'s ring).
+    var glowsWithinHulls: Double?
     /// Whether the mark you sail for is in view (false: the edge arrow points at it, as the cue fixtures want).
     var markInView: Bool?
     /// The rules of the calls in their 8 s on screen, newest first, exactly (`RuleCalls.active(... seconds: 8 ...)`'s
@@ -310,7 +314,7 @@ enum FreezeTicks {
             let shown = race.boats.indices.compactMap { seat -> String? in
                 guard seat != me, relations.indices.contains(seat),
                       RightOfWayGlyph.isInRange(boat.position, race.boats[seat].position,
-                                                rangeHulls: RightOfWayGlyph.defaultRangeHulls,
+                                                rangeHulls: row.glowsWithinHulls ?? RightOfWayGlyph.defaultRangeHulls,
                                                 hullLength: race.boatClass.hull.length) else { return nil }
                 return RightOfWayGlyph.glyph(for: relations[seat], me: me).map { "\($0)" }
             }

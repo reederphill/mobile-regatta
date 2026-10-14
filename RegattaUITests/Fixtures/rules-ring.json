@@ -1,0 +1,8 @@
+{
+  "log" : "rules-ring.racelog.json",
+  "freezeTick" : -470,
+  "camera" : "boat",
+  "vision" : "none",
+  "view" : "courseUp",
+  "ruleCues" : true
+}

@@ -48,7 +48,7 @@ What a right-of-way boat that has just acquired right of way (rule 15) or change
 _Avoid_: space, time to react
 
 **Escape simulation**:
-The umpire's test of room: the keep-clear boat's candidate inputs sailed on with the real boat dynamics for 2 s against the right-of-way boat's recorded track. If none keeps her clear, room wasn't given.
+The umpire's test of room: the keep-clear boat's candidate inputs sailed on with the real boat dynamics for 2 s against the right-of-way boat's recorded track. If none keeps her clear, room wasn't given. Under fleet-rules@7 a boat that turns into a boat taking a penalty (21.2) takes the call (16.1) when her held course, from where her turn began up to 8 s back, would have stayed clear, with no escape sailed.
 _Avoid_: avoidance check, track projection
 
 **Proper course**:
@@ -368,11 +368,11 @@ The race HUD's two figures, a pair centred in the bottom row ([#460](https://git
 _Avoid_: dials, gauges, AWA/AWS
 
 **Right-of-way glow**:
-The wordless halo round another boat that says who keeps clear: red on a boat you must keep clear of, green on a boat that must keep clear of you. It fades in from nothing as she comes within a short range, to full strength close in; mark-room shows the same way within that range, a boat owing it red and the boat owed it green (mark-room has no notice of its own, and the umpire's calls don't change: rule 18 isn't right of way), and a ghost has none. Online the glows are the server umpire's, mark-room included. The core's `RightOfWayGlyph` is its red/green kind (the name dates from when these were a ⚠ and a chevron).
+The wordless halo round another boat that says who keeps clear: red on a boat you must keep clear of, green on a boat that must keep clear of you. A boat taking a penalty (rule 21.2) shows no halo: she wears a plain orange ring, the penalty arc's colour and size, with no countdown or marks, fading in the same way; her own view keeps every boat red, and a returning boat (21.1) keeps green. It fades in from nothing as she comes within a short range, to full strength close in; mark-room shows the same way within that range, a boat owing it red and the boat owed it green (mark-room has no notice of its own, and the umpire's calls don't change: rule 18 isn't right of way), and a ghost has none. Online the glows are the server umpire's, mark-room included. The core's `RightOfWayGlyph` has the red and green kinds and `takingAPenalty` (the name dates from when these were a ⚠ and a chevron).
 _Avoid_: boat label, rights icon, glyph
 
 **Penalty arc**:
-The orange arc round your boat while you owe a penalty turn. Under fleet-rules@6 (one tack and one gybe, turning the same way) it counts down the turn's one limit (the rules file's, from the turn's clock: its call, or once she is clear of the mark she was rounding, or once the turn before is served), and a short "Turn" notice gives that countdown. Just inside it sit the turn's two marks, the screen-up half for the tack and the screen-down half for the gybe: grey until that crossing is made, then orange, with a half arrow at its leading end showing the way the turn goes (it flips on a recross). When the turn is served both halves light for about half a second, then the next owed turn shows (both grey) or the arc goes. Under the older rules (fleet-rules@5 and before, a full circle) it counts down the start deadline until the turn is started, then the complete deadline, and the "Turn" notice gives both countdowns.
+The orange arc round your boat while you owe a penalty turn. Under fleet-rules@6 (one tack and one gybe, turning the same way) it counts down the turn's one limit (the rules file's, from the turn's clock: its call, or once she is clear of the mark she was rounding, or once the turn before is served), and a short "Turn" notice gives that countdown. Just inside it sit the turn's two marks, the screen-up half for the tack and the screen-down half for the gybe: grey until that crossing is made, then orange, with a half arrow at its leading end showing the way the turn goes (it flips on a recross). When the turn is served both halves light for about half a second, then the next owed turn shows (both grey) or the arc goes. Under the older rules (fleet-rules@5 and before, a full circle) it counts down the start deadline until the turn is started, then the complete deadline, and the "Turn" notice gives both countdowns. Another boat taking a penalty shows its colour and size as a plain ring (see Right-of-way glow).
 _Avoid_: penalty timer, spin meter
 
 **Ladder line**:

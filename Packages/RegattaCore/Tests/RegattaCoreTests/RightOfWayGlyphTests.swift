@@ -55,20 +55,31 @@ import Testing
         #expect(onOne == .giveWay && onZero == .hasRight)
     }
 
+    /// Seat 0, the leeward boat, `degrees` into her penalty turn.
+    static func penalised(_ degrees: Double) -> (Race, inout WorldSnapshot) -> Void {
+        { _, snapshot in
+            snapshot.seats[0].boat.penaltyTurnsOwed = 1
+            snapshot.seats[0].boat.penaltyProgress = deg2rad(degrees)
+            snapshot.seats[0].boat.penaltyClockTick = snapshot.tick
+        }
+    }
+
     /// The leeward boat 45° into her penalty turn keeps clear (21.2); at 20° she still has her rights.
     @Test func penalised21() throws {
-        func penalised(_ degrees: Double) -> (Race, inout WorldSnapshot) -> Void {
-            { _, snapshot in
-                snapshot.seats[0].boat.penaltyTurnsOwed = 1
-                snapshot.seats[0].boat.penaltyProgress = deg2rad(degrees)
-                snapshot.seats[0].boat.penaltyClockTick = snapshot.tick
-            }
-        }
-        let starting = try Self.glyphs(edit: penalised(20))
+        let starting = try Self.glyphs(edit: Self.penalised(20))
         #expect(starting.2 == .windwardLeeward && starting.0 == .hasRight)
-        let (onOne, onZero, rule) = try Self.glyphs(edit: penalised(45))
+        let (onOne, onZero, rule) = try Self.glyphs(edit: Self.penalised(45))
         #expect(rule == .takingAPenalty)
-        #expect(onOne == .giveWay && onZero == .hasRight)
+        #expect(onOne == .giveWay && onZero == .takingAPenalty)
+    }
+
+    /// #517: a boat taking a penalty (21.2) shows every other boat the penalty kind, the orange ring, in place of
+    /// green; her own view keeps the other boat red.
+    @Test func boatTakingAPenaltyShowsThePenaltyKindToOtherBoats() throws {
+        let (onOne, onZero, rule) = try Self.glyphs(edit: Self.penalised(45))
+        #expect(rule == .takingAPenalty)
+        #expect(onZero == .takingAPenalty, "seat 1 sees the boat taking a penalty")
+        #expect(onOne == .giveWay, "her own view: she must keep clear")
     }
 
     /// An OCS boat sailing back to the line keeps clear (21.1).
@@ -85,6 +96,24 @@ import Testing
         }
         #expect(rule == .returningToStart)
         #expect(onOne == .giveWay && onZero == .hasRight)
+    }
+
+    /// #517: a boat returning to start (21.1) keeps clear as a boat taking a penalty does, but stays green.
+    @Test func returningBoatStaysGreen() throws {
+        let (onOne, onZero, rule) = try Self.glyphs { race, snapshot in
+            let at = race.course.startLine.centre + race.course.upwind * 6
+            let heading = F.starboard(race, offWind: 3 * .pi / 4)
+            snapshot.seats[0].boat.position = at
+            snapshot.seats[0].boat.heading = heading
+            snapshot.seats[1].boat.heading = heading
+            snapshot.seats[1].boat.position = at + Vec2.heading(heading).rightPerp * (race.boatClass.hull.beam + 1.5)
+            snapshot.seats[0].boat.status = .ocs
+        }
+        #expect(rule == .returningToStart)
+        #expect(onZero == .hasRight, "no ring: the green glow")
+        #expect(onOne == .giveWay)
+        let returning = RightOfWay(keepClear: 0, rule: .returningToStart)
+        #expect(RightOfWayGlyph.glyph(for: returning, me: 1) == .hasRight)
     }
 
     @Test func ghostHasNoGlyph() throws {
@@ -104,6 +133,9 @@ import Testing
         let relation = RightOfWay(keepClear: 2, rule: .portStarboard)
         #expect(RightOfWayGlyph.glyph(for: relation, me: 2) == .giveWay)
         #expect(RightOfWayGlyph.glyph(for: relation, me: 5) == .hasRight)
+        let penalised = RightOfWay(keepClear: 2, rule: .takingAPenalty)
+        #expect(RightOfWayGlyph.glyph(for: penalised, me: 2) == .giveWay)
+        #expect(RightOfWayGlyph.glyph(for: penalised, me: 5) == .takingAPenalty)
         #expect(RightOfWayGlyph.glyph(for: nil, me: 2) == nil)
     }
 }

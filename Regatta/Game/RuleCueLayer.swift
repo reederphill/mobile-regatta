@@ -4,10 +4,11 @@ import UIKit
 
 /// The rule cues over the fleet (#123, #15): the right-of-way glows (red round a boat you must keep clear of, green
 /// round one that must keep clear of you, fading in as she nears), the rule-call lines with their rule-number badges,
-/// and your penalty arc (under a `tackAndGybe` penalty, fleet-rules@6, with its tack and gybe marks inside it, #489).
-/// The glows are the boats' own: this layer works out which boats glow and how strongly
-/// (`glows`), and the scene sets each `BoatNode`'s halo from them. The lines and arc pair their colour with a line
-/// style. Their sizes and widths are screen points at any zoom, and the badges stay upright as the camera turns.
+/// your penalty arc (under a `tackAndGybe` penalty, fleet-rules@6, with its tack and gybe marks inside it, #489),
+/// and the penalty ring round another boat taking a penalty (#517: the arc's colour, radius and width as a plain
+/// full circle, in place of her green glow). The glows are the boats' own: this layer works out which boats glow
+/// and how strongly (`glows`), and the scene sets each `BoatNode`'s halo from them. The lines and arc pair their
+/// colour with a line style. Their sizes and widths are screen points at any zoom, and the badges stay upright as the camera turns.
 /// Every node has a z of its own (`DrawOrder`), hidden or not.
 final class RuleCueLayer: SKNode {
     static let layerName = "rules"
@@ -16,6 +17,7 @@ final class RuleCueLayer: SKNode {
     static let arcName = "penaltyArc"
     static let markName = "penaltyTurnMark"
     static let barbName = "penaltyTurnBarb"
+    static let ringName = "penaltyRing"
     /// The gap between the two marks at 3 and 9 o'clock, each side, radians (the owner's sketch, #489: 14°).
     static let markGap = 14 * CGFloat.pi / 180
     /// The unlit marks' alpha: translucent grey.
@@ -31,12 +33,14 @@ final class RuleCueLayer: SKNode {
     private let gybeBarb = SKShapeNode()
     /// The marks last drawn, nil while hidden: `marksSummary`'s.
     private var drawnMarks: PenaltyReadout.TurnMarks?
+    /// The penalty rings, one a seat (#517).
+    private var rings: [SKShapeNode] = []
     private let ppm: CGFloat
 
     /// The glow each seat has now, nil where none. Empty until the cues are first drawn, and after `reset`.
     private(set) var glows: [RightOfWayGlow?] = []
 
-    init(pointsPerMeter: CGFloat) {
+    init(pointsPerMeter: CGFloat, seats: Int) {
         ppm = pointsPerMeter
         super.init()
         name = Self.layerName
@@ -98,6 +102,17 @@ final class RuleCueLayer: SKNode {
             barb.zPosition = next()
             addChild(barb)
         }
+        // The other boats' penalty rings, a seat each: added last again.
+        for _ in 0..<seats {
+            let ring = SKShapeNode()
+            ring.name = Self.ringName
+            ring.strokeColor = CuePalette.orange.uiColor
+            ring.fillColor = .clear
+            ring.isHidden = true
+            ring.zPosition = next()
+            addChild(ring)
+            rings.append(ring)
+        }
     }
 
     @available(*, unavailable)
@@ -120,6 +135,26 @@ final class RuleCueLayer: SKNode {
                                                fadeSeconds: style.ruleCallFadeSeconds)
         updateLines(world, active: active, px: px, rotation: rotation)
         updateArc(world, served: served, style: style, px: px, rotation: rotation, ghost: ghost)
+        updateRings(world, style: style, px: px)
+    }
+
+    /// The penalty ring round each other boat taking a penalty (#517, `RightOfWayGlyph.takingAPenalty`): the arc's
+    /// radius and width as a full circle, no countdown and no marks, as strong as her glow would be.
+    private func updateRings(_ world: RenderWorld, style: BoatStyle, px: CGFloat) {
+        let radius = CGFloat(world.boatClass.hull.length * style.penaltyArcRadiusHulls) * ppm
+        for (seat, ring) in rings.enumerated() {
+            guard seat < glows.count, world.boats.indices.contains(seat), let glow = glows[seat],
+                  glow.kind == .takingAPenalty else {
+                ring.isHidden = true
+                continue
+            }
+            ring.path = CGPath(ellipseIn: CGRect(x: -radius, y: -radius, width: 2 * radius, height: 2 * radius),
+                               transform: nil)
+            ring.lineWidth = CGFloat(style.penaltyArcWidth) * px
+            ring.position = point(world.boats[seat].position)
+            ring.alpha = CGFloat(glow.intensity)
+            ring.isHidden = false
+        }
     }
 
     private func updateLines(_ world: RenderWorld, active: [RuleCallLines.Line], px: CGFloat, rotation: CGFloat) {
@@ -240,6 +275,7 @@ final class RuleCueLayer: SKNode {
     /// Puts every boat's glow out, for while the cues are off (the layer's own nodes are hidden with it).
     func reset() {
         glows = []
+        for ring in rings { ring.isHidden = true }
     }
 
     /// How many glows, lines and arcs show, for tests: e.g. `glows=2 lines=1 arc=1`.
@@ -248,6 +284,9 @@ final class RuleCueLayer: SKNode {
         let l = lines.filter { !$0.isHidden }.count
         return "glows=\(g) lines=\(l) arc=\(arc.isHidden ? 0 : 1)"
     }
+
+    /// How many penalty rings show, for tests (#517): e.g. `rings=1`.
+    var ringsSummary: String { "rings=\(rings.filter { !$0.isHidden }.count)" }
 
     /// The `tackAndGybe` turn's marks as drawn, for tests (#489): "none" when hidden, else e.g.
     /// `tack=lit gybe=grey barbs=1`, the barbs counted as shown.

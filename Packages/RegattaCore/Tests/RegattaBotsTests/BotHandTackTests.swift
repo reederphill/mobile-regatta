@@ -16,12 +16,15 @@ import Testing
 
     /// Old classes sail the tap and the roll exactly as before #459: an all-bot race on skiff@7 (the default class until #461, the
     /// autohelm off, a roll tack) and on skiff@6 (the autohelm on), pinned on #458's tip before any bot code changed
-    /// (re-pinned on #508, whose windward final approach every class sails).
+    /// (re-pinned on #508, whose windward final approach every class sails; and on #517, whose circle round a boat
+    /// taking a penalty is every class's before a tack or gybe: both races have boats turning one near a boat about to
+    /// tack, whose tack the circle holds off first 13.9 s after the gun on skiff@7 and 10.9 s after it on skiff@6, and
+    /// with the circle off both kept their digests).
     @Test(.onFiveRules) func skiffSevenBotsAreBitIdentical() throws {
         let seven = try Self.digest(seed: 459, boatClass: BoatClassFile.bundled(id: "skiff", version: 7))
         let six = try Self.digest(seed: 459, boatClass: BoatClassFile.bundled(id: "skiff", version: 6))
-        #expect(hex64(seven) == "0x51aadb37c9f9ce79")
-        #expect(hex64(six) == "0x3b18c5b8b61919dc")
+        #expect(hex64(seven) == "0xa14310d235ced195")
+        #expect(hex64(six) == "0xb5f6b3e1a7f78b40")
     }
 
     /// And skiff@8, the default class until #462's switch, sails exactly as before #462's bots layer (every change there is behind "the
@@ -31,12 +34,15 @@ import Testing
     /// tacking speed by hand near her mark are every class's; the two laps again on #509, whose hold of a turn refused
     /// near her mark is every class's too: the start and the first beat have none and kept their digest; the two laps
     /// again on #518, whose pick of the leeward gate's mark is every class's: the start and the first beat reach no gate
-    /// and kept theirs).
+    /// and kept theirs; the two laps, seed 462, again on #517, whose circle round a boat taking a penalty is every
+    /// class's before a tack or gybe: it holds a turn off first 18.8 s before the gun, and others up the first beat, and
+    /// with the circle off they kept their digest; in the start and the first beat, seed 459, no circle holds any turn
+    /// off, and they kept theirs).
     @Test func skiffEightBotsAreBitIdentical() throws {
         let short = try Self.digest(seed: 459, boatClass: Self.skiffEight)
         let long = try Self.digest(seed: 462, boatClass: Self.skiffEight, seconds: 700)
         #expect(hex64(short) == "0x2f226740a8699d03")
-        #expect(hex64(long) == "0x66ecaf694e85d067")
+        #expect(hex64(long) == "0x6cff054cb3e019bc")
     }
 
     // MARK: - skiff@8: tacks and gybes by hand

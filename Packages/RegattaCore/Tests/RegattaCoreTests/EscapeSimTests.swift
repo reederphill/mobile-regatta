@@ -72,6 +72,44 @@ enum EscapeFixture {
         }
     }
 
+    /// `tack`'s mirror for rule 10 (#517), sailed from before the tack: both boats on port 48° off the wind at 3 m/s,
+    /// their rudders centred, seat 1's centre `ahead` hull lengths ahead of seat 0's along their heading and `leeward`
+    /// metres to leeward of it. Not overlapped. Five ticks on seat 1 puts her helm hard down for 88 ticks, a hand
+    /// tack onto starboard, then lets go: the tack is complete about three seconds after the jump, so a call after it
+    /// has more behind it than the 62 ticks the umpire records without a look-back.
+    static func tackOntoStarboard(_ race: Race, ahead: Double, leeward: Double) throws {
+        let hull = race.boatClass.hull
+        let at = F.midBeat(race)
+        let port = wrapAngle(race.course.axis + deg2rad(48))
+        try jump(race, to: 300) { snapshot in
+            for seat in 0..<2 {
+                var boat = snapshot.seats[seat].boat
+                placeRacing(&boat, leg: 0, at: at)
+                boat.boomSide = .starboard
+                boat.heading = port
+                boat.speed = 3
+                boat.rudder = 0
+                boat.desiredRudder = 0
+                boat.autohelm = nil
+                boat.isTacking = false
+                boat.penaltyTurnsOwed = 0
+                boat.penaltyProgress = 0
+                boat.penaltyClockTick = nil
+                boat.queuedPenaltyCallTicks = []
+                if seat == 1 {
+                    boat.position = at + Vec2.heading(port) * (ahead * hull.length) + Vec2.heading(port).rightPerp * leeward
+                }
+                snapshot.seats[seat].boat = boat
+                snapshot.seats[seat].heldInput = .neutral
+            }
+            snapshot.touchingBoats = []
+            snapshot.overlaps = []
+        }
+        let helmDown = race.tick + 5
+        _ = race.apply(BoatInput(rudder: -1.0), seat: 1, atTick: helmDown)
+        _ = race.apply(.neutral, seat: 1, atTick: helmDown + 88)
+    }
+
     /// Where seat 1 is from seat 0: hull lengths ahead along seat 0's heading, and metres to leeward of it
     /// (her port side, on starboard tack).
     static func tackerFromStarboardBoat(_ race: Race) -> (ahead: Double, leeward: Double) {

@@ -964,11 +964,16 @@ public final class Race {
     }
 
     /// The escape simulation for seats `a` and `b` on the umpire's recorded track, with the pair's rule 17 record
-    /// (#345) and rule 18 record (#93), or nil in a prediction or under a rules configuration without one.
+    /// (#345) and rule 18 record (#93), or nil in a prediction or under a rules configuration without one. Under a
+    /// rules configuration with a look-back (#517), a pair with a boat taking a penalty gets its whole recorded track
+    /// too, for rule 21.2's: copied for no other pair.
     private func escapeSimulation(_ a: Int, _ b: Int) -> EscapeSimulation? {
-        guard let umpire, let track = umpire.track(a, b) else { return nil }
-        return EscapeSimulation(track: track, rules: rules, boatClass: boatClass,
-                                properCourse: umpire.properCourse(SeatPair(a, b)), markRoom: umpire.markRoom(SeatPair(a, b)))
+        let escape = rules.incidents.escape
+        guard let umpire, let track = umpire.track(a, b, last: escape.windowTicks) else { return nil }
+        let lookingBack = escape.penaltyLookBack != nil && (boats[a].isTakingPenalty || boats[b].isTakingPenalty)
+        return EscapeSimulation(track: track, penaltyTrack: lookingBack ? umpire.track(a, b) : nil, rules: rules,
+                                boatClass: boatClass, properCourse: umpire.properCourse(SeatPair(a, b)),
+                                markRoom: umpire.markRoom(SeatPair(a, b)))
     }
 
     /// Rule 43.1(a) (#93): `verdict` with its offender exonerated too when another boat's breach compelled her
@@ -977,7 +982,8 @@ public final class Race {
     /// configuration without an escape simulation.
     private func exoneratingCompelled(_ verdict: Verdict) -> Verdict {
         let (offender, victim) = (verdict.offender, verdict.victim)
-        guard !verdict.exonerated.contains(offender), let track = umpire?.track(offender, victim),
+        guard !verdict.exonerated.contains(offender),
+              let track = umpire?.track(offender, victim, last: rules.incidents.escape.windowTicks),
               compellingIncident(of: offender, into: .boat(seat: victim, track: track.recorded(victim))) != nil
         else { return verdict }
         return Verdict(rule: verdict.rule, offender: offender, victim: victim, exonerated: verdict.exonerated + [offender])

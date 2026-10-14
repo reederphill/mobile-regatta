@@ -18,6 +18,9 @@ import RegattaCore
 //   has right of way. A turn her autohelm makes following a shift isn't hers.
 // - She taps a tack or gybe only clear of every boat (`tapIsClear`), racing and before her start (#280): a boat
 //   tacking keeps clear (rule 13), and one that acquires right of way by it gives room (rule 15).
+//   "Give a turning boat her circle" (#517): a boat taking a penalty is to that look a circle of water where she is,
+//   which the tack's track and the sailing after it stay out of (`penaltyCircleRadius`), and a boat sailed on at her
+//   velocity as every other: both.
 // - Misjudging (#103, #19: "they foul only by misjudging"): meeting a boat she must keep clear of under a rule in
 //   `BotWeaknesses.misjudgeScope`, she may misjudge the encounter, by her skill's `ruleMisjudgeRate`, drawn once an
 //   encounter (`judgeEncounters`), racing and before her start (#280): she believes she holds her rights and sails on,
@@ -61,6 +64,13 @@ extension BotBrain {
     static let tapSpeedShare = 0.5
     /// Hull lengths, centre to centre, a boat must pass off her through a tack or gybe.
     static let tapClearance = 1.3
+    /// "Give a turning boat her circle" (#517): the radius of the water a boat taking a penalty is to her before a tack or
+    /// gybe (`penaltyCircleRadius`), in diameters of a penalty turn. One: `OtherBoat` shows no rudder, so she can't see
+    /// which way that boat turns, and a disc that far round her holds the circle on either side. Placeholder.
+    static let penaltyCircleDiameters = 1.0
+    /// Seconds she sails on at her speed on the new tack, after the tack or gybe itself (`tapLookahead`), that must stay
+    /// out of that water too (`circleApproach`); the cautious bot's as every bot's. Placeholder.
+    static let penaltyCircleAfter = 3.0
     /// Radians between the headings she tries for the least turn that keeps her clear (`clearingHeading`).
     static let clearingStep = deg2rad(5)
 
@@ -238,6 +248,19 @@ extension BotBrain {
     /// wait on the other to tack, and sail on together into the race area's edge; the one whose tack takes her away
     /// tacks.
     ///
+    /// "Give a turning boat her circle" (#517): a boat taking a penalty (rule 21.2) isn't only a boat sailed on at her
+    /// velocity. She is slow and circling, and can't get out of the way of a tack into her turn; the rules gave the
+    /// tacker right of way through it and called the turning boat (the owner's incident of 2026-10-13). She is a circle
+    /// of water where she is now (`penaltyCircleRadius`), which the tack's track and the sailing after it stay out of
+    /// (`circleApproach`), and a boat sailed on at her velocity as well, weighed as every other boat is with the
+    /// lookahead any boat has: between her tack and her gybe she is reaching, not circling in place. A tap near her
+    /// passes both. Her circle is looked for as far off as `tapRange` and its radius and the clearance: off the wind the
+    /// track reaches a circle whose boat is beyond `tapRange` (4.5 s of her speed: a skiff running at 7 m/s sails 32 m,
+    /// to a circle 8 m round a boat 46 m off).
+    /// Held off it, she sails on as for any tap refused (`sail`), and tacks once her track clears the circle, read anew
+    /// where that boat is at every decision: no slowing, no easing, no keeping station ("no orderly bots"). Not a
+    /// returning boat (rule 21.1), who sails a course: she is weighed as every other boat. Internal: nothing shows it.
+    ///
     /// The cautious bot looks for it as well sailing the tap through in her mind (`tapTrack`), every boat going on turning
     /// as she saw it turn (`tapApproach`).
     func tapIsClear(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
@@ -250,7 +273,12 @@ extension BotBrain {
         var track: [Vec2]?
         return view.others.allSatisfy { other in
             let gap = (other.position - b.position).length
-            guard !other.isGhost, gap <= Self.tapRange else { return true }
+            guard !other.isGhost else { return true }
+            // Her circle, from as far off as her track reaches it; then the boat she is, as every other.
+            if let radius = penaltyCircleRadius(of: other, b, view), gap <= Self.tapRange + radius + clear {
+                guard circleApproach(to: other, b, heading: heading) >= min(radius + clear, gap) else { return false }
+            }
+            guard gap <= Self.tapRange else { return true }
             let lookahead = (ontoPort && other.tack == .starboard ? Self.tapOntoPortLookahead : Self.tapLookahead) * tapLookaheadScale
             let approach = Self.closestApproach(of: other, to: b, heading: heading, speed: speed, lookahead: lookahead)
             guard approach >= min(clear, gap) else { return false }
@@ -259,6 +287,30 @@ extension BotBrain {
             track = sailed
             return tapApproach(of: other, track: sailed, lookahead: lookahead, view) >= min(clear, gap)
         }
+    }
+
+    /// "Give a turning boat her circle" (#517): the radius, metres, of the water `other` is to her before a tack or gybe
+    /// (`tapIsClear`), or nil unless `other` is taking a penalty and keeps clear of her for it (rule 21.2,
+    /// `OtherBoat.rightOfWay`; not a returning boat, rule 21.1). `penaltyCircleDiameters` diameters of a penalty turn:
+    /// its circle at the rate `penaltyRudder` turns a boat of the class at `HandTackTable.penaltyTurn.speed` of
+    /// close-hauled speed in the wind she has (`turnSweep`'s reckoning of her own turn, its `reach` without the
+    /// clearance), centred on that boat, who never leaves her circle.
+    func penaltyCircleRadius(of other: SeatView.OtherBoat, _ b: SeatView.OwnBoat, _ view: SeatView) -> Double? {
+        guard let right = other.rightOfWay, right.keepClear == other.seat, right.rule == .takingAPenalty else { return nil }
+        let speed = closeHauledSpeed(b, view) * HandTackTable.penaltyTurn.speed
+        let rate = Self.penaltyRudder(view) * view.boatClass.steering.turnRate(speed: speed)
+        guard rate > 0 else { return nil }
+        return Self.penaltyCircleDiameters * 2 * speed / rate
+    }
+
+    /// The closest her track through a tack or gybe onto `heading`, and the sailing after it, comes to where `other` is
+    /// now, metres between centres: the tap's line (`tapSpeedShare` of her speed for `tapLookahead` seconds, the
+    /// cautious bot's further), then on at her speed for `penaltyCircleAfter` seconds. `other` doesn't move: a boat
+    /// taking a penalty, turning her circle (`tapIsClear`, which weighs her sailed on at her velocity besides).
+    func circleApproach(to other: SeatView.OtherBoat, _ b: SeatView.OwnBoat, heading: Double) -> Double {
+        let sailed = b.speed * (Self.tapSpeedShare * Self.tapLookahead * tapLookaheadScale + Self.penaltyCircleAfter)
+        return Self.closestApproach(offset: other.position - b.position, relativeVelocity: -Vec2.heading(heading),
+                                    lookahead: sailed)
     }
 }
 

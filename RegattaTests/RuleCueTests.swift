@@ -1,6 +1,8 @@
 import Foundation
 import RegattaCore
+import SpriteKit
 import Testing
+import UIKit
 @testable import Regatta
 
 /// #123 acceptance: the penalty arc and Turn notice (`PenaltyReadout`), the rule-call lines (`RuleCallLines`), the
@@ -231,6 +233,98 @@ import Testing
                        RightOfWay(keepClear: 2, rule: .givingMarkRoom)]) == [nil, .hasRight, nil])
         #expect(glows([nil, RightOfWay(keepClear: 0, rule: .tackingInTheZone),
                        RightOfWay(keepClear: 0, rule: .tackingInTheZone)]) == [nil, .giveWay, nil])
+    }
+
+    /// A practice fleet with seat 1 `hulls` hull lengths from you (seat 0) and the rest far off, the pair's relation
+    /// `relation`, drawn by a fresh `RuleCueLayer` at `ppm` points a metre and camera scale `px`: the layer, the
+    /// world it drew and its showing rings.
+    static func cues(relation: RightOfWay, hulls: Double, ppm: CGFloat = 8, px: CGFloat = 0.5)
+        -> (layer: RuleCueLayer, world: RenderWorld, rings: [SKShapeNode]) {
+        let driver = PracticeDriver(config: RaceDriverTests.config)
+        let base = driver.currentFrame
+        let hull = driver.boatClass.hull.length
+        var boats = base.boats
+        boats[1].position = boats[0].position + Vec2(0, hulls * hull)
+        for seat in boats.indices.dropFirst(2) { boats[seat].position = boats[0].position + Vec2(1000 * Double(seat), 0) }
+        var keepClear = [RightOfWay?](repeating: nil, count: boats.count)
+        keepClear[1] = relation
+        let frame = TickFrame(tick: base.tick, boats: boats, standings: base.standings, wind: base.wind, isOver: false,
+                              keepClear: keepClear)
+        let world = RenderWorld(course: driver.course, boatClass: driver.boatClass, myBoatIndex: 0, previous: frame,
+                                current: frame, alpha: 1)
+        let layer = RuleCueLayer(pointsPerMeter: ppm, seats: boats.count)
+        layer.update(world, calls: RuleCallLines(), style: .standard, px: px, rotation: 0)
+        let rings = layer.children.compactMap { $0 as? SKShapeNode }.filter { $0.name == RuleCueLayer.ringName && !$0.isHidden }
+        return (layer, world, rings)
+    }
+
+    /// #517: another boat taking a penalty (21.2) wears a plain ring, the penalty arc's as a full circle: round her,
+    /// 0.9 hulls out, 4 screen points wide, orange, unfilled; no arc, no marks.
+    @Test func penaltyRingShowsOnAnotherBoatTakingAPenalty() throws {
+        let style = BoatStyle.standard
+        let (layer, world, rings) = Self.cues(relation: RightOfWay(keepClear: 1, rule: .takingAPenalty), hulls: 1)
+        #expect(layer.glows.map { $0?.kind } == [nil, .takingAPenalty, nil, nil])
+        #expect(layer.ringsSummary == "rings=1" && layer.summary == "glows=1 lines=0 arc=0" && layer.marksSummary == "none")
+        let ring = try #require(rings.first)
+        let her = world.boats[1].position
+        // SpriteKit keeps a position as Floats.
+        #expect(abs(ring.position.x - CGFloat(her.x) * 8) < 0.01 && abs(ring.position.y - CGFloat(her.y) * 8) < 0.01)
+        let radius = CGFloat(world.boatClass.hull.length * style.penaltyArcRadiusHulls) * 8
+        let box = try #require(ring.path?.boundingBoxOfPath)
+        #expect(abs(box.width - 2 * radius) < 1e-6 && abs(box.height - 2 * radius) < 1e-6, "\(box)")
+        #expect(abs(box.midX) < 1e-6 && abs(box.midY) < 1e-6, "round her centre")
+        #expect(abs(ring.lineWidth - CGFloat(style.penaltyArcWidth) * 0.5) < 1e-6)
+        // The node hands its colours back in a colour space of its own: compared by 8-bit components.
+        func rgba(_ colour: UIColor) -> [Int] {
+            var (r, g, b, a) = (CGFloat(0), CGFloat(0), CGFloat(0), CGFloat(0))
+            colour.getRed(&r, green: &g, blue: &b, alpha: &a)
+            return [r, g, b, a].map { Int(($0 * 255).rounded()) }
+        }
+        #expect(rgba(ring.strokeColor) == rgba(CuePalette.orange.uiColor), "\(ring.strokeColor)")
+        #expect(rgba(ring.fillColor)[3] == 0, "unfilled")
+        // Put out with the cues.
+        layer.reset()
+        #expect(layer.ringsSummary == "rings=0")
+    }
+
+    /// #517: her own view keeps the other boat red with no ring, and a returning boat (21.1) keeps green with none.
+    @Test func noRingOnHerOwnViewOrForAReturningBoat() {
+        let mine = Self.cues(relation: RightOfWay(keepClear: 0, rule: .takingAPenalty), hulls: 1)
+        #expect(mine.layer.glows[1]?.kind == .giveWay && mine.rings.isEmpty && mine.layer.ringsSummary == "rings=0")
+        let returning = Self.cues(relation: RightOfWay(keepClear: 1, rule: .returningToStart), hulls: 1)
+        #expect(returning.layer.glows[1]?.kind == .hasRight && returning.rings.isEmpty)
+    }
+
+    /// #517: the ring fades in as the glow does, its alpha the glow's intensity (not scaled by the halo's
+    /// `glowMaxAlpha`): partly there 2.5 hulls off, full at 1 hull, none past the range.
+    @Test func penaltyRingAlphaFollowsGlowIntensity() throws {
+        let style = BoatStyle.standard
+        let penalised = RightOfWay(keepClear: 1, rule: .takingAPenalty)
+        let far = Self.cues(relation: penalised, hulls: 2.5)
+        let intensity = GlowSelection.fadeIn(hulls: 2.5, rangeHulls: style.glowRangeHulls, fullHulls: style.glowFullHulls)
+        #expect(intensity > 0 && intensity < 1, "\(intensity)")
+        #expect(far.layer.glows[1]?.intensity == intensity)
+        // SpriteKit keeps alpha as a Float.
+        #expect(abs(try #require(far.rings.first).alpha - CGFloat(intensity)) < 1e-6)
+        let near = Self.cues(relation: penalised, hulls: 1)
+        #expect(try #require(near.rings.first).alpha == 1)
+        #expect(Self.cues(relation: penalised, hulls: style.glowRangeHulls + 1).rings.isEmpty)
+    }
+
+    /// #517: a boat taking a penalty has no halo, where a keep-clear boat's is green and a right-of-way boat's red;
+    /// a halo lit before goes out when she starts her turn.
+    @Test func penalisedBoatHasNoHalo() {
+        let style = BoatStyle.standard
+        let driver = PracticeDriver(config: RaceDriverTests.config)
+        let node = BoatNode(boat: driver.currentFrame.boats[1], isMine: false, color: .red, boatClass: driver.boatClass,
+                            pointsPerMeter: 8, style: style)
+        #expect(!node.showsRightOfWayHalo)
+        for kind in [RightOfWayGlyph.hasRight, .giveWay] {
+            node.setRightOfWayGlow(RightOfWayGlow(kind: kind, intensity: 1), style: style)
+            #expect(node.showsRightOfWayHalo, "\(kind)")
+            node.setRightOfWayGlow(RightOfWayGlow(kind: .takingAPenalty, intensity: 1), style: style)
+            #expect(!node.showsRightOfWayHalo, "after \(kind)")
+        }
     }
 
     /// The glow fades in from nothing at the range's edge to full at the full distance, easing at both ends, and

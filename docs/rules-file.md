@@ -1,4 +1,4 @@
-# Rules configuration file, schema versions 1 to 6
+# Rules configuration file, schema versions 1 to 7
 
 The rules configuration is an immutable, versioned data file (ADR 0004, #32, #73), loaded by
 `DataFile<RulesConfig>` (`RulesConfigFile`) through the same loader as boat classes and venues. It holds
@@ -31,6 +31,9 @@ changes; a change ships as `<id>@<version + 1>.json`.
   tack and one gybe turning the same way, completed within 40 s of its clock, which starts when she is clear of
   the mark she is rounding; no `startSeconds`, no `startedTurnDegrees`. The default (`RaceFiles.defaults`,
   `Race.defaultRulesConfiguration`) since #490.
+- `fleet-rules@7` (bundled, schema 7): version 6 plus `escape.penaltyLookBackSeconds`, 8 (#517): a boat that turns
+  into a boat taking a penalty takes the call (rule 16.1) when the course she held before the turn would have stayed
+  clear. Not the default yet.
 
 Schema 2 is schema 1 plus `raceFormat.startRow.minimumSpacingHullLengths`, the start row's spacing floor:
 required in schema 2, refused in schema 1. A schema-1 file has no floor (`RulesConfig.StartRow.minimumSpacing`
@@ -47,10 +50,14 @@ is never called, which is what they did.
 Schema 6 is schema 5 plus `raceFormat.penalty.turn`: optional in schema 6 (absent `fullCircle`), refused before
 it. A `tackAndGybe` penalty has no `startSeconds` and no `startedTurnDegrees` (refused); a `fullCircle` one, and
 every file before schema 6, requires both, and means what it meant: 360° one way.
+Schema 7 is schema 6 plus `incidents.escape.penaltyLookBackSeconds`: required in schema 7, refused before it. A
+schema-1 to -6 file has none (`RulesConfig.Escape.penaltyLookBack` is nil): the 16.1 test of a rule 21.2 incident
+looks `horizonSeconds` back like any other, and the umpire records the ticks it did, which is what they did.
 The tables' `v1` column gives version 1's values; version 2's are the same, plus that floor, version
 3's the same again, plus `sequential` stacking and its looser penalty deadlines (marked v3), and version 4's
 the same again, plus the "changes course" rate (marked v4), and version 5's the same again, plus rule 17's
-limits (marked v5); version 6's the same again, with the `tackAndGybe` penalty turn (marked v6).
+limits (marked v5); version 6's the same again, with the `tackAndGybe` penalty turn (marked v6); version 7's the
+same again, plus rule 21.2's look-back (marked v7).
 
 ## Units
 
@@ -105,6 +112,7 @@ the ranges below.
 | `escape.startTickOffset` | ticks ≥ 0 | 1 | *Builder value.* The simulation starts this many ticks after the obligation began (its last point of certainty): the first tick the keep-clear boat can answer. |
 | `escape.initiallySeconds` | s | 2 | *Builder value.* The "initially" window of rules 15 and 16.1: how long after acquiring right of way a boat must give the other room to keep clear. |
 | `escape.changesCourseDegreesPerSecond` | degrees/s > 0; schema 4 | — (v4: 12) | *Builder value.* The right-of-way boat changes course (rule 16.1) on a tick her heading turns faster than this. A rate, not an angle, so one value sits between the autohelm following shifts and a luff however long the encounter has run (#228): see below. Absent before schema 4: no escape simulation. |
+| `escape.penaltyLookBackSeconds` | s > 0; schema 7 | — (v7: 8) | *Builder value.* How far back from an incident whose obligation is rule 21.2 the 16.1 test looks for where the right-of-way boat's turn began: see below. Absent before schema 7: such an incident looks `horizonSeconds` back, like any other. |
 | `separationHullLengths` | L | 2 | Contacts between the same two boats closer together than this are one incident. |
 | `lastPointOfCertaintySeconds` | s | 0.5 | A change in overlap or zone state counts only once it has held this long (#18). |
 | `properCourse.distanceHullLengths` | L > 0; schema 5 | — (v5: 2) | Rule 17: the hull gap within which a leeward boat's overlap from clear astern begins and holds. |
@@ -130,8 +138,10 @@ before then is part of the same incident and draws no second call.
 by whether the boat that had to keep clear could have. The umpire records every boat each tick (her dynamics
 state, how she was steering, and the wind and current the race sampled at her) and each pair's overlap as of
 the last point of certainty, over the last `max(horizon + startTickOffset + 1, initially + 2)` ticks (62
-in version 4). An incident's call starts from who had to keep clear (rule 21, then rules 10–13); then, on
-that track:
+in version 4), which is what every call below but rule 21.2's look-back reads; with a look-back (schema 7)
+the umpire records `penaltyLookBack + 2` ticks if that is more (242 in version 7), and copies the longer
+track out only for a pair with a boat taking a penalty. An incident's call starts from who had to keep clear
+(rule 21, then rules 10–13); then, on that track:
 
 - *Rule 15*: the right-of-way boat acquired right of way (the first tick of the run through now on which the
   other has had to keep clear) within `initiallySeconds`, not because of the other boat's own actions (her
@@ -142,6 +152,26 @@ that track:
   change still going on then counts from there); the other can't escape from `startTickOffset` ticks after the
   first such tick, but could have had the right-of-way boat held her course (straight on at her velocity over
   the ground from the tick before). Otherwise the keep-clear boat was failing to keep clear anyway.
+- *Rule 16.1 towards a boat taking a penalty* (schema 7, #517): in an incident whose obligation is rule 21.2 (one
+  boat taking a penalty; not 21.1, and not both boats under rule 21, which Section A decides), the test above is
+  replaced by rule 44.2's "well clear" (World Sailing Case 149). A boat is well clear if, when she begins her
+  penalty, no other boat is in a position to interfere with her; a boat that was well clear may continue her
+  penalty, and a boat that afterwards tacks or luffs onto a collision course with her is the one at fault. Rule 21.2
+  switches Section A off between the pair, so the other boat has right of way through a whole tack, and a hand tack
+  lasts longer than `horizonSeconds`: the test looks back to where her turn began instead.
+  - *Her turn* is the latest run of ticks on which she turned faster than `changesCourseDegreesPerSecond`, was
+    tacking, or her boom crossed, and the straight sailing after it through now; no further back than
+    `penaltyLookBackSeconds`.
+  - *Rule 16.1 on her*, the boat taking the penalty exonerated (43.1(b)), when, had she held her course from the
+    tick before that turn (straight on at her velocity over the ground), the boat taking the penalty, on her
+    recorded track, would have been clear of her on every tick through now: no contact, and no hit by her
+    near-miss sweep. No escape is sailed for the boat taking the penalty: she may continue it.
+  - *Otherwise rule 21.2 stands*: the right-of-way boat made no such turn (she held her course, and the penalty
+    was begun in her path, not well clear); or her turn was under way on the tick rule 21.2 began to bind (she was
+    in a position to interfere when the penalty began); or it was still running at the look-back's far end (the
+    course she held before it is out of sight, as just past the look-back); or her held course would have met the
+    boat taking the penalty anyway.
+  - Rule 15 is tried first, as in any incident. Section A incidents don't move: the look-back is rule 21.2's alone.
 - *Escaping*: the keep-clear boat is sailed on through `BoatDynamics` by each candidate in file order, each
   held for `horizonSeconds`, a centred rudder being her autohelm, in the wind and current she recorded each
   tick (the last tick's past now). The right-of-way boat follows her recorded track, then sails on as she was

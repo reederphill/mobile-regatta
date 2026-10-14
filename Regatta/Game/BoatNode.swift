@@ -146,16 +146,26 @@ final class BoatNode: SKNode {
     }
 
     /// Lights or puts out her right-of-way glow (#123): red where you keep clear of her, green where she keeps clear
-    /// of you, `glow.intensity` of `style.glowMaxAlpha`. Nil hides it.
+    /// of you, `glow.intensity` of `style.glowMaxAlpha`. Nil hides it, and so does a boat taking a penalty (#517):
+    /// she has `RuleCueLayer`'s orange ring and no halo.
     func setRightOfWayGlow(_ glow: RightOfWayGlow?, style: BoatStyle) {
         guard let glow else {
             rightOfWayGlow.isHidden = true
             return
         }
-        rightOfWayGlow.color = (glow.kind == .giveWay ? CuePalette.giveWayRed : CuePalette.hasRightGreen).uiColor
+        switch glow.kind {
+        case .giveWay: rightOfWayGlow.color = CuePalette.giveWayRed.uiColor
+        case .hasRight: rightOfWayGlow.color = CuePalette.hasRightGreen.uiColor
+        case .takingAPenalty:
+            rightOfWayGlow.isHidden = true
+            return
+        }
         rightOfWayGlow.alpha = CGFloat(glow.intensity * style.glowMaxAlpha)
         rightOfWayGlow.isHidden = false
     }
+
+    /// Whether her right-of-way halo shows, for tests.
+    var showsRightOfWayHalo: Bool { !rightOfWayGlow.isHidden }
 
     /// Heel (#22): the hull drawn narrower and a drop shadow offset to leeward (the boom's side, except by the lee).
     private func updateHeel(_ pose: BoatPose, style: BoatStyle) {
