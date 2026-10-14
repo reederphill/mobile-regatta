@@ -300,15 +300,12 @@ import RegattaCore
     /// crosses the line (`gateSetUp`), and keeps her pick. On main she crossed on the other gybe and gybed round the
     /// mark below it.
     ///
-    /// A known issue on 7814c4b0 (fix round 3, `.brief/525-1-fix3-note.md`): from 30 and 40 m up she sails across above
-    /// her point on a reach of about 115° and plans the rounding gybe only once her point bears past dead downwind,
-    /// some 19 m up; by hand from that reach the gybe takes over 4 s, and she crosses the line on the other gybe with
-    /// the turn still on. The deep roundings of the suite's tail have this shape. Fix the bot and this reports the
-    /// known issue as not recorded: then drop `withKnownIssue`.
+    /// Red on 7814c4b0 (fix round 3): from 30 and 40 m up she sailed across above her point on a reach of about 115°
+    /// and planned the rounding gybe only once her point bore past dead downwind, some 19 m up; by hand from that reach
+    /// the gybe took over 4 s, and she crossed the line on the other gybe with the turn still on. Fix round 4 reads her
+    /// point's side from where the gybe will leave her and turns it harder (`gateSetUpGybeFraction`).
     @Test func farMarkSailedSheCrossesOnTheRoundingGybe() throws {
-        try withKnownIssue("#525: the set-up gybe by hand starts too low to finish above the line") {
-            try sailFarMarkFromAbove()
-        }
+        try sailFarMarkFromAbove()
     }
 
     private func sailFarMarkFromAbove() throws {

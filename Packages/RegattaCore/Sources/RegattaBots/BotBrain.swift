@@ -196,6 +196,9 @@ struct BotBrain: Sendable {
     var gateCommitted: (leg: Int, left: Bool)?
     /// The leg she has gybed out of dirty air on the rounding gybe (#525 H1, `gateAim`): once a leg.
     var gateShadowGybeLeg: Int?
+    /// The leg and gybe of the set-up gybe `gateSetUp` has planned (#525 fix round 4): she holds that plan, and turns
+    /// that gybe at `gateSetUpGybeFraction` at least.
+    var gateSetUpGybe: (leg: Int, tack: Tack)?
     /// The traffic she prices on each of her gate's marks, smoothed over the leg (#525 H1, `smoothedGateTraffic`).
     var gateTraffic: (leg: Int, left: Double, right: Double, time: Double)?
     /// Whether she is sailing back above a gate's line she fell below without going through it (`gateAim`).

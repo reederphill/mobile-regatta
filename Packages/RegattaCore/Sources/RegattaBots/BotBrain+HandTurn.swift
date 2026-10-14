@@ -526,6 +526,11 @@ extension BotBrain {
         if !isTack, b.status != .racing { turn.fraction = max(turn.fraction, HandTackTable.startGybeFraction) }
         // "A gybe within her skill" (#462): on a class a slammed gybe takes off the plane, no more rudder than keeps her on.
         if !isTack, b.status == .racing, Self.hasPlaningRule(view.boatClass) { turn.fraction = min(turn.fraction, PlaningTable.safeGybe) }
+        // "Throw her round to make the mark" (#525 fix round 4): her set-up gybe above the gate, harder than her own.
+        if !isTack, b.status == .racing, b.roundingStage == 0,
+           let setUp = gateSetUpGybe, setUp.leg == b.legIndex, setUp.tack == aim.tack {
+            turn.fraction = max(turn.fraction, Self.gateSetUpGybeFraction)
+        }
         if handTurnRng.unit() < HandTackTable.botchRate(handling: h) {
             let under = handTurnRng.unit() < HandTackTable.underSteerShare
             let past = handTurnRng.range(HandTackTable.overSteer.lowerBound, HandTackTable.overSteer.upperBound)

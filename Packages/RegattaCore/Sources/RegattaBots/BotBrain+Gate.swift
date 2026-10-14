@@ -99,6 +99,20 @@ extension BotBrain {
     /// Metres above her point below which she no longer gybes above the mark but at it, the old way (#525 fix round
     /// 2). Set by hand.
     static let gateSetUpLow = 5.0
+    /// The least rudder of her set-up gybe (`gateSetUp`), a share of full: "throw her round to make the mark" (#525 fix
+    /// round 4). Her own gybe is gentler (`HandTackTable.gybeFraction`, and on a planing class `PlaningTable.safeGybe`);
+    /// from a reach above her point that gentle gybe ran 4 s and 19 m, and she crossed the line mid-turn. Set by hand.
+    static let gateSetUpGybeFraction = 0.7
+    /// The share of her set-up gybe's seconds she reads ahead on her course for her point's side (#525 fix round 4):
+    /// the gybe bears her away as it goes, so she covers less of her reach than its whole time at her speed. Set by
+    /// hand.
+    static let gateSetUpLead = 0.5
+    /// Radians by the lee, at most, of a point she runs for on the rounding gybe rather than gybe away: off her set-up
+    /// gybe, or within `gateSetUpRunRange` of it (#525 fix round 4). Set by hand.
+    static let gateSetUpLee = deg2rad(25)
+    /// Metres from her point within which she runs for it by the lee on the rounding gybe (`gateSetUpLee`, #525 fix
+    /// round 4). Set by hand.
+    static let gateSetUpRunRange = 50.0
 
     /// Seconds after a gate's leg ends that the beat's first tack is held (#523), so a boat that never gets
     /// close-hauled (a refused luff) is not held to it for good.
@@ -253,23 +267,42 @@ extension BotBrain {
     /// "Gybe above the mark, not at it" (#525 fix round 2), on the gybe that does not round `mine` in one luff: she
     /// gybes onto the rounding gybe once her point bears on its side, so she comes to the line on the gybe that rounds
     /// it, not across it and round the mark by a gybe below it (in a pack that gybe is refused and she carries deep).
+    /// Within `gateStraightRange` her point's side is read from where the gybe will leave her, the plan holds once
+    /// made, and she gybes straight onto a run for her point, hard (`gateSetUpGybeFraction`, #525 fix round 4).
     /// Till then she sails for the point `gateSetUpMetres` up the rounding gybe's groove from her point, or, lower
     /// than that, reaches across to that groove at `gateSetUpReach`. Nil within `gateSetUpLow` of her point's height:
     /// the old way, straight on and the gybe round the mark.
     mutating func gateSetUp(_ mine: GateOption, _ b: SeatView.OwnBoat, _ view: SeatView, down: Double) -> Aim? {
         let wind = b.windDirection
+        let up = view.course.upwind
+        // "Gybe early enough to finish above the line" (#525 fix round 4): her point's side is read from where she will
+        // be once the gybe is done, not from where she is; a prediction already past her point's height is late, and
+        // she reads it from here. Far out (`gateStraightRange`) the gybe is to her point's layline, as ever.
+        let close = mine.distance < Self.gateStraightRange
+        let ahead = b.position + b.velocityOverGround * (gateSetUpGybeSeconds(b, view, down: down) * Self.gateSetUpLead)
+        let from = close && up.dot(ahead - mine.entry) > 0 ? ahead : b.position
         // Where her point bears, as the wind's side: positive with it over her starboard side, as `Aim(heading:)`.
-        let toEntry = wrapAngle(wind - (mine.entry - b.position).bearing)
+        let toEntry = wrapAngle(wind - (mine.entry - from).bearing)
         let entrySide: Tack = toEntry >= 0 ? .starboard : .port
         // Far out, no deeper on it than she sails straight for her point (`farDeep`), or she gybes back.
-        let limit = mine.distance < Self.gateStraightRange ? Self.gateMaxAngle : down + Self.gateDeepest
-        if entrySide == mine.needs, abs(toEntry) <= limit {
+        let limit = close ? Self.gateMaxAngle : down + Self.gateDeepest
+        // Once planned it holds (#525 fix round 4): as she bears away into the gybe her prediction swings, and a plan
+        // dropped mid-turn ends the turn.
+        let held = close && gateSetUpGybe.map { $0.leg == b.legIndex && $0.tack == mine.needs } ?? false
+        if held || (entrySide == mine.needs && abs(toEntry) <= limit) {
             plannedTack = mine.needs
-            return navigate(b, to: mine.entry, view)
+            if close { gateSetUpGybe = (b.legIndex, mine.needs) }
+            // The gybe straight onto the course for her point, by the lee no further than `gateMaxAngle`: not
+            // `navigate`'s aim, which with her point still on her side is on the gybe she is on, nor a heated-up angle,
+            // which from above her point heads her at her mark.
+            let now = wrapAngle(wind - (mine.entry - b.position).bearing)
+            let onNeeds = (now >= 0 ? Tack.starboard : .port) == mine.needs
+            guard close || !onNeeds else { return navigate(b, to: mine.entry, view) }
+            let angle = onNeeds ? min(abs(now), Self.gateMaxAngle) : Self.gateMaxAngle
+            return Aim(angle: angle, tack: mine.needs, tolerance: Self.reachTolerance)
         }
         let groove = Vec2.heading(Aim(angle: down, tack: mine.needs).heading(wind: wind))
         let setUp = mine.entry - groove * Self.gateSetUpMetres
-        let up = view.course.upwind
         if up.dot(b.position - setUp) >= Self.gateSetUpDrop {
             let aim = Aim(heading: (setUp - b.position).bearing, b, tolerance: Self.reachTolerance)
             guard aim.tack == b.tack else { return nil }
@@ -282,6 +315,15 @@ extension BotBrain {
         plannedTack = b.tack
         return downwindAim(b, view, aim: Aim(angle: Self.gateSetUpReach, tack: b.tack, tolerance: Self.reachTolerance),
                            nearMark: true)
+    }
+
+    /// Seconds her set-up gybe takes her by hand from here, roughly: from her angle off the wind through dead downwind
+    /// to her groove on the other gybe, at `gateSetUpGybeFraction`'s rudder (or her own, if more) at her speed.
+    func gateSetUpGybeSeconds(_ b: SeatView.OwnBoat, _ view: SeatView, down: Double) -> Double {
+        guard Self.turnsByHand(view) else { return 0 }
+        let fraction = max(HandTackTable.gybeFraction(handling: turnHandling), Self.gateSetUpGybeFraction)
+        let turn = max(0, .pi - b.twa) + max(0, .pi - down)
+        return turn / (fraction * view.boatClass.steering.turnRate(speed: b.speed))
     }
 
     /// Her aim on the leg to the gate before she is through it, or nil when it is `navigate`'s to the gate's centre
@@ -332,7 +374,13 @@ extension BotBrain {
         if b.tack == mine.needs {
             // On the gybe she rounds it on: straight for her point, not down her groove past it. With it on the other
             // side, or far and deep, she gybes now and `navigate` brings her back on its layline; a reach is its too.
-            if !mine.onOwn || mine.farDeep {
+            // "Run by the lee to the mark" (#525 fix round 4): off her set-up gybe, or within `gateSetUpRunRange` (a
+            // current setting her outside it), a point by the lee no further than `gateSetUpLee` she runs for, rather
+            // than gybe away and round the mark by a gybe below the line.
+            let setUp = gateSetUpGybe.map { $0.leg == b.legIndex && $0.tack == b.tack } ?? false
+            let runs = !mine.onOwn && (setUp || mine.distance < Self.gateSetUpRunRange)
+                && mine.offWind >= .pi - Self.gateSetUpLee
+            if !runs, !mine.onOwn || mine.farDeep {
                 plannedTack = b.tack.other
                 return navigate(b, to: mine.entry, view)
             }
