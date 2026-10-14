@@ -54,10 +54,10 @@ import Testing
             try RaceFiles(resolving: setup)
         }
 
-        // A catalog's fleet-rules@6 (the default, #490) with other bytes than the setup's ref.
+        // A catalog's fleet-rules@7 (the default, #517) with other bytes than the setup's ref.
         var catalog = RaceFileCatalog()
         let retuned = try RulesConfigFile(data: RulesConfigTests.tampered(#""finishWindowSeconds": 120"#, #""finishWindowSeconds": 150"#,
-                                                                          version: 6))
+                                                                          version: 7))
         try catalog.rulesConfigurations.add(retuned)
         #expect(throws: DataFileError.refMismatch(expected: real, foundHash: retuned.ref.hash)) {
             try RaceFiles(resolving: try Self.setup(), from: catalog)

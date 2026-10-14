@@ -3,7 +3,7 @@ import Testing
 @testable import RegattaCore
 
 /// Two boats set up for rule 17 (#345): `IncidentFixture`'s two-seat race (ilca-dinghy@3 in a steady 10 kn from the
-/// course's axis, no current, the default rules fleet-rules@6), close-hauled on starboard mid-beat, where proper
+/// course's axis, no current, the default rules fleet-rules@7), close-hauled on starboard mid-beat, where proper
 /// course is the upwind groove. Seat 0 is the leeward boat, seat 1 the windward one.
 enum Rule17Fixture {
     typealias F = IncidentFixture

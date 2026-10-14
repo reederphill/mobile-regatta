@@ -60,7 +60,7 @@ import UIKit
         #expect(past.noticeText == "Turn · 0s / 0s")
     }
 
-    /// A practice frame carries your keep-clear row and the rules' penalty (the default fleet-rules@6, #490: a tack and
+    /// A practice frame carries your keep-clear row and the rules' penalty (the default fleet-rules@7, #517: a tack and
     /// a gybe, one 40 s limit, its start window the complete one); a frame's readout reads them, and none shows for a
     /// seat that owes nothing.
     @Test func practiceFramesCarryKeepClearRowsAndTheRulesPenalty() throws {

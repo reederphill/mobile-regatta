@@ -30,7 +30,7 @@ import RegattaCore
     /// the gate (`running`); the wind there, and the best upwind and downwind in it.
     /// The class the scripted encounters' water sails (`Water`): the default, or a pinned one a test binds (#437).
     @TaskLocal static var waterClass: FileRef = RaceFiles.defaults.boatClass.ref
-    /// The rules the scripted encounters' water races under (`Water`): the default (fleet-rules@6 since #490), or the
+    /// The rules the scripted encounters' water races under (`Water`): the default (fleet-rules@7 since #517), or the
     /// version a test pins (`.onSixRules`, #488; `.onFiveRules`, the full circle).
     @TaskLocal static var waterRules: FileRef = RaceFiles.defaults.rulesConfiguration.ref
 

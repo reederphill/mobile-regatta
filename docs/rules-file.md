@@ -29,11 +29,11 @@ changes; a change ships as `<id>@<version + 1>.json`.
   race logs replay.
 - `fleet-rules@6` (bundled, schema 6): version 5 with `penalty.turn` `tackAndGybe` (#487): a penalty turn is one
   tack and one gybe turning the same way, completed within 40 s of its clock, which starts when she is clear of
-  the mark she is rounding; no `startSeconds`, no `startedTurnDegrees`. The default (`RaceFiles.defaults`,
-  `Race.defaultRulesConfiguration`) since #490.
+  the mark she is rounding; no `startSeconds`, no `startedTurnDegrees`. The default until #517; kept so its race
+  logs replay.
 - `fleet-rules@7` (bundled, schema 7): version 6 plus `escape.penaltyLookBackSeconds`, 8 (#517): a boat that turns
   into a boat taking a penalty takes the call (rule 16.1) when the course she held before the turn would have stayed
-  clear. Not the default yet.
+  clear. The default (`RaceFiles.defaults`, `Race.defaultRulesConfiguration`) since #517.
 
 Schema 2 is schema 1 plus `raceFormat.startRow.minimumSpacingHullLengths`, the start row's spacing floor:
 required in schema 2, refused in schema 1. A schema-1 file has no floor (`RulesConfig.StartRow.minimumSpacing`
