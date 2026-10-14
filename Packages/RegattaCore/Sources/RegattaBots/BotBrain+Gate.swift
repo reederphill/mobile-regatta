@@ -133,7 +133,7 @@ extension BotBrain {
         // Once she has sailed straight for a mark's point she is no longer far and deep of it: she holds on.
         let committed = gateCommitted.map { $0.leg == b.legIndex && $0.left == left } ?? false
         let farDeep = !committed && to.length >= Self.gateStraightRange && aim.angle > down + Self.gateDeepest
-        let cost: Double
+        var cost: Double
         if b.tack == needs {
             // Far out and much deeper than her groove she gybes away and back for it rather than run by the lee.
             cost = !onOwn || farDeep ? length + 2 * Self.gateGybeMetres : length
@@ -144,8 +144,37 @@ extension BotBrain {
         } else {
             cost = length + Self.gateMarkGybeMetres
         }
+        if BotVariant.hand("1") { cost += gateTrafficMetres(to: entry, gate, b, view) }
         return GateOption(cost: cost, entry: entry, distance: to.length, onOwn: onOwn, offWind: aim.angle, needs: needs,
                           farDeep: farDeep)
+    }
+
+    /// PROTOTYPE (#525 H1): metres the boats ahead and their wake cost her on the way to `point`: each boat ahead of her
+    /// within `h1Near` of the line to it blocks it (up to `h1BoatMetres`, less the further off the line), and the speed
+    /// she loses in the wake the ribbons leave there (`view.wake`, at the time she gets there), weighted.
+    func gateTrafficMetres(to point: Vec2, _ gate: Gate, _ b: SeatView.OwnBoat, _ view: SeatView) -> Double {
+        let up = view.course.upwind
+        let line = point - b.position
+        let length = line.length
+        guard length > 1 else { return 0 }
+        let dir = line / length
+        var metres = 0.0
+        for other in view.others where !other.isGhost {
+            let rel = other.position - b.position
+            let along = rel.dot(dir)
+            // On the way to the point, ahead of her, and not already through the gate.
+            guard along > 0, along < length + 5, rel.dot(up) < 0, up.dot(other.position - gate.centre) > -3 else { continue }
+            let off = abs(rel.cross(dir))
+            if off < BotVariant.h1Near { metres += BotVariant.h1BoatMetres * (1 - off / BotVariant.h1Near) }
+        }
+        let speed = max(b.speed, 1)
+        var lost = 0.0
+        for k in 1...4 {
+            let f = Double(k) / 4
+            let tick = TurbulenceRibbons.tick(after: length * f / speed, from: view.tick)
+            lost += (1 - view.wake.factor(at: b.position + line * f, tick: tick, receiver: view.seat)) * length / 4
+        }
+        return metres + BotVariant.h1ShadowWeight * lost
     }
 
     /// What each of her gate's marks costs her now (`gateOption`), or nil when her leg rounds no gate.
@@ -210,6 +239,12 @@ extension BotBrain {
                 return navigate(b, to: mine.entry, view)
             }
             guard deeper else { return navigate(b, to: mine.entry, view) }
+            // PROTOTYPE (#525 H1): in dirty air on the rounding gybe and with room to come back, gybe out of it once.
+            if BotVariant.hand("1"), b.shadow < Self.dirtyAir, mine.distance >= BotVariant.h1GybeMin, gateShadowGybeLeg != b.legIndex {
+                gateShadowGybeLeg = b.legIndex
+                plannedTack = b.tack.other
+                return navigate(b, to: mine.entry, view)
+            }
             // She has sailed straight for this point: far and deep never reprices it.
             gateCommitted = (b.legIndex, picksLeft)
         } else {

@@ -107,6 +107,11 @@ extension BotBrain {
         misjudged[other.seat] == true && BotWeaknesses.misjudgeScope.contains(rule)
     }
 
+    /// PROTOTYPE (#525): whether `other` owes her mark-room now (`OwnBoat.markRoom`).
+    func owesHerRoom(_ other: SeatView.OtherBoat, _ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+        b.markRoom.contains { $0.entitled == view.seat && $0.owing == other.seat }
+    }
+
     // MARK: - Giving way
 
     /// The rule she keeps clear of `other` under, racing: the one rules 10–13 name her keep-clear boat under
@@ -268,12 +273,18 @@ extension BotBrain {
         let heading = 2 * b.windDirection - b.heading
         let speed = b.speed * Self.tapSpeedShare
         let clear = view.boatClass.hull.length * tapClearanceLengths
+        // PROTOTYPE (#525 H3): against a boat that owes her mark-room the gybe may pass this close.
+        let clearOwing = view.boatClass.hull.length * tapClearanceLengths * (BotVariant.h3Lengths / Self.tapClearance)
         let ontoPort = b.tack == .starboard
         // Her track through the tap, sailed in her mind only once a boat is near enough to matter (the cautious bot's).
         var track: [Vec2]?
         return view.others.allSatisfy { other in
             let gap = (other.position - b.position).length
             guard !other.isGhost else { return true }
+            let owes = (BotVariant.hand("2") || BotVariant.hand("3")) && owesHerRoom(other, b, view)
+            // PROTOTYPE (#525 H2): a boat that owes her room is not a refusal inside the zone.
+            if BotVariant.hand("2"), owes { return true }
+            let clear = BotVariant.hand("3") && owes ? clearOwing : clear
             // Her circle, from as far off as her track reaches it; then the boat she is, as every other.
             if let radius = penaltyCircleRadius(of: other, b, view), gap <= Self.tapRange + radius + clear {
                 guard circleApproach(to: other, b, heading: heading) >= min(radius + clear, gap) else { return false }

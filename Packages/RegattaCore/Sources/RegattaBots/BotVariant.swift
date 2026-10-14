@@ -11,6 +11,16 @@ public enum BotVariant {
     public static func number(_ name: String, _ fallback: Double) -> Double {
         ProcessInfo.processInfo.environment[name].flatMap(Double.init) ?? fallback
     }
+    // Tunables (sliders), read once.
+    /// H3: hull lengths a gybe may pass a boat that owes her room.
+    static let h3Lengths = number("REGATTA_H3_LENGTHS", 0.6)
+    /// H1: metres from the line to a mark's point within which a boat ahead blocks it, and the metres it costs at zero offset.
+    static let h1Near = number("REGATTA_H1_NEAR", 25)
+    static let h1BoatMetres = number("REGATTA_H1_BOAT_M", 30)
+    /// H1: weight of the metres lost to other boats' wake on the way to a point.
+    static let h1ShadowWeight = number("REGATTA_H1_SHADOW_W", 1.5)
+    /// H1: least distance to her point at which she gybes out of shadow on the rounding gybe, metres.
+    static let h1GybeMin = number("REGATTA_H1_GYBE_MIN", 45)
     /// A per-decision trace of the gate leg on stderr.
     public static let traces = ProcessInfo.processInfo.environment["REGATTA_GATE_TRACE"] != nil
 }
