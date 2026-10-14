@@ -107,6 +107,9 @@ extension BotBrain {
         misjudged[other.seat] == true && BotWeaknesses.misjudgeScope.contains(rule)
     }
 
+    /// PROTOTYPE (#525 P): whether her plan has her shoot the gap on this leg: the boats that owe her room are not ones she keeps clear of.
+    func shootsGap(_ b: SeatView.OwnBoat) -> Bool { BotVariant.on("P") && gatePlan.gapLeg == b.legIndex }
+
     /// PROTOTYPE (#525): whether `other` owes her mark-room now (`OwnBoat.markRoom`).
     func owesHerRoom(_ other: SeatView.OtherBoat, _ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
         b.markRoom.contains { $0.entitled == view.seat && $0.owing == other.seat }
@@ -281,9 +284,9 @@ extension BotBrain {
         return view.others.allSatisfy { other in
             let gap = (other.position - b.position).length
             guard !other.isGhost else { return true }
-            let owes = (BotVariant.hand("2") || BotVariant.hand("3")) && owesHerRoom(other, b, view)
+            let owes = (BotVariant.hand("2") || BotVariant.hand("3") || shootsGap(b)) && owesHerRoom(other, b, view)
             // PROTOTYPE (#525 H2): a boat that owes her room is not a refusal inside the zone.
-            if BotVariant.hand("2"), owes { return true }
+            if BotVariant.hand("2") || shootsGap(b), owes { return true }
             let clear = BotVariant.hand("3") && owes ? clearOwing : clear
             // Her circle, from as far off as her track reaches it; then the boat she is, as every other.
             if let radius = penaltyCircleRadius(of: other, b, view), gap <= Self.tapRange + radius + clear {

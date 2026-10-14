@@ -289,7 +289,7 @@ extension BotBrain {
 
     /// Notes every boat as she sees it now, for `guarded` at her next decision.
     mutating func see(_ view: SeatView) {
-        guard caution != nil else { return }
+        guard caution != nil || BotVariant.on("t") else { return }
         for other in view.others {
             if other.seat >= seen.count { seen += Array(repeating: nil, count: other.seat + 1 - seen.count) }
             seen[other.seat] = Seen(time: view.time, heading: other.heading, speed: other.speed)

@@ -198,6 +198,8 @@ struct BotBrain: Sendable {
     var gateRecovering = false
     /// PROTOTYPE (#525 H1): the leg on which she has already gybed out of a boat's shadow on her way to the gate.
     var gateShadowGybeLeg: Int?
+    /// PROTOTYPE (#525 P): the gate planner's held choice and the fidelity track.
+    var gatePlan = GatePlanState()
     /// The tack she starts the beat on after a gate, until she is close-hauled on it (#523, `updateGateExit`): the leg
     /// of that beat, the tack she luffed onto round the mark she rounded, and when the window ends anyway.
     var gateExit: (leg: Int, tack: Tack, until: Double)?
@@ -268,6 +270,8 @@ struct BotBrain: Sendable {
         if caution != nil {
             if decision.tap == nil, !decision.centred, handTurn?.isTurning != true,
                let input = guarded(view, decision.input) { decision.input = input }
+            see(view)
+        } else if BotVariant.on("t") {
             see(view)
         }
         noteStartLuff(view, decision)
@@ -1449,7 +1453,7 @@ struct BotBrain: Sendable {
                 guard let rule = keepClearRule(b, view, other), !misjudges(other, rule),
                       isAboutToHit(other, b, view, desired: desired, lookahead: lookahead) else { continue }
                 // PROTOTYPE (#525 H2): a boat that owes her mark-room is not one she keeps clear of.
-                if BotVariant.hand("2"), !rule.isRule21, owesHerRoom(other, b, view) { continue }
+                if BotVariant.hand("2") || shootsGap(b), !rule.isRule21, owesHerRoom(other, b, view) { continue }
                 return Evasion(heading: racingKeepClear(b, view, from: other, rule: rule, desired: desired, lookahead: lookahead))
             }
             guard isAboutToHit(other, b, view, desired: desired, lookahead: lookahead) else { continue }

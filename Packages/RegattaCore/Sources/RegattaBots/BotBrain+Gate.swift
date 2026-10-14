@@ -225,6 +225,35 @@ extension BotBrain {
         defer { isNearHerMark = true }
 
         let l = gateOption(left: true, gate, b, view), r = gateOption(left: false, gate, b, view)
+        if BotVariant.on("P") {
+            gatePlanFidelity(b, view)
+            let plan = gatePlanChoice(b, view, gate: gate, l: l, r: r)
+            gatePick = (b.legIndex, plan.left)
+            let mine = plan.left ? l : r
+            let down = grooveAngle(.downwind, b, view)
+            let deeper = mine.offWind > down - Self.gateDeeperMargin
+            switch plan.gybe {
+            case .now:
+                plannedTack = b.tack.other
+                return navigate(b, to: mine.entry, view)
+            case .layline:
+                guard mine.distance < Self.gateStraightRange, deeper, mine.onOwn else { return navigate(b, to: mine.entry, view) }
+            case .none:
+                // No gybe: on her own gybe straight for it, down her groove while it is far and deep of it; the point on the
+                // other gybe, she sails her groove on this one.
+                if BotVariant.planNoneGroove, !mine.onOwn || (mine.distance >= Self.gateStraightRange && mine.offWind > down) {
+                    plannedTack = b.tack
+                    isNearHerMark = true
+                    return downwindAim(b, view, aim: Aim.groove(.downwind, tack: b.tack, angle: down), nearMark: true)
+                }
+                guard deeper, mine.onOwn else { return navigate(b, to: mine.entry, view) }
+                if b.tack == mine.needs { gateCommitted = (b.legIndex, plan.left) }
+            }
+            plannedTack = b.tack
+            isNearHerMark = true
+            isAtHerGate = mine.distance < PlaningTable.gateRange
+            return downwindAim(b, view, aim: Aim(angle: min(mine.offWind, Self.gateMaxAngle), tack: b.tack, tolerance: Self.reachTolerance), nearMark: true)
+        }
         let held = gatePick.flatMap { $0.leg == b.legIndex ? $0.left : nil }
         let picksLeft = Self.picksLeftGateMark(held: held, left: l.cost, right: r.cost)
         gatePick = (b.legIndex, picksLeft)
