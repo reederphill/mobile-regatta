@@ -196,6 +196,9 @@ struct BotBrain: Sendable {
     var gateCommitted: (leg: Int, left: Bool)?
     /// Whether she is sailing back above a gate's line she fell below without going through it (`gateAim`).
     var gateRecovering = false
+    /// The tack she starts the beat on after a gate, until she is close-hauled on it (#523, `updateGateExit`): the leg
+    /// of that beat, the tack she luffed onto round the mark she rounded, and when the window ends anyway.
+    var gateExit: (leg: Int, tack: Tack, until: Double)?
     /// What she knows of a stall in irons (#459, `centresStalled`): only on a class she turns by hand.
     var stall = Stall()
     /// What she has made of the boats around her (#234, `observeFleet`): each one's tack, when she saw it tack, and
@@ -1161,6 +1164,7 @@ struct BotBrain: Sendable {
             if case .finish = c.legs[b.legIndex] { return finishAim(b, view) }
             // The windward mark's last 60 m are sailed by her board, not the corridor (#508).
             if let aim = windwardFinalAim(b, view) { return aim }
+            updateGateExit(b, view)
             // The leg to the gate, from her pick of its marks to its line, is sailed for her point inside her mark (#518).
             if let aim = gateAim(b, view) { return aim }
             return navigate(b, to: waypoint(b, view), view)
@@ -1307,7 +1311,10 @@ struct BotBrain: Sendable {
             // Where the target bears from her: to the right of the wind positive.
             let relative = wrapAngle(bearing - w)
             var tack = plannedTack
-            if lateral < -corridor {
+            if let exit = gateExit {
+                // Off the gate the beat starts on the rounding tack: a luff, never a gybe and a tack (#523).
+                tack = exit.tack
+            } else if lateral < -corridor {
                 tack = .port
             } else if lateral > corridor {
                 tack = .starboard

@@ -458,6 +458,104 @@ import RegattaCore
         #expect(other.left == fresh.left && other.right == fresh.right)
     }
 
+    /// #523 acceptance: from the pick on (70 m above the line, inside `gatePickRange` and outside `PlaningTable.markRange`)
+    /// she is near her mark of her leg: slow on the plane (her point far and deep) and wanting a gybe, she builds no speed
+    /// first, as inside 60 m. Away from it, as before, she does.
+    @Test func noSpeedBuildBetweenPickAndMarkRange() throws {
+        for tack in [Tack.starboard, .port] {
+            var scene = try Self.scene(tack: tack) {
+                $0.laying(left: $0.rounded(on: tack), on: tack, out: 72, deeper: deg2rad(20))
+            }
+            _ = scene.aim()
+            try #require(scene.hand.brain.gatePick != nil)
+            #expect(PlaningTable.markRange < BotBrain.gatePickRange && scene.bearings.above(scene.boat.position) > PlaningTable.markRange)
+            // Slow for her angle: 30 % of her polar speed there.
+            let first = scene.seen()
+            let angle = abs(scene.hand.brain.sailingAngle(first.own))
+            var snapshot = scene.race.exportSnapshot()
+            snapshot.seats[0].boat.speed = 0.3 * first.boatClass.polar.speed(twa: angle, tws: first.own.polarWindSpeed)
+                * first.own.speedShadow
+            try scene.race.importSnapshot(snapshot)
+            let view = scene.seen()
+            var away = scene.hand.brain
+            away.senses.planing = true
+            away.isNearHerMark = false
+            let buildsAway = away.buildsSpeedToGybe(view.own, view)
+            try #require(buildsAway, "\(tack): not slow for her angle")
+            var near = scene.hand.brain
+            near.senses.planing = true
+            let isNear = near.isNearHerMark && near.isNearMarkOfHerLeg(view.own, view)
+            let builds = near.buildsSpeedToGybe(view.own, view)
+            #expect(isNear, "\(tack)")
+            #expect(!builds, "\(tack): she builds speed for the gybe at the pick")
+        }
+    }
+
+    /// #523 acceptance: at 75 m, the plan a reach on the other gybe (her pick's point to the other side of dead
+    /// downwind) and the gybe refused, she holds the closest course to her point on her own gybe, never the mirror of
+    /// the plan's angle away from it.
+    @Test func refusedGybeAtThePickHoldsHerCourseToThePoint() throws {
+        for tack in [Tack.starboard, .port] {
+            var found = 0
+            for off in stride(from: -50.0, through: 50.0, by: 5.0) {
+                var scene = try Self.scene(tack: tack) { $0.gate.centre + $0.outwards(left: true) * off + $0.up * 75 }
+                let aimAsked = scene.aim()
+                guard let aim = aimAsked, aim.tack != tack, aim.groove == nil else { continue }
+                let view = scene.seen()
+                guard let pick = scene.hand.brain.gatePick else { continue }
+                found += 1
+                #expect(scene.hand.brain.isNearMarkOfHerLeg(view.own, view), "\(tack), \(off) m: not near her mark at 75 m")
+                let held = try #require(scene.hand.brain.refusedTurnAim(aim, view.own, view), "\(tack), \(off) m")
+                #expect(held.tack == tack)
+                let entry = scene.bearings.entry(left: pick.left)
+                let bearing = (entry - view.own.position).bearing
+                let wind = view.own.windDirection
+                let mirror = Aim(angle: aim.angle, tack: tack)
+                #expect(abs(wrapAngle(held.heading(wind: wind) - bearing)) <= abs(wrapAngle(mirror.heading(wind: wind) - bearing)) + 1e-9,
+                        "\(tack), \(off) m: holds \(rad2deg(held.angle))° against the mirror's \(rad2deg(mirror.angle))°")
+            }
+            #expect(found >= 1, "\(tack): no pose with a reach on the other gybe")
+        }
+    }
+
+    /// #523 acceptance: rounding a gate mark on its rounding tack with the beat's plan wanting the other (the
+    /// corridor's), her first beat aim is the rounding tack close-hauled: the turn is a luff (her angle off the wind
+    /// never grows past what it was, never through dead downwind), and she is close-hauled on it before she tacks.
+    @Test func offTheGateTheBeatStartsOnTheRoundingTack() throws {
+        for tack in [Tack.port, .starboard] {
+            var scene = try Self.scene(tack: tack) { $0.laying(left: $0.rounded(on: tack), on: tack, above: 40) }
+            let leg = scene.boat.legIndex
+            var changed: (offWind: Double, boom: BoomSide)?
+            var seconds = 0.0
+            var widest = 0.0
+            var crossed = false
+            var hauled = false
+            for _ in 1...Int(60 * Double(Race.tickRate)) {
+                scene.hand.drive(scene.race)
+                scene.race.step()
+                let boat = scene.boat
+                let wind = scene.race.groundWind(at: boat.position).direction
+                let offWind = abs(wrapAngle(wind - boat.heading))
+                if changed == nil, boat.legIndex != leg {
+                    changed = (offWind, boat.boomSide)
+                    // The corridor wants the other tack.
+                    scene.hand.brain.plannedTack = tack.other
+                }
+                guard let at = changed else { continue }
+                seconds += 1 / Double(Race.tickRate)
+                widest = max(widest, offWind - at.offWind)
+                if boat.boomSide != at.boom { crossed = true }
+                if boat.tack == tack && offWind < deg2rad(60) { hauled = true }
+                if hauled || seconds > 25 { break }
+            }
+            try #require(changed != nil, "\(tack): she never left the gate's leg")
+            #expect(!crossed, "\(tack): her boom crossed on the way to close-hauled")
+            #expect(widest < deg2rad(3), "\(tack): her angle off the wind grew by \(rad2deg(widest))°")
+            #expect(hauled, "\(tack): never close-hauled on the rounding tack")
+            #expect(scene.hand.brain.plannedTack == tack, "\(tack): planned \(scene.hand.brain.plannedTack)")
+        }
+    }
+
     /// Sails `scene` to the end of her leg, or for `seconds`: every tick.
     static func track(_ scene: inout Scene, seconds: Double) -> [Tick] {
         var ticks: [Tick] = []
