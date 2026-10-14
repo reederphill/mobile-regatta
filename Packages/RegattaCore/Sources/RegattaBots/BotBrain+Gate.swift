@@ -17,6 +17,9 @@ import RegattaCore
 // #525 H1: the pick prices a crowded or shadowed mark (`gateTrafficMetres`), and on the rounding gybe in dirty air with
 // room to come back she gybes out of it once a leg; the traffic is blended over `gateTrafficSeconds` so the pick does
 // not follow the pack. H3 is the tap's (`tapClearanceOwing`).
+// #525 fix round 2: to her mark on the gybe that does not round it, she gybes onto the rounding gybe above the line
+// (`gateSetUp`), not round the mark below it, where in a pack the gybe is refused and she carried deep; and straight for
+// a point by the lee she runs, not the mirror angle that sailed her outside it.
 //
 // Every constant here was set by hand in #510 on 80 races (8 bots, 2 laps); none was swept beyond a step or two inside
 // the noise, but the pick's range (40 against 80 m) and the inset, which moved the overshoots clearly.
@@ -83,6 +86,19 @@ extension BotBrain {
     /// Metres from her point, at least, at which she gybes out of dirty air on the rounding gybe (#525 H1): room to come
     /// back on its layline before `gateStraightRange`. Set by hand (the prototype's value; not swept).
     static let gateShadowGybeMetres = 45.0
+    /// Metres up the rounding gybe's groove from her point at which she gybes onto it when she comes to her mark on the
+    /// other gybe (#525 fix round 2, `gateSetUp`): above the line, so she rounds in one luff and does not gybe at the
+    /// mark in the pack. Set by hand.
+    static let gateSetUpMetres = 20.0
+    /// Metres below her, at least, that point must lie for her to sail for it; higher than that she reaches across to
+    /// the groove at `gateSetUpReach` (#525 fix round 2). Set by hand.
+    static let gateSetUpDrop = 3.0
+    /// Her angle off the wind on that reach, radians: a little below a beam reach, so she keeps her height above the
+    /// line (#525 fix round 2). Set by hand.
+    static let gateSetUpReach = deg2rad(100)
+    /// Metres above her point below which she no longer gybes above the mark but at it, the old way (#525 fix round
+    /// 2). Set by hand.
+    static let gateSetUpLow = 5.0
 
     /// Seconds after a gate's leg ends that the beat's first tack is held (#523), so a boat that never gets
     /// close-hauled (a refused luff) is not held to it for good.
@@ -234,6 +250,40 @@ extension BotBrain {
         return other + gateRepickMetres >= mine ? held : !held
     }
 
+    /// "Gybe above the mark, not at it" (#525 fix round 2), on the gybe that does not round `mine` in one luff: she
+    /// gybes onto the rounding gybe once her point bears on its side, so she comes to the line on the gybe that rounds
+    /// it, not across it and round the mark by a gybe below it (in a pack that gybe is refused and she carries deep).
+    /// Till then she sails for the point `gateSetUpMetres` up the rounding gybe's groove from her point, or, lower
+    /// than that, reaches across to that groove at `gateSetUpReach`. Nil within `gateSetUpLow` of her point's height:
+    /// the old way, straight on and the gybe round the mark.
+    mutating func gateSetUp(_ mine: GateOption, _ b: SeatView.OwnBoat, _ view: SeatView, down: Double) -> Aim? {
+        let wind = b.windDirection
+        // Where her point bears, as the wind's side: positive with it over her starboard side, as `Aim(heading:)`.
+        let toEntry = wrapAngle(wind - (mine.entry - b.position).bearing)
+        let entrySide: Tack = toEntry >= 0 ? .starboard : .port
+        // Far out, no deeper on it than she sails straight for her point (`farDeep`), or she gybes back.
+        let limit = mine.distance < Self.gateStraightRange ? Self.gateMaxAngle : down + Self.gateDeepest
+        if entrySide == mine.needs, abs(toEntry) <= limit {
+            plannedTack = mine.needs
+            return navigate(b, to: mine.entry, view)
+        }
+        let groove = Vec2.heading(Aim(angle: down, tack: mine.needs).heading(wind: wind))
+        let setUp = mine.entry - groove * Self.gateSetUpMetres
+        let up = view.course.upwind
+        if up.dot(b.position - setUp) >= Self.gateSetUpDrop {
+            let aim = Aim(heading: (setUp - b.position).bearing, b, tolerance: Self.reachTolerance)
+            guard aim.tack == b.tack else { return nil }
+            plannedTack = b.tack
+            return downwindAim(b, view, aim: Aim(angle: min(aim.angle, Self.gateMaxAngle), tack: b.tack,
+                                                 tolerance: Self.reachTolerance), nearMark: true)
+        }
+        // Lower down, across to its groove on a reach that keeps her height, while there is room above the line.
+        guard up.dot(b.position - mine.entry) >= Self.gateSetUpLow else { return nil }
+        plannedTack = b.tack
+        return downwindAim(b, view, aim: Aim(angle: Self.gateSetUpReach, tack: b.tack, tolerance: Self.reachTolerance),
+                           nearMark: true)
+    }
+
     /// Her aim on the leg to the gate before she is through it, or nil when it is `navigate`'s to the gate's centre
     /// (more than `gatePickRange` above the line), or not that leg at all.
     ///
@@ -241,8 +291,9 @@ extension BotBrain {
     /// and `gateRecoverUp` above it until she is `gateRecoverAbove` above the line. Otherwise she picks her mark
     /// (`gateOption`, `picksLeftGateMark`) and sails for her point inside it: on the gybe that rounds it, straight for
     /// it when it lies deeper than a reach, gybing away first when it is on the other side or far and deep; on the
-    /// other gybe by `navigate` to its layline, and straight on to gybe round the mark only from inside
-    /// `gateStraightRange`. Straight for it she plans no gybe.
+    /// other gybe across above it and onto the rounding gybe above the line (`gateSetUp`), else by `navigate` to its
+    /// layline, and straight on to gybe round the mark only from inside `gateStraightRange` and low down. Straight for
+    /// it she plans no gybe.
     mutating func gateAim(_ b: SeatView.OwnBoat, _ view: SeatView) -> Aim? {
         guard let gate = Self.gate(of: b, view), b.roundingStage == 0 else {
             gateRecovering = false
@@ -271,15 +322,7 @@ extension BotBrain {
         let held = gatePick.flatMap { $0.leg == b.legIndex ? $0.left : nil }
         // The traffic she prices is the boats' of the last `gateTrafficSeconds`, not of this tick: a boat that sails on
         // through the gate leaves a crowded mark dear a while, so her pick does not flip back and forth with the pack.
-        // Inside `gateStraightRange` of the mark she holds it is what she last priced: traffic no longer flips her pick
-        // there (#525 fix round 1), where a change forces a gybe at the line; the costs still repick as on main.
-        let heldDistance = held.map { $0 ? l.distance : r.distance } ?? .infinity
-        let traffic: (left: Double, right: Double)
-        if heldDistance < Self.gateStraightRange, let last = gateTraffic, last.leg == b.legIndex {
-            traffic = (last.left, last.right)
-        } else {
-            traffic = smoothedGateTraffic(l.traffic, r.traffic, b, view)
-        }
+        let traffic = smoothedGateTraffic(l.traffic, r.traffic, b, view)
         let picksLeft = Self.picksLeftGateMark(held: held, left: l.cost - l.traffic + traffic.left,
                                                right: r.cost - r.traffic + traffic.right)
         gatePick = (b.legIndex, picksLeft)
@@ -303,6 +346,7 @@ extension BotBrain {
             // She has sailed straight for this point: far and deep never reprices it.
             gateCommitted = (b.legIndex, picksLeft)
         } else {
+            if let aim = gateSetUp(mine, b, view, down: down) { return aim }
             // On the other gybe: to its layline and the gybe while there is room; close in, straight on and round it.
             guard mine.distance < Self.gateStraightRange, deeper, mine.onOwn else { return navigate(b, to: mine.entry, view) }
         }
@@ -310,7 +354,9 @@ extension BotBrain {
         plannedTack = b.tack
         isNearHerMark = true
         isAtHerGate = mine.distance < PlaningTable.gateRange
-        let angle = min(mine.offWind, Self.gateMaxAngle)
+        // Her point by the lee: as close to dead downwind as she sails, not as far the other side (#525 fix round 2).
+        let byTheLee = Aim(heading: (mine.entry - b.position).bearing, b, tolerance: 0).tack != b.tack
+        let angle = byTheLee ? Self.gateMaxAngle : min(mine.offWind, Self.gateMaxAngle)
         return downwindAim(b, view, aim: Aim(angle: angle, tack: b.tack, tolerance: Self.reachTolerance), nearMark: true)
     }
 }

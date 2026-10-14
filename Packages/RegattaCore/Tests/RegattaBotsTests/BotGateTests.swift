@@ -224,10 +224,11 @@ import RegattaCore
         #expect(out.hand.brain.gatePick?.left == !near)
 
         // The near mark picked already, and the far one under `gateRepickMetres` cheaper: she holds on for it on the
-        // gybe she is on and gybes round it after the line.
+        // gybe she is on and, this low (no room to gybe above the line, `gateSetUpLow`; higher up she does, see
+        // `farMarkSheGybesAboveTheLineNotAtTheMark`), gybes round it after the line.
         var held = try Self.scene(tack: tack, heading: {
-            ($0.entry(left: !$0.rounded(on: tack)) - ($0.gate.centre + $0.outwards(left: !$0.rounded(on: tack)) * 28 + $0.up * 6)).bearing
-        }) { $0.gate.centre + $0.outwards(left: !$0.rounded(on: tack)) * 28 + $0.up * 6 }
+            ($0.entry(left: !$0.rounded(on: tack)) - ($0.gate.centre + $0.outwards(left: !$0.rounded(on: tack)) * 28 + $0.up * 2)).bearing
+        }) { $0.gate.centre + $0.outwards(left: !$0.rounded(on: tack)) * 28 + $0.up * 2 }
         held.hand.brain.gatePick = (held.boat.legIndex, near)
         costs = try held.costs()
         let (mine, other) = near ? (costs.left, costs.right) : (costs.right, costs.left)
@@ -240,6 +241,75 @@ import RegattaCore
         try #require(before.count < ticks.count, "she never crossed the line")
         #expect(before.allSatisfy { $0.pick == near && $0.planned == tack })
         #expect(Self.gybes(Array(before), from: .port).isEmpty, "a gybe before the line")
+    }
+
+    /// #525 fix round 2: come to her mark on the gybe that does not round it, from outside it and above the line
+    /// (the pick held: a boat stopped above the other mark's point makes it dear), she does not sail straight for her
+    /// point to cross on that gybe and gybe round the mark below the line: she sails across above her point
+    /// (`gateSetUp`), for the point `gateSetUpMetres` up the rounding gybe's groove from it or, lower, on a reach of
+    /// `gateSetUpReach`; and once her point bears on the rounding gybe's side she gybes onto it above the line. On
+    /// main she sailed straight for her point, crossed on the other gybe and carried deep below the line.
+    @Test func farMarkSheGybesAboveTheLineNotAtTheMark() throws {
+        for tack in [Tack.starboard, .port] {
+            for up in [10.0, 25.0] {
+                let name = "\(tack), \(up) m up"
+                let place: (Bearings) -> Vec2 = {
+                    $0.gate.centre + $0.outwards(left: !$0.rounded(on: tack)) * 28 + $0.up * up
+                }
+                var scene = try Self.scene(tack: tack, heading: { ($0.entry(left: !$0.rounded(on: tack)) - place($0)).bearing },
+                                           pose: place)
+                let b = scene.bearings
+                let mark = !b.rounded(on: tack)
+                var snapshot = scene.race.exportSnapshot()
+                snapshot.seats[1].boat.position = b.entry(left: !mark) + b.up * 6
+                snapshot.seats[1].boat.heading = b.wind
+                snapshot.seats[1].boat.speed = 0
+                try scene.race.importSnapshot(snapshot)
+                scene.hand.brain.gatePick = (scene.boat.legIndex, mark)
+                let costs = try scene.costs()
+                let (mine, other) = mark ? (costs.left, costs.right) : (costs.right, costs.left)
+                try #require(other + BotBrain.gateRepickMetres >= mine, "\(name): costs \(costs)")
+                let entry = b.entry(left: mark)
+                let seen = scene.seen()
+                let toEntry = Aim(heading: (entry - seen.own.position).bearing, seen.own, tolerance: 0)
+                let aimAsked = scene.aim()
+                let aim = try #require(aimAsked, "\(name)")
+                #expect(scene.hand.brain.gatePick?.left == mark, "\(name): changed her pick")
+                #expect(aim.tack == tack && scene.hand.brain.plannedTack == tack, "\(name): \(aim)")
+                // Across, above her point: higher than the course to it by more than a few degrees.
+                #expect(toEntry.tack == tack && aim.angle < toEntry.angle - deg2rad(10),
+                        "\(name): aims \(rad2deg(aim.angle))° off the wind, her point is \(rad2deg(toEntry.angle))°")
+            }
+        }
+        // Inside her point's groove on the rounding gybe, 10 m above the line, she gybes onto it.
+        for tack in [Tack.starboard, .port] {
+            var scene = try Self.scene(tack: tack) {
+                $0.laying(left: !$0.rounded(on: tack), on: tack.other, above: 10, deeper: -deg2rad(10))
+            }
+            let mark = !scene.bearings.rounded(on: tack)
+            scene.hand.brain.gatePick = (scene.boat.legIndex, mark)
+            let aimAsked = scene.aim()
+            let aim = try #require(aimAsked, "\(tack)")
+            #expect(scene.hand.brain.gatePick?.left == mark && aim.tack == tack.other, "\(tack): \(aim)")
+        }
+    }
+
+    /// #525 fix round 2: straight for her point on the gybe that rounds it, with the point a few degrees by the lee
+    /// (inside `gateLee`), she sails as close to dead downwind as she does (`gateMaxAngle`), not as far the other side
+    /// of it: that mirror sailed her away from her point, outside it, till a gybe at the line. It fails on main.
+    @Test func herPointByTheLeeSheRunsNotMirrors() throws {
+        for tack in [Tack.starboard, .port] {
+            var scene = try Self.scene(tack: tack) {
+                $0.laying(left: $0.rounded(on: tack), on: tack, out: 20, deeper: .pi - $0.down + deg2rad(6))
+            }
+            let left = scene.bearings.rounded(on: tack)
+            scene.hand.brain.gatePick = (scene.boat.legIndex, left)
+            let aimAsked = scene.aim()
+            let aim = try #require(aimAsked, "\(tack)")
+            #expect(aim.tack == tack && scene.hand.brain.gatePick?.left == left, "\(tack): \(aim)")
+            #expect(abs(scene.hand.brain.planingAimed.asked - BotBrain.gateMaxAngle) < 1e-9,
+                    "\(tack): asks \(rad2deg(scene.hand.brain.planingAimed.asked))°")
+        }
     }
 
     /// #518 acceptance: on the gybe that rounds her mark, from 60 m above the line to the end of the leg, her boom
@@ -722,47 +792,5 @@ import RegattaCore
             _ = clean.aim()
             #expect(clean.hand.brain.plannedTack == tack, "\(tack): gybed in clean air")
         }
-    }
-
-    /// #525 fix round 1: inside `gateStraightRange` of the mark she holds, a boat that comes onto her line does not
-    /// flip her pick (it would force a gybe at the line); she prices the traffic she last saw. Further out the same
-    /// boat does flip it.
-    @Test func trafficDoesNotFlipHerPickCloseIn() throws {
-        // A pose inside `gateStraightRange` of a mark she holds on the costs alone, and a boat on the line to it that
-        // makes it dearer than the other by more than the repick margin.
-        var found: (scene: Scene, left: Bool, boat: Vec2)?
-        search: for up in stride(from: 10.0, through: 26.0, by: 2) {
-            for off in stride(from: -20.0, through: 20.0, by: 1) {
-                var scene = try Self.scene(tack: .starboard) { $0.gate.centre + $0.outwards(left: true) * off + $0.up * up }
-                let costs = try scene.costs()
-                for left in [true, false] {
-                    let mine = left ? costs.left : costs.right, other = left ? costs.right : costs.left
-                    let me = scene.boat.position, entry = scene.bearings.entry(left: left)
-                    guard (entry - me).length < BotBrain.gateStraightRange - 2,
-                          mine <= other + BotBrain.gateRepickMetres - 2 else { continue }
-                    let boat = me + (entry - me) * 0.8
-                    guard scene.bearings.above(boat) > 0 else { continue }
-                    try Self.park(&scene, at: boat)
-                    let crowded = try scene.costs()
-                    if (left ? crowded.left : crowded.right) > (left ? crowded.right : crowded.left) + BotBrain.gateRepickMetres + 2 {
-                        found = (try Self.scene(tack: .starboard) { $0.gate.centre + $0.outwards(left: true) * off + $0.up * up },
-                                 left, boat)
-                        break search
-                    }
-                    try Self.park(&scene, at: me + scene.bearings.up * 300)
-                }
-            }
-        }
-        var (scene, left, boat) = try #require(found, "no pose inside gateStraightRange of a held mark a boat can crowd")
-        _ = scene.aim()
-        let leg = try #require(scene.hand.brain.gatePick).leg
-        scene.hand.brain.gatePick = (leg, left)
-        let held = scene.hand.brain
-        _ = scene.aim()
-        try #require(scene.hand.brain.gatePick?.left == left, "she holds the mark on the costs alone")
-        try Self.park(&scene, at: boat)
-        scene.hand.brain = held
-        _ = scene.aim()
-        #expect(scene.hand.brain.gatePick?.left == left, "a boat on her line flipped her pick inside gateStraightRange")
     }
 }
