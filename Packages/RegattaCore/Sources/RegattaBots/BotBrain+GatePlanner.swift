@@ -186,7 +186,8 @@ extension BotBrain {
         let current = b.velocityOverGround - Vec2.heading(b.heading) * b.speed
         var others: [PlanOther] = []
         let useRates = BotVariant.on("t")
-        for o in view.others where !o.isGhost && (o.position - b.position).length < 70 {
+        // Variant b: blind to traffic (no boats, no wake), to tell what the roll-out's own route is worth from what its traffic is.
+        for o in view.others where !o.isGhost && (o.position - b.position).length < 70 && !BotVariant.on("b") {
             var kind = PlanOther.Kind.neutral
             if keepClearRule(b, view, o) != nil { kind = .keepClear }
             if owesHerRoom(o, b, view) { kind = .owes }
@@ -216,7 +217,7 @@ extension BotBrain {
                 born += every
             }
         }
-        points = extended
+        points = BotVariant.on("b") ? Array(repeating: [], count: points.count) : extended
         let near = TurbulenceRibbons(shadow: wake.shadow, points: points, levels: wake.levels)
         return PlanContext(gate: gate, others: others, current: current, wind: b.windDirection, cleanWind: b.sailingWind.speed,
                            polarWind: b.polarWindSpeed, down: grooveAngle(.downwind, b, view), hull: view.boatClass.hull.length,
