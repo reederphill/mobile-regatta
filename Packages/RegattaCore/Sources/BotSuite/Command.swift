@@ -102,7 +102,9 @@ public struct BotSuiteOptions: Hashable, Sendable {
     /// The matrix to sail: the file's or the bundled one, with this command line's overrides.
     public func matrix() throws -> BotMatrix {
         var matrix = try matrixPath.map { try BotMatrix.load(from: URL(fileURLWithPath: $0)) } ?? BotMatrix.bundled()
-        if let seedCount { matrix.seeds = (1...seedCount).map(UInt64.init) }
+        // PROTOTYPE (#525): REGATTA_SEED_START moves the seed set (a second set to read the noise from).
+        let seedStart = ProcessInfo.processInfo.environment["REGATTA_SEED_START"].flatMap(Int.init) ?? 1
+        if let seedCount { matrix.seeds = (seedStart..<(seedStart + seedCount)).map(UInt64.init) }
         if !fleetSizes.isEmpty { matrix.fleetSizes = fleetSizes }
         if !tierMixes.isEmpty { matrix.tierMixes = tierMixes }
         if !profileMixes.isEmpty {
@@ -144,7 +146,12 @@ public enum BotSuite {
             let races = try inParallel(matrix.cells, jobs: jobs, BotRaceHarness.run)
             return BotSuiteReport(matrix: matrix, thresholds: thresholds, races: races)
         }
-        let sailed = try inParallel(matrix.cells, jobs: jobs, BotRaceHarness.runDiagnosed)
+        // PROTOTYPE (#525): REGATTA_ONLY=venue:conditions:seed:fleet sails that one race (for a trace).
+        var cells = matrix.cells
+        if let only = ProcessInfo.processInfo.environment["REGATTA_ONLY"] {
+            cells = cells.filter { "\($0.venue):\($0.conditions):\($0.seed):\($0.fleetSize)" == only }
+        }
+        let sailed = try inParallel(cells, jobs: jobs, BotRaceHarness.runDiagnosed)
         var report = BotSuiteReport(matrix: matrix, thresholds: thresholds, races: sailed.map(\.result))
         report.diagnose = DiagnoseSummary(sailed.map(\.diagnosis), seats: report.races.flatMap(\.seats))
         return report
