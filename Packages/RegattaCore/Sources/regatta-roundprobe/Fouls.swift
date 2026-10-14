@@ -104,6 +104,8 @@ struct Candidate: Codable, Sendable {
     var tacked = false // crossed the wind (tack or gybe) in the fork
     var inScan = false // a heading on her own tack within `clearingHeading`'s range at the branch
     var minRangeM = 0.0 // closest approach to the other boat in the window
+    /// Avoided, but the same pair is called in the 2 s after the window (call tick + 1 s to + 3 s): only put off.
+    var delayed = false
 }
 
 struct FoulRecord: Codable, Sendable {
@@ -214,7 +216,7 @@ enum FoulsProbe {
         var skills: [Double] = []
         var tiers: [String] = []
         let cautious = cell.cautiousSeats
-        let className = cell.boatClass ?? "default"
+        let className = cell.boatClass ?? "\(RaceFiles.defaults.boatClass.ref.id)@\(RaceFiles.defaults.boatClass.ref.version)"
         func geoBoat(_ s: State, _ prev: State?, _ r: Race) -> BoatGeo {
             let polar = r.boatClass.polar
             let twa = abs(s.relativeWind)
@@ -421,7 +423,10 @@ enum FoulsProbe {
         let avoiding = r.at5.filter(\.avoided)
         guard !avoiding.isEmpty else { return "d" }
         if r.brain.targetedThird > 0 { return "c" }
-        if avoiding.contains(where: { $0.inScan && !$0.tacked && Manoeuvre(rawValue: $0.name)?.isHeading == true }) { return "a" }
+        // Hold (her heading as it is, rudder centred) is a heading on her own tack the scan reaches as well.
+        if avoiding.contains(where: { !$0.tacked && ($0.name == "hold" || ($0.inScan && Manoeuvre(rawValue: $0.name)?.isHeading == true)) }) {
+            return "a"
+        }
         return "b"
     }
 
@@ -450,20 +455,22 @@ enum FoulsProbe {
             for c in cats { cells.append(fmt(Double(rs.filter { $0.category == c }.count) / n * 100, 0)) }
             let d = rs.filter { $0.category == "d" }
             cells.append(d.isEmpty ? "-" : "\(d.filter(\.avoidable10).count)/\(d.count)")
+            cells.append(fmt(Double(rs.filter { $0.at5.contains { $0.name == "hold" && $0.avoided } }.count) / n * 100, 0))
             cells.append(fmt(Double(rs.filter(\.cascade).count) / n * 100, 0))
             return cells
         }
-        let header = ["rule × phase × geometry", "n", "% all", "a%", "b%", "c%", "d%", "d→10s", "casc%"]
+        let header = ["rule × phase × geometry", "n", "% all", "a%", "b%", "c%", "d%", "d→10s", "hold%", "casc%"]
         var rows: [[String]] = [header, row("ALL", calls)]
         for phase in ["preStart", "firstBeat", "laterLegs", "lastLeg"] { rows.append(row("phase \(phase)", calls.filter { $0.phase == phase })) }
         var ruleCounts: [String: Int] = [:]
         for r in calls { ruleCounts[r.rule, default: 0] += 1 }
         let rules = ruleCounts.sorted { $0.value > $1.value }.map(\.key)
         for rule in rules { rows.append(row("rule \(rule)", calls.filter { $0.rule == rule })) }
+        rows.append(row("rule 31 (mark touch; not in n)", all.filter { $0.rule == "31" }))
         let geos = Set(calls.map(\.geometryClass)).sorted()
         for g in geos { rows.append(row("geo \(g)", calls.filter { $0.geometryClass == g })) }
         lines.append("")
-        lines.append("BY MARGIN (a = own-tack heading in the scan, b = a manoeuvre the evaluator can't produce, c = weighing a second boat, d = nothing at 5 s; d→10s = avoidable from 10 s)")
+        lines.append("BY MARGIN (a = own-tack heading in the scan, hold included, b = a manoeuvre the evaluator can't produce, c = weighing a second boat, d = nothing at 5 s; d→10s = avoidable from 10 s)")
         lines += table(rows)
         var cellRows: [[String]] = [header]
         var groups: [String: [FoulRecord]] = [:]
@@ -480,10 +487,19 @@ enum FoulsProbe {
             let a = ran.filter { $0.at5.contains { $0.name == m.rawValue && $0.avoided } }.count
             let ocs = ran.filter { $0.at5.contains { $0.name == m.rawValue && $0.avoided && $0.ocs } }.count
             let other = ran.filter { $0.at5.contains { $0.name == m.rawValue && $0.avoided && $0.anyCall } }.count
-            lines.append("  \(m.rawValue.padding(toLength: 10, withPad: " ", startingAt: 0)) \(fmt(Double(a) / Double(max(ran.count, 1)) * 100, 1))%  (of which OCS \(ocs), another call on her \(other))")
+            let late = ran.filter { $0.at5.contains { $0.name == m.rawValue && $0.avoided && $0.delayed } }.count
+            let ranges = ran.compactMap { r in r.at5.first { $0.name == m.rawValue && $0.avoided && $0.minRangeM >= 0 }?.minRangeM }.sorted()
+            let median = ranges.isEmpty ? -1 : ranges[ranges.count / 2]
+            let p10 = ranges.isEmpty ? -1 : ranges[ranges.count / 10]
+            lines.append("  \(m.rawValue.padding(toLength: 10, withPad: " ", startingAt: 0)) \(fmt(Double(a) / Double(max(ran.count, 1)) * 100, 1))%  (of which OCS \(ocs), another call on her \(other), same pair called 1-3 s after the window \(late); closest approach when avoided median \(fmt(median)) m, p10 \(fmt(p10)) m)")
         }
+        let base = ran.compactMap { $0.identity5?.minRangeM }.filter { $0 >= 0 }.sorted()
+        if !base.isEmpty { lines.append("  (recorded inputs: closest approach median \(fmt(base[base.count / 2])) m, p10 \(fmt(base[base.count / 10])) m)") }
         let aOnly40 = calls.filter { $0.category == "a" && !$0.at5.contains { $0.avoided && $0.inScan && ["luff10", "luff20", "bear10", "bear20"].contains($0.name) } }.count
         lines.append("(a) avoided only by a 40° luff/bear-away (still in the scan): \(aOnly40) of \(calls.filter { $0.category == "a" }.count)")
+        let cs = calls.filter { $0.category == "c" }
+        let cOwn = cs.filter { r in r.at5.contains { $0.avoided && !$0.tacked && ($0.name == "hold" || ($0.inScan && Manoeuvre(rawValue: $0.name)?.isHeading == true)) } }.count
+        lines.append("(c) is any call whose 5 s before had a decision with `ruleKeepClear` returning on a boat other than the one called, and some candidate avoids it: \(cs.count); of those an own-tack heading or hold also avoids \(cOwn), only ease/tack/gybe \(cs.count - cOwn)")
         lines.append("")
         lines.append("cascades: \(calls.filter(\.cascade).count) (on a boat already turning \(calls.filter(\.cascadeTurning).count), within 15 s of her last call \(calls.filter(\.cascadeRecent).count))")
         let pre = calls.filter { $0.phase == "preStart" }
@@ -552,11 +568,14 @@ struct Forker {
     /// Forks at the latest snapshot `leadIn` ticks or more before `branch`, replays every seat's recorded inputs to
     /// `branch`, then sails her by `m` (the others on their recorded inputs) to the call tick + 1 s.
     func run(_ m: Manoeuvre, branch: Int) -> Candidate? {
-        guard let snap = snapshots.last(where: { $0.tick <= branch - leadIn }) else { return nil }
+        // Near the sequence's start there may be less lead-in than asked: the earliest snapshot before the branch.
+        guard let snap = snapshots.last(where: { $0.tick <= branch - leadIn }) ?? snapshots.first(where: { $0.tick <= branch })
+        else { return nil }
         guard let race = try? Race(setup: setup, files: files, mode: .authoritative(windSeed: BotRaceHarness.windSeed(for: cell.seed))),
               (try? race.importSnapshot(snap)) != nil else { return nil }
         _ = race.drainEvents()
-        let end = callTick + Race.tickRate
+        let windowEnd = callTick + Race.tickRate
+        let end = callTick + 3 * Race.tickRate
         var cursor = inputs.partitioningIndex { $0.tick > snap.tick }
         var c = Candidate(name: m.rawValue, avoided: true, anyCall: false)
         var turnTarget = 0.0, turned = 0.0, lastHeading = 0.0, startTack = Tack.port
@@ -606,11 +625,19 @@ struct Forker {
                 }
             }
             race.step()
-            if race.tick > branch {
+            if race.tick > branch && race.tick <= windowEnd {
                 if victim >= 0 { minRange = min(minRange, (race.boats[victim].position - race.boats[seat].position).length) }
                 if race.boats[seat].tack != startTack && m != .recorded && race.tick > branch + 1 { c.tacked = true }
             }
             for e in race.drainEvents() where race.tick > branch {
+                if race.tick > windowEnd {
+                    switch e.kind {
+                    case .ruleCall(let call) where call.offender == seat && !isMark && call.victim == victim: c.delayed = c.avoided
+                    case .markTouch(let s, _) where s == seat && isMark: c.delayed = c.avoided
+                    default: break
+                    }
+                    continue
+                }
                 switch e.kind {
                 case .ruleCall(let call) where call.offender == seat:
                     c.anyCall = true
