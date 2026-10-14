@@ -275,8 +275,8 @@ import Glibc
 ///    it, in an incident whose obligation is rule 21.2 the 16.1 test looks back to where the right-of-way boat's turn
 ///    began (`EscapeSimulation.penaltyRoomVerdict`): rule 16.1 on her, the boat taking the penalty exonerated, when the
 ///    course she held before the turn would have stayed clear (rule 44.2's "well clear", Case 149), and the umpire
-///    records 242 ticks of each boat for it in place of 62 (the track isn't hashed). Not the default: a race naming
-///    fleet-rules@6 or older sails as on 40, bit for bit, and the golden digest is 40's.
+///    records 242 ticks of each boat for it in place of 62 (the track isn't hashed). Races sail fleet-rules@7 by
+///    default (#517); a race naming fleet-rules@6 or older sails as on 40, bit for bit, and the golden digest is 40's.
 public let simulationRevision = 41
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`

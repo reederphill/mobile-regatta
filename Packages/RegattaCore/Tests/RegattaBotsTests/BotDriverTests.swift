@@ -42,7 +42,7 @@ let fiveRulesPenalty = try! RulesConfigFile.bundled(id: "fleet-rules", version: 
 
 extension Trait where Self == RulesPin {
     /// fleet-rules@6 (#487): a penalty turn is one tack and one gybe the same way, which the bots sail as #488 has
-    /// them. The default since #490: the pin keeps the test on @6 whatever the default becomes.
+    /// them. The default from #490 to #517: the pin keeps the test on @6 whatever the default becomes.
     static var onSixRules: Self { RulesPin(version: 6) }
     /// fleet-rules@5, the default until #490: a penalty turn is a full circle, started 30° in by its start deadline
     /// (20 s) and completed by its complete deadline (40 s). A test of the bots' full-circle turns names it: races

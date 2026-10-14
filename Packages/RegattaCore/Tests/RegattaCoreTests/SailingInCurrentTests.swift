@@ -192,7 +192,7 @@ func placedRace(seats: Int = 2, current: CurrentField, seed: UInt64 = 3, wind: (
                 #expect((moved - boat.velocityOverGround).length < 1e-9, "seat \(seat)")
             }
         }
-        // She turned (fleet-rules@6, the default since #490, keeps no turned angle: the heading says it).
+        // She turned (fleet-rules@7, the default since #517, keeps no turned angle: the heading says it).
         #expect(abs(wrapAngle(race.boats[2].heading - turningFrom)) > deg2rad(10))
     }
 

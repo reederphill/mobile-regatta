@@ -90,4 +90,40 @@ import Testing
         #expect(six.outcome.exonerated.isEmpty)
         #expect(seven == six)
     }
+
+    /// On fleet-rules@7 the umpire holds more of a pair's track than the 62 ticks every call but rule 21.2's is judged
+    /// on, and rule 17 reads the track's start: the leeward boat's proper-course path is sailed from where her run
+    /// above proper course began, or from the track's first tick. A leeward boat held to her proper course sails 10°
+    /// above it from 6 m off a windward boat who bears away 10° at her, and the call comes 5.5 s on. Over the 62 ticks
+    /// the windward boat would have hit the proper-course path too, and it is rule 11 on her; over the whole track
+    /// that path starts 5.5 s back and falls away clear of her, and it would be rule 17 on the leeward boat. The race
+    /// calls rule 11, as on fleet-rules@6, on the same tick.
+    @Test func otherRulesReadTheSixtyTwoTickWindowOnRules7() throws {
+        func converge(_ version: Int) throws -> (Race, EscapeFixture.Outcome) {
+            let race = try Rule17Tests.race(rules: version)
+            try Rule17Fixture.place(race, leewardAbove: deg2rad(10), windwardBelow: deg2rad(10), gap: 6)
+            Rule17Fixture.record(race)
+            return (race, try #require(EscapeFixture.sailToCall(race, within: 12 * Race.tickRate)))
+        }
+        let (race, seven) = try converge(7)
+        let windowTicks = race.rules.incidents.escape.windowTicks
+        let whole = try #require(race.umpire?.track(0, 1))
+        let window = try #require(race.umpire?.track(0, 1, last: windowTicks))
+        #expect(windowTicks == 62 && window.count == 62 && whole.count > 2 * windowTicks)
+        let obligation = Verdict(rule: .windwardLeeward, offender: 1, victim: 0)
+        func verdict(on track: PairTrack) throws -> Verdict {
+            try #require(EscapeSimulation(track: track, rules: race.rules, boatClass: race.boatClass,
+                                          properCourse: Rule17Fixture.record(of: race)))
+                .verdict(obligation, course: race.course)
+        }
+        #expect(try verdict(on: whole) == Verdict(rule: .properCourse, offender: 0, victim: 1, exonerated: [1]))
+        #expect(try verdict(on: window) == obligation)
+        #expect(seven.call.rule == .windwardLeeward && seven.call.offender == 1 && seven.call.victim == 0)
+        #expect(seven.exonerated.isEmpty)
+        #expect(race.boats[1].penaltyTurnsOwed == 1 && race.boats[0].penaltyTurnsOwed == 0)
+
+        let (old, six) = try converge(6)
+        #expect(old.umpire?.track(0, 1)?.count == 62)
+        #expect(six == seven)
+    }
 }
