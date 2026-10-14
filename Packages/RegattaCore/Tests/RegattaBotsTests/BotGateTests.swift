@@ -723,4 +723,46 @@ import RegattaCore
             #expect(clean.hand.brain.plannedTack == tack, "\(tack): gybed in clean air")
         }
     }
+
+    /// #525 fix round 1: inside `gateStraightRange` of the mark she holds, a boat that comes onto her line does not
+    /// flip her pick (it would force a gybe at the line); she prices the traffic she last saw. Further out the same
+    /// boat does flip it.
+    @Test func trafficDoesNotFlipHerPickCloseIn() throws {
+        // A pose inside `gateStraightRange` of a mark she holds on the costs alone, and a boat on the line to it that
+        // makes it dearer than the other by more than the repick margin.
+        var found: (scene: Scene, left: Bool, boat: Vec2)?
+        search: for up in stride(from: 10.0, through: 26.0, by: 2) {
+            for off in stride(from: -20.0, through: 20.0, by: 1) {
+                var scene = try Self.scene(tack: .starboard) { $0.gate.centre + $0.outwards(left: true) * off + $0.up * up }
+                let costs = try scene.costs()
+                for left in [true, false] {
+                    let mine = left ? costs.left : costs.right, other = left ? costs.right : costs.left
+                    let me = scene.boat.position, entry = scene.bearings.entry(left: left)
+                    guard (entry - me).length < BotBrain.gateStraightRange - 2,
+                          mine <= other + BotBrain.gateRepickMetres - 2 else { continue }
+                    let boat = me + (entry - me) * 0.8
+                    guard scene.bearings.above(boat) > 0 else { continue }
+                    try Self.park(&scene, at: boat)
+                    let crowded = try scene.costs()
+                    if (left ? crowded.left : crowded.right) > (left ? crowded.right : crowded.left) + BotBrain.gateRepickMetres + 2 {
+                        found = (try Self.scene(tack: .starboard) { $0.gate.centre + $0.outwards(left: true) * off + $0.up * up },
+                                 left, boat)
+                        break search
+                    }
+                    try Self.park(&scene, at: me + scene.bearings.up * 300)
+                }
+            }
+        }
+        var (scene, left, boat) = try #require(found, "no pose inside gateStraightRange of a held mark a boat can crowd")
+        _ = scene.aim()
+        let leg = try #require(scene.hand.brain.gatePick).leg
+        scene.hand.brain.gatePick = (leg, left)
+        let held = scene.hand.brain
+        _ = scene.aim()
+        try #require(scene.hand.brain.gatePick?.left == left, "she holds the mark on the costs alone")
+        try Self.park(&scene, at: boat)
+        scene.hand.brain = held
+        _ = scene.aim()
+        #expect(scene.hand.brain.gatePick?.left == left, "a boat on her line flipped her pick inside gateStraightRange")
+    }
 }

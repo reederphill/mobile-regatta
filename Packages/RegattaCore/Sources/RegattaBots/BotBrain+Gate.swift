@@ -271,7 +271,15 @@ extension BotBrain {
         let held = gatePick.flatMap { $0.leg == b.legIndex ? $0.left : nil }
         // The traffic she prices is the boats' of the last `gateTrafficSeconds`, not of this tick: a boat that sails on
         // through the gate leaves a crowded mark dear a while, so her pick does not flip back and forth with the pack.
-        let traffic = smoothedGateTraffic(l.traffic, r.traffic, b, view)
+        // Inside `gateStraightRange` of the mark she holds it is what she last priced: traffic no longer flips her pick
+        // there (#525 fix round 1), where a change forces a gybe at the line; the costs still repick as on main.
+        let heldDistance = held.map { $0 ? l.distance : r.distance } ?? .infinity
+        let traffic: (left: Double, right: Double)
+        if heldDistance < Self.gateStraightRange, let last = gateTraffic, last.leg == b.legIndex {
+            traffic = (last.left, last.right)
+        } else {
+            traffic = smoothedGateTraffic(l.traffic, r.traffic, b, view)
+        }
         let picksLeft = Self.picksLeftGateMark(held: held, left: l.cost - l.traffic + traffic.left,
                                                right: r.cost - r.traffic + traffic.right)
         gatePick = (b.legIndex, picksLeft)
