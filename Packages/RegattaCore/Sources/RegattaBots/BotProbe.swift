@@ -33,5 +33,26 @@ public struct BotProbeTrace: Sendable, Equatable {
     public var wantsOtherTack = false
     public var cantTapWhy = ""
 
+    // PROBE (#527): the fouls probe's view of each decision. Write-only side channels.
+    /// Counts `sail` decisions, so a reader can tell a fresh decision from a held one.
+    public var decisions = 0
+    /// The heading she wanted (`desired`) and the one she steered for, compass radians; equal when nothing evaded.
+    public var desiredHeading = 0.0
+    public var chosenHeading = 0.0
+    /// Whether this decision reached the evasion step at all (not penalty, tapping or a hand turn).
+    public var evaluated = false
+    /// The keep-clear lookahead she used, seconds.
+    public var lookahead = 0.0
+    /// Seats `isAboutToHit` fired on (any boat within 30 m whose straight-line approach on `desired` is inside her
+    /// keep-clear distance), whatever the rules.
+    public var aboutToHit: [Int] = []
+    /// The seat `ruleKeepClear` returned on (first boat wins), or -1.
+    public var keepClearTarget = -1
+    /// Seats she owes keep-clear to, about to hit, but misjudged (`misjudges`).
+    public var misjudgedSeats: [Int] = []
+    /// Which keep-clear path she took: "rule" (`ruleKeepClear`), "start" (`startKeepClear`), "line" (the starboard
+    /// keep-clear crossed the line early and fell back to `startKeepClear`), "lineSailOn" (that and no fallback).
+    public var keepClearPath = ""
+
     public init() {}
 }

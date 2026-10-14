@@ -314,6 +314,12 @@ struct BotBrain: Sendable {
         probe.cantTapWhy = ""
         probe.handTurning = false
         probe.handTurnFlubbed = false
+        probe.decisions += 1
+        probe.evaluated = false
+        probe.aboutToHit = []
+        probe.keepClearTarget = -1
+        probe.misjudgedSeats = []
+        probe.keepClearPath = ""
         if let input = penaltyInput(boat, view) {
             handTurn = nil
             probe.branch = "penalty"
@@ -347,7 +353,14 @@ struct BotBrain: Sendable {
         // Her own hand is turning her through the tack or gybe (#459): she turns it on until it is over.
         if byHand, let turn = handTurn, let decision = handTurning(turn, aim, boat, view) { return decision }
         let desired = aim.tack == boat.tack ? aim.heading(wind: boat.windDirection) : boat.heading
+        // PROBE (#527): what the keep-clear test saw this decision. Read-only replicas of `keepClear`'s steps.
+        probe.evaluated = true
+        probe.desiredHeading = desired
+        probe.chosenHeading = desired
+        probe.lookahead = keepClearLookahead
+        (probe.aboutToHit, probe.keepClearTarget, probe.misjudgedSeats, probe.keepClearPath) = probeKeepClear(boat, view, desired: desired)
         if let evasion = evasion(boat, view, desired: desired) {
+            probe.chosenHeading = evasion.heading
             // PROBE: which of the three turned her off her plan.
             if let kept = keepClear(boat, view, desired: desired) {
                 probe.evasion = "keepClear"
@@ -1502,6 +1515,44 @@ struct BotBrain: Sendable {
         let within = isStartLuff(b, view, kept.heading) ? Self.luffLineSeconds : nil
         guard crossesEarly(b, view, heading: kept.heading, within: within) else { return kept }
         return startKeepClear(b, view, desired: desired, lookahead: lookahead).map { Evasion(heading: $0) } ?? kept
+    }
+
+    /// PROBE (#527): `keepClear`'s steps replayed without effect: the seats `isAboutToHit` fires on, the seat
+    /// `ruleKeepClear` returns on (first boat wins; -1 for none), the seats she misjudges, and the path taken.
+    func probeKeepClear(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double) -> ([Int], Int, [Int], String) {
+        let lookahead = keepClearLookahead
+        var hits: [Int] = [], misjudgedSeats: [Int] = [], target = -1
+        for other in view.others where !other.isGhost {
+            let hit = isAboutToHit(other, b, view, desired: desired, lookahead: lookahead)
+            if hit { hits.append(other.seat) }
+            guard hit else { continue }
+            let rule: RacingRule?
+            if b.status == .racing {
+                rule = keepClearRule(b, view, other)
+            } else if let right = other.rightOfWay, right.keepClear == view.seat {
+                rule = right.rule
+            } else {
+                rule = nil
+            }
+            guard let rule else { continue }
+            if misjudges(other, rule) { misjudgedSeats.append(other.seat) } else if target < 0 { target = other.seat }
+        }
+        var path = ""
+        if b.status == .racing {
+            path = target >= 0 ? "rule" : ""
+        } else if b.status == .prestart || b.status == .ocs {
+            if b.tack == .port || b.status == .ocs || keepsClearOfEveryBoat {
+                path = startKeepClear(b, view, desired: desired, lookahead: lookahead) != nil ? "start" : ""
+            } else if let kept = ruleKeepClear(b, view, desired: desired, lookahead: lookahead) {
+                let within = isStartLuff(b, view, kept.heading) ? Self.luffLineSeconds : nil
+                if crossesEarly(b, view, heading: kept.heading, within: within) {
+                    path = startKeepClear(b, view, desired: desired, lookahead: lookahead) != nil ? "line" : "lineKept"
+                } else {
+                    path = "rule"
+                }
+            }
+        }
+        return (hits, target, misjudgedSeats, path)
     }
 
     /// Seconds ahead she looks for a collision she must keep clear of: further, the more skilled she is

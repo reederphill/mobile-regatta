@@ -49,7 +49,7 @@ public enum BotRaceHarness {
 
     /// The files `setup`, `cell`'s (`raceSetup(for:)`), names: the bundled ones, and the hand-steered copy of the class
     /// for a cell sailed with the autohelm off.
-    static func raceFiles(for cell: BotRaceCell, setup: RaceSetup) throws -> RaceFiles {
+    public static func raceFiles(for cell: BotRaceCell, setup: RaceSetup) throws -> RaceFiles {
         guard cell.autohelmOff == true else { return try RaceFiles(resolving: setup) }
         var catalog = RaceFileCatalog()
         try catalog.boatClasses.add(handSteered(classFile(for: cell)))
@@ -107,7 +107,8 @@ public enum BotRaceHarness {
     /// (`BotDriver(seat:raceSeed:skill:)`, as the app's practice rivals do, #235) in place of the cell's draw; their
     /// metrics still give the cell's tier for the seat.
     public static func run(_ cell: BotRaceCell, cautiousSeats: Set<Int>, seatSkills: [Int: Double] = [:],
-                           events: (Race, [RaceEvent]) -> Void = { _, _ in }) throws -> RaceResult {
+                           events: (Race, [RaceEvent]) -> Void = { _, _ in },
+                           observe: (Race, [RaceEvent], SeatControllers) -> Void = { _, _, _ in }) throws -> RaceResult {
         let setup = try raceSetup(for: cell)
         // Assembled as the server assembles a race (#81): the files the setup names, the race of record.
         let race = try Race(setup: setup, files: raceFiles(for: cell, setup: setup),
@@ -140,6 +141,7 @@ public enum BotRaceHarness {
             tickMs.append(milliseconds(start.duration(to: clock.now)))
             let drained = race.drainEvents()
             events(race, drained)
+            observe(race, drained, controllers) // PROBE (#527)
             tally.record(race, events: drained)
             hunts?.record(race, events: drained, controllers: controllers)
             crosses?.record(race)

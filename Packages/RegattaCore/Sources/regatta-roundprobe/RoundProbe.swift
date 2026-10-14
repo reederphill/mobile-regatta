@@ -146,6 +146,7 @@ func fmt(_ x: Double, _ d: Int = 1) -> String { String(format: "%.\(d)f", x) }
 @main
 struct Main {
     static func main() throws {
+        if CommandLine.arguments.contains("--fouls") { try FoulsProbe.run(); return }
         let o = parse()
         let matrix = BotMatrix(seeds: (0..<UInt64(o.seeds)).map { o.seedStart + $0 }, venues: o.venues, conditions: o.conditions,
                                conditionsByVenue: o.byVenue, fleetSizes: [o.fleetSize], tierMixes: [o.tierMix], profileMixes: [.live], laps: o.laps,

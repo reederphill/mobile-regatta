@@ -221,7 +221,7 @@ public enum BotSuite {
 
     /// `transform` over `items`, up to `jobs` at once, the results in `items`' order. Each worker takes the next index
     /// in turn; the first error by index is thrown, as a serial map would throw it.
-    static func inParallel<Item: Sendable, Result: Sendable>(_ items: [Item], jobs: Int,
+    public static func inParallel<Item: Sendable, Result: Sendable>(_ items: [Item], jobs: Int,
                                                              _ transform: @Sendable (Item) throws -> Result) throws -> [Result] {
         let workers = min(max(jobs, 1), items.count)
         guard workers > 1 else { return try items.map(transform) }
