@@ -294,6 +294,53 @@ import RegattaCore
         }
     }
 
+    /// #525 fix round 3, the sailed version of `farMarkSheGybesAboveTheLineNotAtTheMark`: sent to her mark on the gybe
+    /// that does not round it, just outside it and `up` metres above the line, the pick held by a boat stopped above
+    /// the other mark's point, and sailed by her hand on the default class, she is on the rounding gybe when she
+    /// crosses the line (`gateSetUp`), and keeps her pick. On main she crossed on the other gybe and gybed round the
+    /// mark below it.
+    ///
+    /// A known issue on 7814c4b0 (fix round 3, `.brief/525-1-fix3-note.md`): from 30 and 40 m up she sails across above
+    /// her point on a reach of about 115° and plans the rounding gybe only once her point bears past dead downwind,
+    /// some 19 m up; by hand from that reach the gybe takes over 4 s, and she crosses the line on the other gybe with
+    /// the turn still on. The deep roundings of the suite's tail have this shape. Fix the bot and this reports the
+    /// known issue as not recorded: then drop `withKnownIssue`.
+    @Test func farMarkSailedSheCrossesOnTheRoundingGybe() throws {
+        try withKnownIssue("#525: the set-up gybe by hand starts too low to finish above the line") {
+            try sailFarMarkFromAbove()
+        }
+    }
+
+    private func sailFarMarkFromAbove() throws {
+        for tack in [Tack.starboard, .port] {
+            for up in [30.0, 40.0] {
+                let name = "\(tack), \(up) m up"
+                let place: (Bearings) -> Vec2 = {
+                    $0.gate.centre + $0.outwards(left: !$0.rounded(on: tack)) * 28 + $0.up * up
+                }
+                var scene = try Self.scene(tack: tack, heading: { ($0.entry(left: !$0.rounded(on: tack)) - place($0)).bearing },
+                                           pose: place)
+                let b = scene.bearings
+                let mark = !b.rounded(on: tack)
+                var snapshot = scene.race.exportSnapshot()
+                snapshot.seats[1].boat.position = b.entry(left: !mark) + b.up * 6
+                snapshot.seats[1].boat.heading = b.wind
+                snapshot.seats[1].boat.speed = 0
+                try scene.race.importSnapshot(snapshot)
+                scene.hand.brain.gatePick = (scene.boat.legIndex, mark)
+                let ticks = Self.track(&scene, seconds: 30)
+                let crossing = try #require(ticks.firstIndex { $0.stage > 0 || $0.leg != 2 }, "\(name): never crossed the line")
+                let before = ticks[..<crossing]
+                #expect(before.allSatisfy { $0.pick == mark }, "\(name): changed her pick")
+                let at = ticks[crossing]
+                #expect(at.boom != (tack == .starboard ? BoomSide.port : .starboard),
+                        "\(name): crossed the line on the gybe that does not round her mark, \(b.above(at.position)) m")
+                let gybes = Self.gybes(Array(before), from: tack == .starboard ? .port : .starboard)
+                #expect(gybes.count == 1, "\(name): gybes before the line at \(gybes)")
+            }
+        }
+    }
+
     /// #525 fix round 2: straight for her point on the gybe that rounds it, with the point a few degrees by the lee
     /// (inside `gateLee`), she sails as close to dead downwind as she does (`gateMaxAngle`), not as far the other side
     /// of it: that mirror sailed her away from her point, outside it, till a gybe at the line. It fails on main.
