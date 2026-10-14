@@ -1,3 +1,4 @@
+import Foundation
 import RegattaCore
 
 // The leg to the leeward gate before she is through it (#518, from #510's prototype, variants P and R). On main she
@@ -227,11 +228,15 @@ extension BotBrain {
         let l = gateOption(left: true, gate, b, view), r = gateOption(left: false, gate, b, view)
         if BotVariant.on("P") {
             gatePlanFidelity(b, view)
-            let plan = gatePlanChoice(b, view, gate: gate, l: l, r: r)
+            if let plan = gatePlanChoice(b, view, gate: gate, l: l, r: r) {
             gatePick = (b.legIndex, plan.left)
             let mine = plan.left ? l : r
             let down = grooveAngle(.downwind, b, view)
             let deeper = mine.offWind > down - Self.gateDeeperMargin
+            if BotVariant.traces {
+                let line = "PA seat=\(view.seat) t=\(String(format: "%.1f", view.time)) \(plan.name) dist=\(String(format: "%.0f", mine.distance)) off=\(String(format: "%.0f", mine.offWind * 180 / .pi)) down=\(String(format: "%.0f", down * 180 / .pi)) onOwn=\(mine.onOwn) deeper=\(deeper) needs=\(mine.needs == .port ? "P" : "S") hd=\(String(format: "%.0f", b.heading * 180 / .pi)) wind=\(String(format: "%.0f", b.windDirection * 180 / .pi)) canTap=\(canTap(b, view)) tapClear=\(tapIsClear(b, view)) markClear=\(isClearOfMarks(b, view, lengths: Self.tapMarkClearance)) lastTap=\(String(format: "%.1f", view.time - lastTapTime)) spd=\(String(format: "%.1f", b.speed))\n"
+                FileHandle.standardError.write(line.data(using: .utf8)!)
+            }
             switch plan.gybe {
             case .now:
                 plannedTack = b.tack.other
@@ -253,6 +258,7 @@ extension BotBrain {
             isNearHerMark = true
             isAtHerGate = mine.distance < PlaningTable.gateRange
             return downwindAim(b, view, aim: Aim(angle: min(mine.offWind, Self.gateMaxAngle), tack: b.tack, tolerance: Self.reachTolerance), nearMark: true)
+            }
         }
         let held = gatePick.flatMap { $0.leg == b.legIndex ? $0.left : nil }
         let picksLeft = Self.picksLeftGateMark(held: held, left: l.cost, right: r.cost)

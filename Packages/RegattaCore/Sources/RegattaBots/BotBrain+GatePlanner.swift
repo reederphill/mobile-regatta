@@ -22,6 +22,8 @@ extension BotVariant {
     static let planMarkHysteresis = number("REGATTA_PLAN_MARK_HYST", 2.5)
     static let planNoneGroove = number("REGATTA_PLAN_NONE", 0) != 0
     static let planMissPenalty = number("REGATTA_PLAN_MISS", 40)
+    /// Variant m: main's own pick stands unless a candidate beats it by this many metres.
+    static let planAnchor = number("REGATTA_PLAN_ANCHOR", 25)
     static let planFD = ProcessInfo.processInfo.environment["REGATTA_PLAN_FD"] != nil
 }
 
@@ -86,7 +88,7 @@ extension BotBrain {
     }
 
     /// The plan for the leg to her gate: the candidate to sail, or the held one.
-    mutating func gatePlanChoice(_ b: SeatView.OwnBoat, _ view: SeatView, gate: Gate, l: GateOption, r: GateOption) -> GatePlanChoice {
+    mutating func gatePlanChoice(_ b: SeatView.OwnBoat, _ view: SeatView, gate: Gate, l: GateOption, r: GateOption) -> GatePlanChoice? {
         if gatePlan.leg != b.legIndex { gatePlan = GatePlanState(); gatePlan.leg = b.legIndex }
         gatePlan.decisions += 1
         let tier = planTier
@@ -96,16 +98,19 @@ extension BotBrain {
             return held.gybe == .now && recentGybe ? GatePlanChoice(left: held.left, gybe: .layline, inside: held.inside) : held
         }
         let ctx = planContext(b, view, gate: gate, horizon: tier.horizon)
-        // Candidates, the cheaper mark by main's pick first; inside only where a boat is between her and the point.
-        let mainLeft = l.cost <= r.cost
+        // Candidates, main's pick first; inside only where a boat is between her and the point.
+        let anchored = BotVariant.on("m")
+        let heldMain = gatePick.flatMap { $0.leg == b.legIndex ? $0.left : nil }
+        let mainLeft = anchored ? Self.picksLeftGateMark(held: heldMain, left: l.cost, right: r.cost) : l.cost <= r.cost
         func mainMode(_ o: GateOption) -> GatePlanGybe {
             if b.tack == o.needs { return !o.onOwn || o.farDeep ? .now : .none }
-            return o.onOwn ? .layline : .now
+            return anchored ? .layline : (o.onOwn ? .layline : .now)
         }
+        let mainChoice = GatePlanChoice(left: mainLeft, gybe: mainMode(mainLeft ? l : r), inside: false)
         var list: [GatePlanChoice] = []
         func add(_ left: Bool, _ g: GatePlanGybe, _ inside: Bool) {
             let c = GatePlanChoice(left: left, gybe: g, inside: inside)
-            if !(g == .now && recentGybe), !list.contains(c) { list.append(c) }
+            if !(g == .now && recentGybe && !(anchored && c == mainChoice)), !list.contains(c) { list.append(c) }
         }
         let marks = [mainLeft, !mainLeft]
         let main = [mainMode(mainLeft ? l : r), mainMode(mainLeft ? r : l)]
@@ -129,13 +134,20 @@ extension BotBrain {
         var best = scored[0]
         for s in scored.dropFirst() where s.score > best.score { best = s }
         var chosen = best
-        if let h = held, let hs = scored.first(where: { $0.choice == h }) {
+        if anchored, let mainScored = scored.first(where: { $0.choice == mainChoice }) {
+            // Main's pick stands unless another beats it by the anchor; a held override stays while it still beats main by half.
+            var ref = mainScored
+            if let h = held, h != mainChoice, let hs = scored.first(where: { $0.choice == h }), hs.score >= mainScored.score + BotVariant.planAnchor / 2 { ref = hs }
+            let margin = ref.choice == mainChoice ? BotVariant.planAnchor
+                : (best.choice.left == ref.choice.left ? Self.gateRepickMetres : Self.gateRepickMetres * BotVariant.planMarkHysteresis)
+            chosen = best.score >= ref.score + margin ? best : ref
+        } else if let h = held, let hs = scored.first(where: { $0.choice == h }) {
             // Another mark must beat the held one by more than another way to the same mark.
             let margin = best.choice.left == h.left ? Self.gateRepickMetres : Self.gateRepickMetres * BotVariant.planMarkHysteresis
             if best.score < hs.score + margin { chosen = hs }
         }
         if BotVariant.traces {
-            let line = "PT t=\(String(format: "%.1f", view.time)) seat=\(view.seat) above=\(String(format: "%.0f", view.course.upwind.dot(b.position - gate.centre))) right=\(String(format: "%.0f", view.course.upwind.rightPerp.dot(b.position - gate.centre))) v=\(String(format: "%.1f", b.speed)) tack=\(b.tack == .port ? "P" : "S") " +
+            let line = "PT t=\(String(format: "%.1f", view.time)) seat=\(view.seat) above=\(String(format: "%.0f", view.course.upwind.dot(b.position - gate.centre))) right=\(String(format: "%.0f", view.course.upwind.rightPerp.dot(b.position - gate.centre))) ml=\(String(format: "%.0f", view.course.upwind.rightPerp.dot(gate.left.position - gate.centre))) mr=\(String(format: "%.0f", view.course.upwind.rightPerp.dot(gate.right.position - gate.centre))) rad=\(String(format: "%.1f", gate.left.radius)) hd=\(String(format: "%.0f", b.heading * 180 / .pi)) v=\(String(format: "%.1f", b.speed)) tack=\(b.tack == .port ? "P" : "S") " +
                 scored.map { "\($0.choice.name):\(String(format: "%.0f", $0.score))" }.joined(separator: " ") + " -> \(chosen.choice.name)\n"
             FileHandle.standardError.write(line.data(using: .utf8)!)
         }
@@ -144,6 +156,11 @@ extension BotBrain {
             gatePlan.track = chosen.path
             gatePlan.trackTime = view.time
             gatePlan.trackLogged = []
+        }
+        if anchored, chosen.choice == mainChoice {
+            gatePlan.choice = nil
+            gatePlan.gapLeg = nil
+            return nil
         }
         gatePlan.choice = chosen.choice
         gatePlan.gapLeg = chosen.choice.inside ? b.legIndex : nil
@@ -294,9 +311,13 @@ extension BotBrain {
                 }
                 var sa = state.boomSide.sailingAngle(relativeWind: wrapAngle(ctx.wind - heading))
                 var tap = false
-                if sa < 0 {
+                if BotVariant.on("f"), c.gybe != .now || gybed, c.gybe == .none || toTarget.length < Self.gateStraightRange,
+                   (sa > 0 && sa >= ctx.down - Self.gateDeeperMargin) || abs(sa) >= .pi - Self.gateLee {
+                    // As `gateAim` sails it: straight for the point on her own gybe, deeper than her groove by the lee no further than gateMaxAngle.
+                    sa = min(abs(sa), Self.gateMaxAngle)
+                } else if sa < 0 {
                     // The point is on the other gybe.
-                    if c.gybe == .layline, !gybed, abs(sa) <= ctx.down + deg2rad(2), toTarget.length > 8 { tap = true }
+                    if (c.gybe == .layline || (c.gybe == .none && BotVariant.on("f"))), !gybed, abs(sa) <= ctx.down + deg2rad(2), toTarget.length > 8 { tap = true }
                     else if c.gybe == .layline, !gybed, abs(sa) > .pi - deg2rad(4) { sa = ctx.down }
                     else { sa = ctx.down }
                 } else if sa > ctx.down {
