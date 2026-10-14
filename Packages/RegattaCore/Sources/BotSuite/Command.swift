@@ -28,6 +28,16 @@ public struct BotSuiteOptions: Hashable, Sendable {
     /// don't finish and how wide they round the marks (`RaceObserver`), and add the tables to the report
     /// (`BotSuiteReport.diagnose`). The races, and the rest of the report, are the same with it or without.
     public var diagnose = false
+    /// `--scenario pack` (#525): sail the pack scenario (`PackScenario`) instead of the matrix. `--fleet-size` (the pack
+    /// size), `--tier-mix`, `--seeds`, `--jobs`, `--json`, `--autohelm` and `--boat-class` apply to it as they do to the
+    /// matrix; `--matrix`, `--thresholds`, `--profile-mix`, `--laps` and `--diagnose` do not.
+    public var scenario: String?
+    /// `--pack-current with|without|both`: the venues the pack scenario sails; nil for both.
+    public var packCurrent: PackCurrent?
+    /// `--pack-offset <hull lengths>`: where the bunch lies across the gate; all of `PackScenario.defaultOffsets` when empty.
+    public var packOffsets: [Double] = []
+    /// `--pack-above <metres>`: how far above the gate's line the bunch lies; nil for `PackScenario.defaultAbove`.
+    public var packAbove: Double?
     public var help = false
 
     public init() {}
@@ -51,6 +61,15 @@ public struct BotSuiteOptions: Hashable, Sendable {
                                  the marks; the races and the rest of the report are the same with it or without
           --jobs <n>             races sailed at once (default: the performance cores; 1 = one after another).
                                  The report is the same for any n but for the tick times
+          --scenario <name>      sail a scenario instead of the matrix. pack: 4-6 boats in a bunch above the leeward
+                                 gate, sailed through it, and measured (no thresholds; exits 0 on a sailed run).
+                                 Uses --fleet-size (pack size, default 4, 5 and 6), --tier-mix (default national),
+                                 --seeds (default 16), --jobs, --json, --autohelm and --boat-class; takes none of
+                                 --matrix, --thresholds, --profile-mix, --laps or --diagnose
+          --pack-current <c>     with the pack scenario: with, without or both (default) a current
+          --pack-offset <n>      with the pack scenario: the bunch's centre this many hull lengths across the gate from
+                                 its middle (repeatable; default -6, 0 and 6; the gate is 10 hull lengths wide)
+          --pack-above <m>       with the pack scenario: metres above the gate's line the bunch's centre lies (default 100)
         Exits 1 when the run misses the thresholds, 2 on a usage or setup error.
         """
 
@@ -91,12 +110,51 @@ public struct BotSuiteOptions: Hashable, Sendable {
             case "--json": jsonPath = try value(flag)
             case "--jobs": jobs = try number(flag)
             case "--diagnose": diagnose = true
+            case "--scenario": scenario = try value(flag)
+            case "--pack-current":
+                let text = try value(flag)
+                guard let current = PackCurrent(rawValue: text) else {
+                    throw BotSuiteError.usage("--pack-current: with, without or both, not \(text)")
+                }
+                packCurrent = current
+            case "--pack-offset":
+                let text = try value(flag)
+                guard let offset = Double(text), offset.isFinite else { throw BotSuiteError.usage("--pack-offset: not a number: \(text)") }
+                packOffsets.append(offset)
+            case "--pack-above":
+                let text = try value(flag)
+                guard let above = Double(text), above.isFinite, above > 0 else {
+                    throw BotSuiteError.usage("--pack-above: not a positive number: \(text)")
+                }
+                packAbove = above
             case "-h", "--help": help = true
             default: throw BotSuiteError.usage("unknown argument: \(flag)")
             }
         }
         if let seedCount, seedCount < 1 { throw BotSuiteError.usage("--seeds must be at least 1") }
         if let jobs, jobs < 1 { throw BotSuiteError.usage("--jobs must be at least 1") }
+        try validateScenario()
+    }
+
+    /// `--scenario`'s own checks: a scenario it knows, with none of the matrix's flags it has no use for, and the
+    /// scenario's flags only with it.
+    private func validateScenario() throws {
+        guard let scenario else {
+            if packCurrent != nil || !packOffsets.isEmpty || packAbove != nil {
+                throw BotSuiteError.usage("--pack-current, --pack-offset and --pack-above need --scenario pack")
+            }
+            return
+        }
+        guard scenario == "pack" else { throw BotSuiteError.usage("--scenario: unknown scenario \(scenario) (pack)") }
+        let refused = [("--matrix", matrixPath != nil), ("--thresholds", thresholdsPath != nil),
+                       ("--profile-mix", !profileMixes.isEmpty), ("--laps", laps != nil), ("--diagnose", diagnose)]
+            .filter(\.1).map(\.0)
+        if !refused.isEmpty {
+            throw BotSuiteError.usage("--scenario pack takes none of \(refused.joined(separator: ", ")): it sails no matrix")
+        }
+        if let size = fleetSizes.first(where: { $0 < PackScenario.packNeighbours + 1 }) {
+            throw BotSuiteError.usage("--fleet-size \(size): a pack needs at least \(PackScenario.packNeighbours + 1) boats")
+        }
     }
 
     /// The matrix to sail: the file's or the bundled one, with this command line's overrides.
@@ -236,6 +294,7 @@ public enum BotSuiteCommand {
     }
 
     static func run(_ options: BotSuiteOptions) throws -> Int32 {
+        if options.scenario != nil { return try runScenario(options) }
         let report = try BotSuite.run(options.matrix(), thresholds: options.thresholds(),
                                       jobs: options.jobs ?? BotSuite.defaultJobs, diagnose: options.diagnose)
         let toStdout = options.jsonPath == "-"
@@ -251,6 +310,24 @@ public enum BotSuiteCommand {
             }
         }
         return report.passed ? 0 : 1
+    }
+
+    /// `--scenario pack`: sails the scenario, prints its table and writes its JSON; no thresholds, so exit 0.
+    private static func runScenario(_ options: BotSuiteOptions) throws -> Int32 {
+        let report = try PackScenario.run(options)
+        let toStdout = options.jsonPath == "-"
+        for line in report.lines {
+            if toStdout { printError(line) } else { print(line) }
+        }
+        if let path = options.jsonPath {
+            let data = try report.jsonData()
+            if toStdout {
+                print(String(decoding: data, as: UTF8.self))
+            } else {
+                try data.write(to: URL(fileURLWithPath: path))
+            }
+        }
+        return 0
     }
 
     private static func printError(_ line: String) {
