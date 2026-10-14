@@ -6,7 +6,7 @@ Variant letters (`REGATTA_BOT_VARIANT`): `1 2 3` = hand-fix parts, `H` = all thr
 
 ## 0. Verdict
 
-**Candid first: the bot suite cannot measure the pack problem, so none of the gains below is proof that the owner's playtest pack is fixed.** Packs (>= 3 boats within 20 m at the pick) are 1% of gate roundings at 8 and 16 mixed boats and 4% in an all-National 16-boat fleet (106 of 2550 roundings). In those packs main does not lose more metres than elsewhere (26.8 m extra in a pack against 25.9 m not), and neither fix cuts them (planner: 28.2 m in a pack, 20.3 m not). What the suite shows is dirty air (39-44% of roundings in 16-boat fleets, +18 m when it happens) and a general better pick/approach. I recommend a **pack scenario ticket first** (section 6, ticket 0).
+**Candid first: the bot suite cannot measure the pack problem, so none of the gains below is proof that the owner's playtest pack is fixed.** Packs (>= 3 boats within 20 m at the pick) are 1% of gate roundings at 8 and 16 mixed boats and 4% in an all-National 16-boat fleet (106 of 2550 roundings). In those packs main does not lose more metres than elsewhere (26.8 m extra in a pack against 25.9 m not), and neither fix cuts them (planner: 28.2 m in a pack, 20.3 m not). What the suite shows is dirty air (39-44% of roundings in 16-boat fleets, +18 m when it happens) and a general better pick/approach. I recommend a **pack scenario ticket first** (section 7, ticket 0).
 
 On what the suite does measure (gate mean extra metres, noise gap 1.6 m at 8 boats, 0.7 m at 16):
 
