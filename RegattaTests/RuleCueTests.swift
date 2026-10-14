@@ -303,7 +303,7 @@ import UIKit
         let far = Self.cues(relation: penalised, hulls: 2.5)
         let intensity = GlowSelection.fadeIn(hulls: 2.5, rangeHulls: style.glowRangeHulls, fullHulls: style.glowFullHulls)
         #expect(intensity > 0 && intensity < 1, "\(intensity)")
-        #expect(far.layer.glows[1]?.intensity == intensity)
+        #expect(abs((far.layer.glows[1]?.intensity ?? -1) - intensity) < 1e-9)
         // SpriteKit keeps alpha as a Float.
         #expect(abs(try #require(far.rings.first).alpha - CGFloat(intensity)) < 1e-6)
         let near = Self.cues(relation: penalised, hulls: 1)

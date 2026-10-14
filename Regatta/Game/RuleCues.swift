@@ -183,6 +183,7 @@ nonisolated struct RuleCallLines: Equatable, Sendable {
 
 /// The right-of-way glow round one boat (#123): red where `me` must keep clear of her, green where she must keep
 /// clear of `me`, `intensity` 0 to 1 (1 at the glow's full distance, 0 where it starts).
+/// A boat taking a penalty is the third kind (#517): no halo, the penalty ring at this intensity.
 nonisolated struct RightOfWayGlow: Equatable, Sendable {
     let kind: RightOfWayGlyph
     let intensity: Double

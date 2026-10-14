@@ -44,7 +44,7 @@ Sources: #22 (art direction), #29 (safe palette), G7 (#37), #53 (values). Consum
 
 Cue-to-cue hue separation: vermillion–orange 29°, orange–yellow 28°, chevron–water 29°, chevron–puff 25°.
 
-- The right-of-way glow is the one red/green cue. It has no shape of its own, so under deuteranopia and protanopia the two glows differ by lightness only (green 0.79, red 0.67); neither is in the hue rule's reserved set, so boat colours may match them.
+- The right-of-way glow is the one red/green cue. It has no shape of its own, so under deuteranopia and protanopia the two glows differ by lightness only (green 0.79, red 0.67); neither is in the hue rule's reserved set, so boat colours may match them. A boat taking a penalty has no glow: other boats see a ring in `orange` round her (#517), a shape and a reserved hue.
 - `orange` reads amber: truer oranges (`#F28C28` 11°, `#FF9500` 15° from vermillion) fail the hue rule.
 - `chevronBlue` vs water contrast ≈ 1.5:1: legible by hue + shape, not lightness. Outline is a #123 builder choice.
 - Colour-vision filters (deuteranopia, protanopia, tritanopia, greyscale, sunlight washout): run in the #111 harness; orange vs yellow is the pair to watch.
