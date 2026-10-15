@@ -71,6 +71,13 @@ extension BotBrain {
     /// Seconds she sails on at her speed on the new tack, after the tack or gybe itself (`tapLookahead`), that must stay
     /// out of that water too (`circleApproach`); the cautious bot's as every bot's. Placeholder.
     static let penaltyCircleAfter = 3.0
+    /// "Turn away, not through" (#528): seconds of `penaltyStartMargin` she may spend past her penalty turn's latest
+    /// start (`latestStartSeconds`) steering off a boat about to hit her on the side her turn goes
+    /// (`lateDodgeInput`), before she turns on into it regardless. Until #528 her turn went on blind past that point:
+    /// on the live all-National cell 58 of the 142 calls her own turn drew came there, most of them avoidable by holding
+    /// her course a moment (42 at T-5 s). The rest of the margin is left for the turn itself: a missed-penalty
+    /// disqualification costs more than a foul. Placeholder.
+    static let penaltyLateDodgeSeconds = 3.0
     /// Radians between the headings she tries for the least turn that keeps her clear (`clearingHeading`).
     static let clearingStep = deg2rad(5)
 
