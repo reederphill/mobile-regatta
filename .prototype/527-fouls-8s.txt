@@ -1,0 +1,91 @@
+races 160, elapsed 191.34935508299998 seconds
+GATE CHECK calls as offender (all .ruleCall, as RaceTally.foulsAsOffender): pre-start 275, racing 331, total 606; mark touches 203
+calls as offender: 606 (pre-start 316), turns owed > 0: 593; mark touches 203
+identity check (offender on her recorded inputs from T-5 s): same pair called 601/602 = 0.998; same rule, pair and tick 601/602 = 0.998
+identity check from T-10 s: same pair called 3/3
+
+BY MARGIN (a = own-tack heading in the scan, hold included, b = a manoeuvre the evaluator can't produce, c = weighing a second boat, d = nothing at 5 s; d→10s = avoidable from 10 s)
+rule × phase × geometry            n  % all   a%  b%  c%  d%  d→10s  hold%  casc%
+ALL                              606  100.0   70   1  28   1    3/7     80     21
+phase preStart                   316   52.1   63   1  34   2    1/5     81     21
+phase firstBeat                  204   33.7   75   2  22   1    2/2     76     27
+phase laterLegs                   84   13.9   79   0  21   0      -     85     10
+phase lastLeg                      2    0.3  100   0   0   0      -    100      0
+rule 11                          190   31.4   62   2  34   2    1/4     78     16
+rule 10                          174   28.7   60   1  39   1    1/1     78     17
+rule 15                           59    9.7   76   0  22   2    0/1     83      5
+rule 13                           59    9.7   83   2  15   0      -     73      7
+rule 16.1                         52    8.6   79   0  21   0      -     90      6
+rule 21.2                         51    8.4   92   2   4   2    1/1     82    100
+rule 21.1                          9    1.5   78   0  22   0      -    100     78
+rule 12                            8    1.3   75   0  25   0      -     75      0
+rule 18.2                          4    0.7  100   0   0   0      -    100     25
+rule 31 (mark touch; not in n)   203   33.5   75   0  21   3    4/6     77     40
+geo changing course (16.1)        31    5.1   84   0  16   0      -    100      6
+geo clear astern, overtaking      31    5.1   68   0  32   0      -     81      3
+geo into a penalty turner         20    3.3   75   0  25   0      -     70      0
+geo into a stopped boat           45    7.4   67   2  24   7    1/3     73     20
+geo luffing at the line           21    3.5   57   0  43   0      -     71     10
+geo mark-room                      4    0.7  100   0   0   0      -    100     25
+geo other boat astern             11    1.8   45   0  55   0      -    100     18
+geo port/starboard crossing      164   27.1   61   1  38   1    1/1     78     18
+geo tacking too close            117   19.3   78   1  21   1    0/1     76      4
+geo turning a penalty             66   10.9   94   2   3   2    1/1     86     89
+geo windward/leeward overlapped   96   15.8   58   3  38   1    0/1     80     21
+
+CELLS rule | phase | geometry (n >= 3)
+rule × phase × geometry                        n  % all   a%  b%  c%  d%  d→10s  hold%  casc%
+10 | preStart | port/starboard crossing       67   11.1   49   1  49   0      -     81     25
+11 | preStart | windward/leeward overlapped   60    9.9   58   3  37   2    0/1     80     20
+10 | firstBeat | port/starboard crossing      46    7.6   59   0  39   2    1/1     72     15
+10 | laterLegs | port/starboard crossing      45    7.4   76   0  24   0      -     78      4
+15 | preStart | tacking too close             35    5.8   60   0  37   3    0/1     71      6
+21.2 | firstBeat | turning a penalty          32    5.3   91   3   3   3    1/1     81    100
+11 | preStart | into a stopped boat           31    5.1   71   0  19  10    1/3     68     23
+13 | firstBeat | tacking too close            31    5.1   81   3  16   0      -     52      6
+11 | firstBeat | windward/leeward overlapped  29    4.8   62   3  34   0      -     76     21
+16.1 | preStart | changing course (16.1)      17    2.8   82   0  18   0      -    100      0
+13 | preStart | tacking too close             16    2.6   75   0  25   0      -     94      0
+21.2 | preStart | turning a penalty           15    2.5  100   0   0   0      -     87    100
+11 | preStart | clear astern, overtaking      14    2.3   57   0  43   0      -     71      0
+15 | firstBeat | tacking too close            13    2.1  100   0   0   0      -    100      0
+11 | preStart | luffing at the line           12    2.0   67   0  33   0      -     67      0
+16.1 | firstBeat | changing course (16.1)     11    1.8   82   0  18   0      -    100     18
+11 | firstBeat | clear astern, overtaking     10    1.7   70   0  30   0      -     80      0
+16.1 | preStart | into a penalty turner        9    1.5   56   0  44   0      -     78      0
+11 | firstBeat | into a stopped boat           9    1.5   44  11  44   0      -     78     22
+15 | laterLegs | tacking too close             9    1.5  100   0   0   0      -    100      0
+11 | preStart | other boat astern              8    1.3   50   0  50   0      -    100     12
+16.1 | firstBeat | into a penalty turner       8    1.3  100   0   0   0      -     75      0
+11 | laterLegs | clear astern, overtaking      6    1.0  100   0   0   0      -    100      0
+10 | preStart | luffing at the line            6    1.0   50   0  50   0      -     83     33
+11 | laterLegs | windward/leeward overlapped   5    0.8   40   0  60   0      -    100     20
+13 | laterLegs | tacking too close             5    0.8  100   0   0   0      -    100      0
+21.2 | laterLegs | turning a penalty           4    0.7   75   0  25   0      -     75    100
+21.1 | preStart | port/starboard crossing      4    0.7  100   0   0   0      -    100     75
+12 | preStart | into a stopped boat            4    0.7   75   0  25   0      -    100      0
+13 | preStart | turning a penalty              3    0.5  100   0   0   0      -    100     33
+16.1 | laterLegs | changing course (16.1)      3    0.5  100   0   0   0      -    100      0
+18.2 | firstBeat | mark-room                   3    0.5  100   0   0   0      -    100      0
+13 | firstBeat | turning a penalty             3    0.5  100   0   0   0      -    100     33
+10 | preStart | tacking too close              3    0.5   67   0  33   0      -    100     33
+
+avoided by each candidate from T-5 s (share of calls with candidates run):
+  hold       80.4%  (of which OCS 43, another call on her 59, same pair called 1-3 s after the window 9; closest approach when avoided median 7.5 m, p10 3.6 m)
+  luff10     86.0%  (of which OCS 65, another call on her 61, same pair called 1-3 s after the window 12; closest approach when avoided median 7.7 m, p10 4.0 m)
+  luff20     87.9%  (of which OCS 67, another call on her 53, same pair called 1-3 s after the window 30; closest approach when avoided median 8.0 m, p10 3.9 m)
+  luff40     88.9%  (of which OCS 65, another call on her 54, same pair called 1-3 s after the window 26; closest approach when avoided median 8.7 m, p10 3.8 m)
+  bear10     77.2%  (of which OCS 20, another call on her 70, same pair called 1-3 s after the window 5; closest approach when avoided median 7.5 m, p10 3.6 m)
+  bear20     76.2%  (of which OCS 13, another call on her 74, same pair called 1-3 s after the window 1; closest approach when avoided median 7.7 m, p10 3.5 m)
+  bear40     75.4%  (of which OCS 7, another call on her 61, same pair called 1-3 s after the window 8; closest approach when avoided median 8.1 m, p10 4.0 m)
+  ease       85.4%  (of which OCS 11, another call on her 37, same pair called 1-3 s after the window 59; closest approach when avoided median 7.7 m, p10 4.0 m)
+  tack       93.2%  (of which OCS 67, another call on her 57, same pair called 1-3 s after the window 22; closest approach when avoided median 9.6 m, p10 4.6 m)
+  gybe       83.1%  (of which OCS 5, another call on her 66, same pair called 1-3 s after the window 5; closest approach when avoided median 9.7 m, p10 4.1 m)
+  (recorded inputs: closest approach median 3.3 m, p10 2.2 m)
+(a) avoided only by a 40° luff/bear-away (still in the scan): 32 of 422
+(c) is any call whose 5 s before had a decision with `ruleKeepClear` returning on a boat other than the one called, and some candidate avoids it: 170; of those an own-tack heading or hold also avoids 164, only ease/tack/gybe 6
+
+cascades: 130 (on a boat already turning 57, within 15 s of her last call 92)
+pre-start line-over-rules fallback in the 5 s before: fell back to startKeepClear 56, kept the line-crossing heading 0, of 316
+brain in the 5 s before (calls with evaluated decisions 505): isAboutToHit fired on the other boat 465, keep-clear evasion targeted her 394, targeted a third boat 170, misjudged 0, heading toggled 2+ times 107, tap wanted and refused 92
+  refused tap reasons (calls): boats 48, interval 25, slow 25, gybeRoom 3, mark 3

@@ -21,6 +21,8 @@ struct FoulOptions {
     /// Seconds of recorded inputs replayed on every seat before the branch, so the fork's umpire has the boats' track
     /// back as far as its rules read (`RulesConfig.Escape` record ticks): `importSnapshot` forgets it.
     var leadIn = 9.0
+    /// Seconds after the call a fork sails on (#527 critique: 8 s, so a foul only put off is not counted avoided).
+    var after = 3.0
     var jobs = 4
 }
 
@@ -35,6 +37,7 @@ func parseFouls() throws -> FoulOptions {
         case "--no-cf": o.noCounterfactual = true
         case "--identity-only": o.identityOnly = true
         case "--lead-in": o.leadIn = Double(args.popFirst() ?? "") ?? o.leadIn
+        case "--after": o.after = Double(args.popFirst() ?? "") ?? o.after
         case "--jobs": o.jobs = Int(args.popFirst() ?? "") ?? o.jobs
         default: rest.append(flag)
         }
@@ -84,6 +87,7 @@ struct BrainSummary: Codable, Sendable {
     var lineFallback = 0 // pre-start: keep-clear crossed the line early, fell back to `startKeepClear` (limit 5)
     var lineKept = 0 // ... and no fallback heading, kept the rule's
     var startKeepClear = 0
+    var ruleKeepClearPath = 0 // decisions whose keep-clear went through `ruleKeepClear` (racing, or a starboard boat before her start)
     var lookahead = 0.0
     var wantsOtherTack = 0
     var cantTap: [String: Int] = [:] // limit 6
@@ -106,6 +110,8 @@ struct Candidate: Codable, Sendable {
     var minRangeM = 0.0 // closest approach to the other boat in the window
     /// Avoided, but the same pair is called in the 2 s after the window (call tick + 1 s to + 3 s): only put off.
     var delayed = false
+    /// Any call on her (any boat, or a mark) after the call tick + 1 s, to the end of the `--after` window.
+    var lateCall = false
 }
 
 struct FoulRecord: Codable, Sendable {
@@ -286,6 +292,7 @@ enum FoulsProbe {
                 case "line": b.lineFallback += 1
                 case "lineKept": b.lineKept += 1
                 case "start": b.startKeepClear += 1
+                case "rule": b.ruleKeepClearPath += 1
                 default: break
                 }
                 let delta = rad2deg(wrapAngle(p.chosenHeading - p.desiredHeading))
@@ -370,7 +377,7 @@ enum FoulsProbe {
         for p in pending {
             var rec = p.record
             let fork = Forker(cell: cell, setup: setup, files: files, inputs: inputs, snapshots: p.snapshots, seat: rec.offender,
-                              victim: p.victim, isMark: p.isMark, callTick: rec.tick, leadIn: Int(o.leadIn * Double(rate)))
+                              victim: p.victim, isMark: p.isMark, callTick: rec.tick, leadIn: Int(o.leadIn * Double(rate)), after: Int(o.after * Double(rate)))
             for back in [5, 10] {
                 let branch = rec.tick - back * rate
                 guard let id = fork.run(.recorded, branch: branch) else { break }
@@ -560,6 +567,7 @@ struct Forker {
     let isMark: Bool
     let callTick: Int
     let leadIn: Int
+    let after: Int
 
     static let fullRudderError = deg2rad(15)
     static let leastRudder = 0.08
@@ -575,7 +583,7 @@ struct Forker {
               (try? race.importSnapshot(snap)) != nil else { return nil }
         _ = race.drainEvents()
         let windowEnd = callTick + Race.tickRate
-        let end = callTick + 3 * Race.tickRate
+        let end = callTick + max(after, Race.tickRate)
         var cursor = inputs.partitioningIndex { $0.tick > snap.tick }
         var c = Candidate(name: m.rawValue, avoided: true, anyCall: false)
         var turnTarget = 0.0, turned = 0.0, lastHeading = 0.0, startTack = Tack.port
@@ -632,8 +640,13 @@ struct Forker {
             for e in race.drainEvents() where race.tick > branch {
                 if race.tick > windowEnd {
                     switch e.kind {
-                    case .ruleCall(let call) where call.offender == seat && !isMark && call.victim == victim: c.delayed = c.avoided
-                    case .markTouch(let s, _) where s == seat && isMark: c.delayed = c.avoided
+                    case .ruleCall(let call) where call.offender == seat:
+                        c.lateCall = true
+                        if !isMark && call.victim == victim { c.delayed = c.avoided }
+                    case .markTouch(let s, _) where s == seat:
+                        c.lateCall = true
+                        if isMark { c.delayed = c.avoided }
+                    case .ocsNotice(let s) where s == seat: c.ocs = true
                     default: break
                     }
                     continue
