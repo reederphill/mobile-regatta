@@ -23,6 +23,8 @@ struct FoulOptions {
     var leadIn = 9.0
     /// Seconds after the call a fork sails on (#527 critique: 8 s, so a foul only put off is not counted avoided).
     var after = 3.0
+    /// Run the 10 s candidates for every call, not only those nothing avoids from 5 s.
+    var always10 = false
     var jobs = 4
 }
 
@@ -37,6 +39,7 @@ func parseFouls() throws -> FoulOptions {
         case "--no-cf": o.noCounterfactual = true
         case "--identity-only": o.identityOnly = true
         case "--lead-in": o.leadIn = Double(args.popFirst() ?? "") ?? o.leadIn
+        case "--always10": o.always10 = true
         case "--after": o.after = Double(args.popFirst() ?? "") ?? o.after
         case "--jobs": o.jobs = Int(args.popFirst() ?? "") ?? o.jobs
         default: rest.append(flag)
@@ -94,6 +97,13 @@ struct BrainSummary: Codable, Sendable {
     var maxHeadingDeltaDeg = 0.0
     var meanHeadingDeltaDeg = 0.0
     var toggles = 0 // sign changes of chosen − desired (limit 4)
+    /// Decisions steered off the desired heading (|chosen − desired| > 1°) by direction: towards the wind (a luff) or
+    /// away, and towards the boat of the call (the chosen heading closer to her bearing than the desired one) or away.
+    var offDecisions = 0
+    var luffs = 0
+    var towardOther = 0
+    /// Mean signed offset, degrees: positive a luff, negative a bear-away.
+    var meanLuffDeg = 0.0
     var branches: [String: Int] = [:]
     var evasions: [String: Int] = [:]
     var keepClearRules: [String: Int] = [:]
@@ -297,6 +307,20 @@ enum FoulsProbe {
                 }
                 let delta = rad2deg(wrapAngle(p.chosenHeading - p.desiredHeading))
                 deltas.append(abs(delta))
+                let back = callTick - tick
+                if abs(delta) > 1, states[seat].count > back {
+                    let me = states[seat][states[seat].count - 1 - back]
+                    let wind = me.heading + me.relativeWind
+                    let luffBy = rad2deg(abs(wrapAngle(p.desiredHeading - wind)) - abs(wrapAngle(p.chosenHeading - wind)))
+                    b.offDecisions += 1
+                    if luffBy > 0 { b.luffs += 1 }
+                    b.meanLuffDeg += luffBy
+                    if other >= 0, states[other].count > back {
+                        let d = states[other][states[other].count - 1 - back].position - me.position
+                        let bearing = d.bearing
+                        if abs(wrapAngle(p.chosenHeading - bearing)) < abs(wrapAngle(p.desiredHeading - bearing)) { b.towardOther += 1 }
+                    }
+                }
                 if abs(delta) > 1 {
                     let sign: Double = delta > 0 ? 1 : -1
                     if lastSign != 0 && sign != lastSign { b.toggles += 1 }
@@ -304,6 +328,7 @@ enum FoulsProbe {
                 }
             }
             b.thirdTargets = thirds.sorted()
+            if b.offDecisions > 0 { b.meanLuffDeg /= Double(b.offDecisions) }
             b.keepClearShare = b.evaluated > 0 ? Double(b.keepClearDecisions) / Double(b.evaluated) : 0
             b.maxHeadingDeltaDeg = deltas.max() ?? 0
             b.meanHeadingDeltaDeg = deltas.isEmpty ? 0 : deltas.reduce(0, +) / Double(deltas.count)
@@ -390,7 +415,7 @@ enum FoulsProbe {
                 if o.identityOnly { break }
                 let cands = Manoeuvre.all.compactMap { fork.run($0, branch: branch) }
                 if back == 5 { rec.at5 = cands } else { rec.at10 = cands }
-                if back == 5, cands.contains(where: \.avoided) { break }
+                if back == 5, !o.always10, cands.contains(where: \.avoided) { break }
             }
             rec.category = category(rec)
             rec.avoidable10 = rec.at10.contains(where: \.avoided)

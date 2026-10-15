@@ -59,26 +59,105 @@ The 271 calls before the gun (tick < 0, with candidates), split by the keep-clea
 | rule 11 | 23 | 43 | 28 | 16 |
 | rule 15 | 15 | 11 | 1 | 7 |
 
-The top cell goes almost entirely through `startKeepClear`, the "by the water" code path ticket 1's racing rewrite does not touch. Holding course avoids 27 of those 59 at 8 s. It needs its own line in ticket 1's scope (below).
+
+The top cell goes almost entirely through `startKeepClear`, the "by the water" code path the racing rewrite does not touch. Its cause analysis (round 3, below) gives it its own ticket.
+
+## Round 3 (owner, 2026-10-15): `startKeepClear`, the tack candidate, and the 10 s reruns
+
+Run: `--after 8 --always10` (every call also forked from T−10 s). `.prototype/527-fouls-8s10.json`; analysis `.prototype/527-round3.py`. The 8 s numbers above are unchanged. Identity from T−10 s: 592 of 592.
+
+### Inside `startKeepClear` (111 pre-start calls), against the racing evasion (178 calls)
+
+| | `startKeepClear` | pre-start `ruleKeepClear` (starboard boats) | racing evasion |
+|---|---|---|---|
+| calls | 111 | 61 | 178 |
+| holding course avoids (8 s) | 53% | 33% | 68% |
+| a tack avoids | 68% | 26% | 80% |
+| some own-tack heading avoids | 87% | 85% | 93% |
+| only ease / tack / gybe | 6% | 8% | 3% |
+| nothing from 5 s | 6% | 7% | 4% |
+| heading toggled 2+ times | **40%** | 21% | 22% |
+| evasion aimed at a third boat (first boat wins) | **54%** | 49% | 30% |
+| decisions in keep-clear | 74% | 73% | 68% |
+| mean / median-max offset off her course | 35° / 72° | 42° / 85° | 43° / 115° |
+| her off-course decisions that luff / bear away | 46 / 54% | 69 / 31% | 47 / 53% |
+| … that point her closer to the boat she then fouls | 29% | 44% | 37% |
+| the other boat stopped (< 30% polar) at the call | **61%** | 43% | 16% |
+| her speed (share of polar) | 0.32 | 0.25 | 0.30 |
+| her tack | port 101, starboard 10 | starboard 61 | port 117, starboard 61 |
+| rules | 10: 59, 11: 23, 15: 15, 13: 10 | 11: 43, 15: 11, 16.1: 5 | 10: 86, 11: 54, 15: 22 |
+
+**Same failure, different weights; its own ticket.** `startKeepClear` fails the way the racing evasion does: its heading is worse than holding course in half its fouls, and a tack beats both. But two of the limits weigh far more here, and one barely applies:
+
+- **First boat wins (limit 3).** Its evasion was steering for a different boat in 54% of calls, against 30% when racing.
+- **No commitment (limit 4).** Its heading toggled 2+ times in 40% of calls, against 22%.
+- **Straight-line prediction (limit 1) barely applies.** The boat she fouls is already stopped in 61% of calls (a starboard row parked below the line): there is no turn to predict.
+
+So the fix is the scorer's two cheaper parts, weigh every boat and commit, without the turn-aware prediction or the overtake. It ships as its own ticket on its own code path, ahead of the racing scorer, and the racing ticket reuses its scorer.
+
+The pre-start `ruleKeepClear` group (starboard boats, mostly rule 11 at the line) has another signature again. Holding course avoids only 33%, its evasion luffs (69%) and points at the boat it fouls 44% of the time, and 21 of its 61 calls are the line fallback. That is the start's approach (below), not the keep-clear scorer.
+
+### The tack candidate
+
+A tack is the best single candidate at 8 s:
+
+| group | a tack avoids | holding course avoids |
+|---|---|---|
+| all calls | 65% | 57% |
+| racing evasion | 80% | 68% |
+| `startKeepClear` | 68% | 53% |
+
+It is the most inflated upper bound. A tack takes her out of the recorded traffic altogether, and nobody reacts to her. Owner ruling: one tack candidate in the scorer, below. The roll-out planner stays a no-go.
+
+### The committed subsets from 10 s
+
+- **Base rate.** From T−10 s, 94% of *all* calls have some clean candidate. "Avoidable from 10 s" is near-universal, so read the subsets against it. They are harder than the average call, not easier.
+- **Nothing avoids from 5 s (39 calls; 25 before the gun).** 69% are avoidable from 10 s.
+  - Racing, 14 calls: 79% avoidable (holding 36%, a heading 71%). That is the horizon-in-lengths item for racing.
+  - Pre-start, 25 calls: 64% avoidable. 17 of them are line-fallback calls.
+- **Line fallback (52 calls, 46 of them rule 11).** 77% are avoidable from 10 s, by a heading 62%, by holding only 15%. Of the 43 that holding course does not avoid from 5 s, 72% are avoidable from 10 s.
+
+The mistake is made before the 5 s window, and the remedy from 10 s is a change of course, not holding on. The start plan puts her where her keep-clear course and the line conflict. That is approach timing, not conduct: a line in the start-regression ticket.
 
 ## Decision
 
 - **Not as the ticket's rule read it.** The conclusion is not "the evaluator's output is right and its inputs are wrong".
 - **Decision quality.** The evaluator chose headings, and in most evasion fouls the chosen heading was worse than the one she was on.
 - **Part B in two halves.**
-  - **Manoeuvre candidates and roll-outs: no-go.** Only 4% of fouls need them.
-  - **The heading half, with commitment and a better prediction: go.** It becomes ticket 3 below, measured with Part B's rigour (question 2 in full).
+  - **The roll-out planner and the manoeuvre set: no-go.** Ease, tack or gybe as the only remedy is 4%.
+  - **The heading scorer with commitment: go**, plus one tack candidate (round 3). It is tickets 2 and 4 below, measured with Part B's rigour (question 2 in full).
 
-## Draft build tickets (not filed; in the owner's order)
+## Draft build tickets (not filed; in order)
+
+Each ticket reruns this probe's Part A table on its branch (`--after 8`), so the gain shows in the rows the fouls came from. Every counterfactual share above is an upper bound; the tickets are judged on paired live races.
 
 ### 1. Bots: penalty turns in clear water
 
 - **Scope.** 142 calls (24%) plus most of the 130 cascades.
 - **Before she starts a circle.** She checks the turn's sweep (`turnSweep`, a disc of her turn's diameter as #517 gives other boats) against the boats round her, and delays or bears off to clear water rather than turning through them.
 - **While she turns.** She keeps checking; a boat entering the sweep makes her finish the current heading change away from it rather than through it.
-- **Measures.** Fouls per encounter; 21.2 calls; calls while turning; episodes of 2+ calls; finish share and missed-penalty DSQs; on-time (the five-penalties-before-the-gun complaint); this probe's penalty-turn cause row. All on paired live 160-race runs.
+- **Measures.** All on paired live 160-race runs:
+  - fouls per encounter; 21.2 calls; calls while turning; episodes of 2+ calls;
+  - finish share and missed-penalty DSQs;
+  - on-time (the five-penalties-before-the-gun complaint);
+  - this probe's penalty-turn cause row.
 
-### 2. Bot suite: an overtake scenario (harness, lands before ticket 3)
+### 2. Bots: pre-start keep-clear weighs every boat and commits (`startKeepClear`)
+
+- **Scope.** 111 pre-start calls, a fifth of all fouls: rule 10 port/starboard 52 (the top cell), 13/15 25.
+- **What changes.** `startKeepClear`'s heading choice becomes a score over candidate headings on her tack, holding course included, against every boat she must keep clear of within range. It is no longer the first boat that trips the test.
+- **Commitment.** She keeps the chosen heading until it no longer clears, which ends the toggling.
+- **Tack candidate.** One tack candidate on the existing tack track (`tapTrack`), costed in lengths. It wins when the best heading clears only by a thin margin, or only if the other boat holds her course.
+- **Not in scope.** No turn-aware prediction: the boats she fouls are mostly stopped.
+- **Shared code.** The scorer is written to be reused by ticket 4.
+- **Measures.**
+  - pre-start calls per boat by rule;
+  - pre-start penalty episodes a race;
+  - on time and OCS share (gate ≤ 0.05);
+  - fouls per encounter;
+  - this probe's `startKeepClear` row (toggling, third-boat share, hold-avoids).
+
+### 3. Bot suite: an overtake scenario (harness; lands before ticket 4)
 
 - **Why.** The owner's playtest complaint is "bots run into me from behind with easy evasions available". Between bots this geometry is 5% of fouls (clear astern 31 + into a stopped boat 45), because a bot behind a slow bot is usually in the same air. With a player ahead it is a routine beat, so the live gate cannot show it.
 - **Scenario.** A scripted boat sails the player's part:
@@ -93,18 +172,14 @@ The top cell goes almost entirely through `startKeepClear`, the "by the water" c
   - seconds to clear ahead.
 - **Pattern.** As `--scenario pack` (#526) did for the gate.
 
-### 3. Bots: keep-clear heading choice with commitment and a turn-aware prediction (Part B's heading half)
+### 4. Bots: racing keep-clear on ticket 2's scorer, with a turn-aware prediction and the overtake (Part B's heading half)
 
-Part B with the candidate set trimmed to headings. Replaces `ruleKeepClear`'s first-boat-wins and `clearingHeading`'s least-offset step.
+Replaces `ruleKeepClear`'s first-boat-wins and `clearingHeading`'s least-offset step when racing.
 
-- **Score every boat in range, holding course included.** Score each candidate heading on her tack against every boat within `keepClearRange`: rules 10–13 and the mark-room she owes. Holding course is a candidate and wins when it clears.
-- **Commitment.** Keep the chosen heading until it no longer clears. Don't re-derive the least offset every tick (limit 4).
+- **Scorer.** Ticket 2's scorer, holding course and the tack candidate included, against every boat within `keepClearRange`: rules 10–13 and the mark-room she owes. It keeps ticket 2's commitment.
 - **Turn-aware prediction.** Predict a turning boat on her yaw rate, and a slowing or stalling one on her measured acceleration over the last second (clamped), from a per-seat velocity memory (limit 1).
-- **The overtake** (owner, 2026-10-15):
-  - **Horizon in distance.** For a boat ahead on her tack, flag her when the closing brings her inside 1.3 lengths within ~6 lengths of her own travel, whatever the closing speed. Keep the 4.5 s test for crossings.
-  - **A committed pass, chosen at the first flag.** Pick a lane two lengths to windward (when her speed margin gets her through before the shadow is hers) or to leeward (with the bear-away's speed), and hold it until clear ahead.
-  - **Tactics.** On a beat, the overtake feeds the tactics module's clear-air weight, so a tack is at least considered.
-- **Pre-start `startKeepClear`.** It holds the top foul cell: 52 of the 59 rule 10 pre-start port/starboard calls. The same scoring and commitment, port boat keeping clear by the water. Otherwise this ticket does not touch the top cell.
+- **Horizon in distance.** For a boat ahead on her tack, flag her when the closing brings her inside 1.3 lengths within ~6 lengths of her own travel, whatever the closing speed. Keep the 4.5 s test for crossings. The racing calls nothing avoids from 5 s are 79% avoidable from 10 s.
+- **A committed pass, chosen at the first flag.** Pick a lane two lengths to windward (when her speed margin gets her through before the shadow is hers) or to leeward (with the bear-away's speed), and hold it until clear ahead. On a beat, the overtake feeds the tactics module's clear-air weight, so a tack is at least considered.
 - **Tack clearance** (rides with this ticket). `tapIsClear` / `tapTurnsAtKeepClearBoat` test the turn track she will actually sail (`tapTrack`) against the turn-aware prediction, not straight lines. This covers 62 tack calls (rule 13) and the rule 15 calls after tacks.
 - **Measures (#527 question 2 in full).**
   - fouls per encounter on the live cells (target ≤ 0.020; under 0.030 a go), by rule and phase against this table;
@@ -113,15 +188,23 @@ Part B with the candidate set trimmed to headings. Replaces `ruleKeepClear`'s fi
   - finish share by tier and the place gap;
   - `CautiousBotSuiteTests`;
   - the #464 / #523 rounding measures;
-  - the pack scenario and ticket 2's overtake scenario;
-  - this probe's evasion cause rows.
+  - the pack scenario and ticket 3's overtake scenario;
+  - this probe's racing evasion and tack cause rows.
   - Paired by seed and venue, with both seed halves.
 - **Tick cost.** p99 brain time at 16 boats against main's 0.6 ms.
+
+### A line for the start-regression ticket (not a conduct ticket)
+
+- **The calls.** 52 pre-start calls (46 of them rule 11) came in the 5 s after her keep-clear course would have crossed the line early and she fell back. She is mostly committed by then: holding course avoids 9.
+- **From 10 s.** 77% are avoidable, by a heading 62%.
+- **The cause.** The start plan puts her where her keep-clear course and the line conflict. That is approach timing.
+- **Measure.** Count this row on that ticket's branch.
 
 ## Rerun
 
 ```
 scripts/heavy.sh swift build -c release --product regatta-roundprobe --package-path Packages/RegattaCore --scratch-path .build/check/RegattaCore
-scripts/heavy.sh .build/check/RegattaCore/release/regatta-roundprobe --fouls --profile-mix live --tier-mix national --after 8 --json .prototype/527-fouls-8s.json > .prototype/527-fouls-8s.txt
-python3 .prototype/527-strict8.py .prototype/527-fouls-8s.json
+scripts/heavy.sh .build/check/RegattaCore/release/regatta-roundprobe --fouls --profile-mix live --tier-mix national --after 8 --always10 --json .prototype/527-fouls-8s10.json > .prototype/527-fouls-8s10.txt
+python3 .prototype/527-strict8.py .prototype/527-fouls-8s10.json
+python3 .prototype/527-round3.py .prototype/527-fouls-8s10.json
 ```
