@@ -148,14 +148,18 @@ Each ticket reruns this probe's Part A table on its branch (`--after 8`), so the
 - **What changes.** `startKeepClear`'s heading choice becomes a score over candidate headings on her tack, holding course included, against every boat she must keep clear of within range. It is no longer the first boat that trips the test.
 - **Commitment.** She keeps the chosen heading until it no longer clears, which ends the toggling.
 - **Tack candidate.** One tack candidate on the existing tack track (`tapTrack`), costed in lengths. It wins when the best heading clears only by a thin margin, or only if the other boat holds her course.
-- **Not in scope.** No turn-aware prediction: the boats she fouls are mostly stopped.
-- **Shared code.** The scorer is written to be reused by ticket 4.
-- **Measures.**
+- **Ease (owner round 4, measured).** Easing to half speed avoids 52% of the 111 (49% into a stopped boat, 58% into a moving one), against hold 53% and tack 68%. It adds no call that holding course or a heading does not already avoid. It clears none of the 14 clusters where no heading clears. It puts her over the line in 2. Not in the 60s, so ease is **not** a candidate, by the owner's condition. The clusters stay the scorer's case: when no heading clears, the tack's cost decides against "furthest off".
+- **Not in scope.** No turn-aware prediction: the boats she fouls are mostly stopped (61%).
+- **One scorer, two parameterisations (owner).** The scorer is one component that takes a predictor. This ticket builds it with the straight-line predictor; ticket 4 passes the turn-and-slowdown predictor to the same component. There is no second scorer, so the Part A table stays comparable between the two.
+- **Measures (it touches the start gate; owner).**
+  - on-time share (gate ≥ 0.60, main 0.47);
+  - OCS share (gate ≤ 0.05);
   - pre-start calls per boat by rule;
-  - pre-start penalty episodes a race;
-  - on time and OCS share (gate ≤ 0.05);
+  - pre-start penalty episodes a race and cascades;
+  - the 16.1 watchdog at 0;
   - fouls per encounter;
   - this probe's `startKeepClear` row (toggling, third-boat share, hold-avoids).
+  - A cut in fouls bought by committing to courses that make her late is a regression.
 
 ### 3. Bot suite: an overtake scenario (harness; lands before ticket 4)
 
@@ -176,7 +180,7 @@ Each ticket reruns this probe's Part A table on its branch (`--after 8`), so the
 
 Replaces `ruleKeepClear`'s first-boat-wins and `clearingHeading`'s least-offset step when racing.
 
-- **Scorer.** Ticket 2's scorer, holding course and the tack candidate included, against every boat within `keepClearRange`: rules 10–13 and the mark-room she owes. It keeps ticket 2's commitment.
+- **Scorer.** Ticket 2's component, the same code, given the turn-and-slowdown predictor (one scorer, two parameterisations). Holding course and the tack candidate are included, against every boat within `keepClearRange`: rules 10–13 and the mark-room she owes. It keeps ticket 2's commitment.
 - **Turn-aware prediction.** Predict a turning boat on her yaw rate, and a slowing or stalling one on her measured acceleration over the last second (clamped), from a per-seat velocity memory (limit 1).
 - **Horizon in distance.** For a boat ahead on her tack, flag her when the closing brings her inside 1.3 lengths within ~6 lengths of her own travel, whatever the closing speed. Keep the 4.5 s test for crossings. The racing calls nothing avoids from 5 s are 79% avoidable from 10 s.
 - **A committed pass, chosen at the first flag.** Pick a lane two lengths to windward (when her speed margin gets her through before the shadow is hers) or to leeward (with the bear-away's speed), and hold it until clear ahead. On a beat, the overtake feeds the tactics module's clear-air weight, so a tack is at least considered.
