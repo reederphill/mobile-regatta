@@ -38,13 +38,16 @@ import Testing
     /// class's before a tack or gybe: it holds a turn off first 18.8 s before the gun, and others up the first beat, and
     /// with the circle off they kept their digest; in the start and the first beat, seed 459, no circle holds any turn
     /// off, and they kept theirs; the two laps again on #523, whose gate pick range and exit tack are every class's: the start and the first beat reach no gate and kept theirs; both again on #528, whose dodge past a turn's latest start
-    /// is every by-hand class's: with `penaltyLateDodgeSeconds` at zero both kept their digests). On fleet-rules@6 since #517's default switch: the class is the test's subject, and on
+    /// is every by-hand class's: with `penaltyLateDodgeSeconds` at zero both kept their digests; both again on #528's
+    /// rework, whose clearing course, held dodge and scanned way out are every by-hand class's under fleet-rules@6,
+    /// replacing the 35° steer-off: no constant returns it to the old path; the two laps again on its fix round, whose
+    /// way out commits to a direction and moves out of a pack in open water: the start and the first beat kept theirs; both again on its second fix round, whose way out keeps her and her turn's circle off the race area's edge; both again on its third, whose held way out is picked again round the heading she first chose, not the one she has come to (a long hold no longer ratchets her round), and is let go when her sweep clears; both again on its fifth, whose way out near the race area's edge takes the side with more water to it). On fleet-rules@6 since #517's default switch: the class is the test's subject, and on
     /// fleet-rules@7 the two laps have a 21.2 incident called as 16.1.
     @Test(.onSixRules) func skiffEightBotsAreBitIdentical() throws {
         let short = try Self.digest(seed: 459, boatClass: Self.skiffEight)
         let long = try Self.digest(seed: 462, boatClass: Self.skiffEight, seconds: 700)
-        #expect(hex64(short) == "0xe1d0264bc3b59896")
-        #expect(hex64(long) == "0xf8ed63be8a0d1dbc")
+        #expect(hex64(short) == "0x39a40d128a32de05")
+        #expect(hex64(long) == "0xda0ca57836844a9d")
     }
 
     // MARK: - skiff@8: tacks and gybes by hand

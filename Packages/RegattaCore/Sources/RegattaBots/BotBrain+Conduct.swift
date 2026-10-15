@@ -72,12 +72,36 @@ extension BotBrain {
     /// out of that water too (`circleApproach`); the cautious bot's as every bot's. Placeholder.
     static let penaltyCircleAfter = 3.0
     /// "Turn away, not through" (#528): seconds of `penaltyStartMargin` she may spend past her penalty turn's latest
-    /// start (`latestStartSeconds`) steering off a boat about to hit her on the side her turn goes
-    /// (`lateDodgeInput`), before she turns on into it regardless. Until #528 her turn went on blind past that point:
-    /// on the live all-National cell 58 of the 142 calls her own turn drew came there, most of them avoidable by holding
-    /// her course a moment (42 at T-5 s). The rest of the margin is left for the turn itself: a missed-penalty
-    /// disqualification costs more than a foul. Placeholder.
+    /// start (`latestStartSeconds`) holding a way out of a boat crossing her turn's sweep (`PenaltyEscape`), before she
+    /// turns on regardless. The rest of the margin is left for the turn itself: a missed-penalty disqualification costs
+    /// more than a foul. Placeholder.
     static let penaltyLateDodgeSeconds = 3.0
+    /// "Penalty turns in clear water" (#528): radians either side of her heading she looks for a heading on her own
+    /// tack that clears her turn's sweep (`penaltyEscapeHeading`). Placeholder.
+    static let penaltyEscapeSpread = deg2rad(60)
+    /// Seconds ahead, at most, from where she scores a heading's sweep (`penaltyEscapeHeading`): where the heading puts
+    /// her by then, no further than her time allows. Placeholder.
+    static let penaltyEscapeHorizon = 6.0
+    /// "Away from the pack, not to the edge" (#528 fix 5, the owner's ruling): hull lengths of water to the race area's
+    /// edge within which, of two ways out that clear her alike, she takes the one with more (`penaltyEscapeEdgeWater`).
+    /// Further in, the edge breaks no tie. Placeholder.
+    static let penaltyEscapeEdgeLengths = 6.0
+    /// Seconds of her latest start (`latestStartSeconds`) under which, called with her sweep blocked racing, she has
+    /// nothing to move to clear water with: she starts at once, the best way, and dodges as she turns. Placeholder.
+    static let penaltyMoveMinSeconds = 6.0
+    /// "Start earlier, not later" (#528, the owner's figure): seconds of her latest start from which, sailing to
+    /// clear water, she starts the turn with a thin margin (`penaltyThinStartMargin`) rather than blind at 0 s.
+    /// Placeholder.
+    static let penaltyThinStartSeconds = 10.0
+    /// Seconds past her keep-clear lookahead the best way's first conflict must be for a thin-margin start
+    /// (`penaltyThinStartSeconds`; owner 2026-10-15: tied to the lookahead, so it scales with her skill as the lookahead
+    /// does): inside the lookahead she would dodge the moment she started. Placeholder.
+    static let penaltyThinStartMargin = 1.5
+    /// Seconds past her keep-clear lookahead her turn's first conflict must be before she lets a held way out go
+    /// (`PenaltyEscape`) and turns on: she dodges inside the lookahead, so letting go at it would flick her back. At
+    /// 1.5 s the held dodge spent her time: the live all-National cell's own-turn calls were 84, at 0.5 s 78.
+    /// Placeholder.
+    static let penaltyEscapeRelease = 0.5
     /// Radians between the headings she tries for the least turn that keeps her clear (`clearingHeading`).
     static let clearingStep = deg2rad(5)
 

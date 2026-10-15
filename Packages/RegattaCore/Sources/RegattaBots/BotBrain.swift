@@ -216,6 +216,8 @@ struct BotBrain: Sendable {
     var penaltyRead: PenaltyRead?
     /// The room she clears before a penalty turn by hand (`clearingRoom`, #471).
     var penaltyClearing = PenaltyClearing()
+    /// The way out she holds of a boat crossing her penalty turn's sweep as she turns it (#528), until clear.
+    var penaltyEscape: PenaltyEscape?
     /// The boats around her as she saw them at her last decision, by seat (`guarded`): the cautious bot's only.
     var seen: [Seen?] = []
     /// Whether she holds her aim within her proper course while told she is restricted under rule 17
@@ -462,6 +464,7 @@ struct BotBrain: Sendable {
             penaltyRead = nil
             penaltyHeldSince = nil
             penaltyClearing = PenaltyClearing()
+            penaltyEscape = nil
             penaltyOwed = 0
             penaltyWaySeen = 0
             return nil
@@ -537,9 +540,10 @@ struct BotBrain: Sendable {
     /// otherwise she steers off, away from the boat, sheeted for speed (`steer`), freely, and turns on the same way once
     /// her sweep is clear. Inside a mark's zone her crossings count for nothing (#487), so she plans none there: she
     /// sails her rounding (keeping clear under 21.2) and starts again once round, while her time allows. With no time
-    /// to spare (`hasTimeToTurnLater`) she turns on whoever is near, but for a boat about to hit her on the side her
-    /// turn goes, for a few seconds (`lateDodgeInput`, #528). Gone under @6: `penaltyGivenUp` (the once, first
-    /// half, towards-only give-up), `turningOn`'s hold-off for the autohelm (#350), and never easing the rudder mid-turn.
+    /// to spare (`hasTimeToTurnLater`) she turns on whoever is near. #528: racing in a crowd she sails to clear water
+    /// first (`clearingCourse`), and a way out of a boat once chosen she holds (`penaltyDodge`). Gone under @6:
+    /// `penaltyGivenUp` (the once, first half, towards-only give-up), `turningOn`'s hold-off for the autohelm (#350),
+    /// and never easing the rudder mid-turn.
     private mutating func crossingsPenaltyInput(_ b: SeatView.OwnBoat, _ view: SeatView, _ owed: OwedPenalty) -> BoatInput? {
         let servedOne = owed.turnsOwed < penaltyOwed
         penaltyOwed = owed.turnsOwed
@@ -608,13 +612,25 @@ struct BotBrain: Sendable {
                     port: turnSweep(b, view, direction: -1, angle: penaltyTurnLeft(b, owed, view, direction: -1)),
                     starboard: turnSweep(b, view, direction: 1, angle: penaltyTurnLeft(b, owed, view, direction: 1)))
             }
-            if let input = clearingRoom(b, owed, view, sweeps) { return input }
-            if let start = startPenaltyTurn(b, view, owed, sweeps) {
+            // Racing, "move, don't wait" (#528): she sails to clear water and starts there, or earlier with a thin
+            // margin; before her start, a short bear-away for room (#471).
+            var start: Double?
+            switch clearingCourse(b, owed, view, sweeps) {
+            case .steer(let input)?: return input
+            case .start?: start = penaltyWay(b, view, owed, sweeps, markAway: nil)
+            case nil:
+                if b.status != .racing, let input = clearingRoom(b, owed, view, sweeps) { return input }
+                start = startPenaltyTurn(b, view, owed, sweeps)
+            }
+            if let start {
                 guard let turn = clearOfRounding(start) else { return sailOn() }
                 penaltyTurn = turn
-                // Started at her latest start with a boat about to hit her on the turn's side: she holds it off.
-                if let dodge = lateDodgeInput(b, view, owed, way: turn) { return dodge }
-                return BoatInput(rudder: turn * penaltyRudder(b, turn, owed, view))
+                // A boat crossing her sweep as she starts: she holds a way out of it, as turning.
+                switch penaltyDodge(b, view, owed, way: turn, keepClear: keepClear, locked: locked) {
+                case .onward: return BoatInput(rudder: turn * penaltyRudder(b, turn, owed, view))
+                case .input(let input): return input
+                case .plan: return nil
+                }
             }
             // Not turning it yet: as under @5, she keeps clear if 21.2 binds her (a crossing of her own sailing started
             // it), and before her start while putting it off in the crowd (#280).
@@ -630,62 +646,161 @@ struct BotBrain: Sendable {
            turnSweep(b, view, direction: away, angle: penaltyTurnLeft(b, owed, view, direction: away)) == nil {
             way = away
             penaltyTurn = away
+            releaseEscape(view)
         }
         guard let clear = clearOfRounding(way) else { return markAhead.map { holdOff($0.mark) } ?? sailOn() }
         if clear != way {
             way = clear
             penaltyTurn = clear
+            releaseEscape(view)
         }
-        let onward = BoatInput(rudder: way * penaltyRudder(b, way, owed, view))
-        // Dodging spends her time: only while her latest start, `penaltyStartMargin` to spare, is still to come. Past it,
-        // only a boat about to hit her on the side she turns, for a little of that margin (`lateDodgeInput`, #528).
-        guard latestStartSeconds(owed, b, view) > 0 else { return lateDodgeInput(b, view, owed, way: way) ?? onward }
+        switch penaltyDodge(b, view, owed, way: way, keepClear: keepClear, locked: locked) {
+        case .onward: return BoatInput(rudder: way * penaltyRudder(b, way, owed, view))
+        case .input(let input): return input
+        case .plan: return nil
+        }
+    }
+
+    /// What she does about her penalty turn's sweep as she turns it `way`'s way (+1 to starboard) (`penaltyDodge`):
+    /// turn on, steer (`input`), or leave the helm to her start plan (a way out over the line early before the gun).
+    enum PenaltyDodge {
+        case onward
+        case input(BoatInput)
+        case plan
+    }
+
+    /// "Dodge, then carry on", committed (#528, the owner's ruling of 2026-10-15): turning her penalty turn `way`'s way,
+    /// a boat crossing what is left of its sweep inside her keep-clear lookahead (`turnSweep`), or about to hit her once
+    /// she is taking the penalty (rule 21.2, `keepClear`) as the turn sweeps her towards it: she turns the other way if
+    /// its sweep is clear (and the turn may go that way, with time for it), a crossing back only changing the turn's way;
+    /// otherwise she picks a way out (`penaltyEscapeHeading`, against every boat, from where it puts her; in open water a
+    /// pack's tie goes to room, at a mark she holds) and holds it (`PenaltyEscape`), sheeted for speed (`steer`), until
+    /// what is left of her turn is clear past her lookahead by `penaltyEscapeRelease` and no boat is about to hit her,
+    /// then turns on. What she commits to is the direction (`EscapeSide`, once she steers off her heading): whenever the
+    /// heading she holds stops keeping her room (`penaltyEscapeHolds`), every decision in close company, she picks it
+    /// again on that side, never back through the boats. Her time: while her latest start (`latestStartSeconds`) is to
+    /// come, and past it by no more than `penaltyLateDodgeSeconds`; then she turns on. Gated on the boat passing her
+    /// inside those seconds (#528 round 1), the dodge let 50 of the live all-National cell's calls go by turning on into
+    /// the boat at her latest start; ungated, the cell's own-turn calls fell from 98 to 84. Before her start, not over
+    /// the line early: that leaves her to her start plan.
+    private mutating func penaltyDodge(_ b: SeatView.OwnBoat, _ view: SeatView, _ owed: OwedPenalty, way: Double,
+                                       keepClear: (heading: Double, away: Double, boat: SeatView.OtherBoat)?,
+                                       locked: Bool) -> PenaltyDodge {
+        let latest = latestStartSeconds(owed, b, view)
+        let lookahead = keepClearLookahead
         let conflict = turnSweep(b, view, direction: way, angle: penaltyTurnLeft(b, owed, view, direction: way))
-        let soon = conflict.flatMap { $0.seconds < keepClearLookahead ? $0 : nil }
         let towards = keepClear.flatMap { $0.away != way ? $0 : nil }
-        guard soon != nil || towards != nil else { return onward }
+        func release() { releaseEscape(view) }
+        func escape(_ heading: Double) -> PenaltyDodge {
+            // A way out into the race area's edge or a mark (a fallback, or a held heading the boats have closed on
+            // with none left on her side): she turns on, a turn keeps her where she is (#528 fix 2).
+            guard avoidEdges(b, view, desired: heading) == nil, avoidMarks(b, view, desired: heading) == nil else {
+                release()
+                return .onward
+            }
+            guard !crossesEarly(b, view, heading: heading) else { return .plan }
+            return .input(steer(b, toHeading: heading, view))
+        }
+        if latest <= -Self.penaltyLateDodgeSeconds { release() }
+        if var held = penaltyEscape {
+            let clear = towards == nil && (conflict.map { $0.seconds >= lookahead + Self.penaltyEscapeRelease } ?? true)
+            guard !clear else {
+                release()
+                return .onward
+            }
+            // Once the heading stops keeping her room she picks it again, on the side she committed to, round the way
+            // out she first chose (#528 fix 3), not the heading she has come to.
+            if !penaltyEscapeHolds(b, view, heading: held.heading, horizon: escapeHorizon(latest)),
+               let heading = penaltyEscapeHeading(b, view, ways: [way],
+                                                  angle: { self.penaltyTurnLeft(b, owed, view, direction: $0) },
+                                                  horizon: escapeHorizon(latest), side: held.side, around: held.toward,
+                                                  openWater: nearestMark(b, view) == nil) {
+                held.side = EscapeSide.latch(held.side, current: b.heading, heading: heading)
+                held.heading = heading
+                penaltyEscape = held
+            }
+            return escape(held.heading)
+        }
+        let soon = conflict.flatMap { $0.seconds < lookahead ? $0 : nil }
+        guard soon != nil || towards != nil, latest > -Self.penaltyLateDodgeSeconds else { return .onward }
         // The other way, if it is clear and hers to turn, with time for all it has left.
         let other = -way
         let left = Double(owed.completeDeadlineTick - view.tick) * Self.tickStep
-        if !locked, left > penaltyTurnSeconds(b, view, owed, direction: other) + HandTackTable.penaltyTurn.margin,
+        if latest > 0, !locked, left > penaltyTurnSeconds(b, view, owed, direction: other) + HandTackTable.penaltyTurn.margin,
            turnSweep(b, view, direction: other, angle: penaltyTurnLeft(b, owed, view, direction: other)) == nil,
            towards.map({ $0.away == other }) ?? true {
             penaltyTurn = other
-            return BoatInput(rudder: other * penaltyRudder(b, other, owed, view))
+            return .input(BoatInput(rudder: other * penaltyRudder(b, other, owed, view)))
         }
-        // Steer off, away from the boat, and turn on once clear. Before her start, not over the line early: a heading
-        // that would carry her over before the gun leaves her to her start plan meanwhile, as putting a turn off does.
-        let heading = towards?.heading ?? soon.map { penaltyDodgeHeading(b, view, from: $0.boat) } ?? b.heading
-        guard !crossesEarly(b, view, heading: heading) else { return nil }
-        return steer(b, toHeading: heading, view)
+        let heading = penaltyEscapeHeading(b, view, ways: [way], angle: { self.penaltyTurnLeft(b, owed, view, direction: $0) },
+                                           horizon: escapeHorizon(latest), openWater: nearestMark(b, view) == nil)
+            ?? towards?.heading ?? b.heading
+        penaltyEscape = PenaltyEscape(heading: heading, since: view.time,
+                                      side: EscapeSide.latch(nil, current: b.heading, heading: heading), toward: heading)
+        return escape(heading)
     }
 
-    /// "Turn away, not through" (#528): past her current turn's latest start (`latestStartSeconds` at or below zero),
-    /// by no more than `penaltyLateDodgeSeconds`, with a boat about to hit her (`penaltyKeepClear`, any boat, whatever
-    /// the rules) on the side her turn goes (`way`, +1 to starboard), and past her on the dodge's heading inside what is
-    /// left of those seconds (`lateDodgePasses`): her input steering off it, away from it, as the dodge before it does,
-    /// else nil (she turns on): a dodge cut short by the time turns her back into the boat, nearer. Before her start,
-    /// not over the line early. Steering off spends the margin, faster than the clock where it turns her back off her
-    /// turn (more of it left), and stops once `penaltyLateDodgeSeconds` of it are gone.
-    private func lateDodgeInput(_ b: SeatView.OwnBoat, _ view: SeatView, _ owed: OwedPenalty, way: Double) -> BoatInput? {
+    /// Letting a way out go (`penaltyEscape`).
+    private mutating func releaseEscape(_ view: SeatView) {
+        penaltyEscape = nil
+    }
+
+    /// Seconds ahead she scores a way out from (`penaltyEscapeHeading`): `penaltyEscapeHorizon`, no more than the time
+    /// she has to sail it (her latest start and `penaltyLateDodgeSeconds`), at least a second.
+    private func escapeHorizon(_ latest: Double) -> Double {
+        min(Self.penaltyEscapeHorizon, max(1, latest + Self.penaltyLateDodgeSeconds))
+    }
+
+    /// What `clearingCourse` has her do: steer her course to clear water, or start her turn now.
+    enum PenaltyCourse {
+        case steer(BoatInput)
+        case start
+    }
+
+    /// "Move, don't wait" (#528, the owner's ruling of 2026-10-15): racing, on a class she turns by hand, owing a turn
+    /// not yet 30° in, with boats crossing its sweep each way she may turn (`PenaltySweeps.isCrowded`), she sails a
+    /// clearing course (`penaltyEscapeHeading`: away from where the boats will be, rule-safe against every boat) sheeted
+    /// for speed, holds it, and picks again, on the side she committed to (`EscapeSide`), whenever it stops keeping her
+    /// room (`penaltyEscapeHolds`); with none on that side she holds the course she has. Every decision she
+    /// sweeps her turn again from where she is: the tick a way's sweep is clear she starts it (`startPenaltyTurn`).
+    /// She starts it anyway with a thin margin from `penaltyThinStartSeconds` of her latest start, the best way's first
+    /// conflict her keep-clear lookahead and `penaltyThinStartMargin` into it, and at her latest start the best way
+    /// (`penaltyWay`). Called with less than `penaltyMoveMinSeconds` of it, she has nothing to move with: she starts at
+    /// once. Nil where she doesn't: before her start (`clearingRoom`), 30° in, one way clear, on the last leg or with
+    /// her next mark close (#351, `putOffEndsAtAMark`), a mark close aboard (#461), or no heading she may sail.
+    private mutating func clearingCourse(_ b: SeatView.OwnBoat, _ owed: OwedPenalty, _ view: SeatView,
+                                         _ sweeps: PenaltySweeps) -> PenaltyCourse? {
+        guard b.status == .racing, !owed.isStarted, sweeps.isCrowded, !startsBeforeHerTurn(owed, b, view),
+              !isOnLastLeg(b, view), !putOffEndsAtAMark(b, view, owed), nearestMark(b, view) == nil else { return nil }
         let latest = latestStartSeconds(owed, b, view)
-        guard latest <= 0, latest > -Self.penaltyLateDodgeSeconds,
-              let keepClear = penaltyKeepClear(b, view), keepClear.away != way,
-              lateDodgePasses(keepClear.boat, b, view, heading: keepClear.heading) < latest + Self.penaltyLateDodgeSeconds,
-              !crossesEarly(b, view, heading: keepClear.heading) else { return nil }
-        return steer(b, toHeading: keepClear.heading, view)
-    }
-
-    /// Seconds until `other`, sailing on, is past her (`keepClearLengths` beyond their closest approach) while she
-    /// sails `heading` at her speed; infinity while it isn't closing or moving off her.
-    private func lateDodgePasses(_ other: SeatView.OtherBoat, _ b: SeatView.OwnBoat, _ view: SeatView,
-                                 heading: Double) -> Double {
-        let offset = other.position - b.position
-        let relative = other.velocity - Vec2.heading(heading) * b.speed
-        let squared = relative.dot(relative)
-        guard squared > 0 else { return .infinity }
-        let closest = max(0, -offset.dot(relative) / squared)
-        return closest + view.boatClass.hull.length * keepClearLengths / squared.squareRoot()
+        if penaltyClearing.since == nil {
+            guard latest >= Self.penaltyMoveMinSeconds, hasTimeToTurnLater(owed, b, view) else { return .start }
+            penaltyClearing.since = view.time
+            penaltyClearing.isCourse = false
+            penaltyClearing.side = nil
+            penaltyClearing.toward = nil
+        }
+        let best = [sweeps.port, sweeps.starboard].compactMap { $0?.seconds }.max() ?? .infinity
+        if latest <= 0 || !hasTimeToTurnLater(owed, b, view)
+            || latest <= Self.penaltyThinStartSeconds && best >= keepClearLookahead + Self.penaltyThinStartMargin {
+            return .start
+        }
+        let horizon = min(latest, Self.penaltyEscapeHorizon)
+        // Once her course stops keeping her room she picks it again, on the side she committed to; with none there, she
+        // holds the course she has.
+        let ways: [Double] = sweeps.only.map { [$0] } ?? [-1, 1]
+        if !penaltyClearing.isCourse || !penaltyEscapeHolds(b, view, heading: penaltyClearing.heading, horizon: horizon),
+           let heading = penaltyEscapeHeading(b, view, ways: ways, angle: { self.penaltyTurnLeft(b, owed, view, direction: $0) },
+                                              horizon: horizon, side: penaltyClearing.side,
+                                              around: penaltyClearing.toward, openWater: true) {
+            penaltyClearing.side = EscapeSide.latch(penaltyClearing.side, current: b.heading, heading: heading)
+            if penaltyClearing.toward == nil { penaltyClearing.toward = heading }
+            penaltyClearing.heading = heading
+            penaltyClearing.isCourse = true
+        } else if !penaltyClearing.isCourse {
+            return nil
+        }
+        return .steer(steer(b, toHeading: penaltyClearing.heading, view))
     }
 
     /// Under fleet-rules@6 (#488, "turn before the mark", the owner's ruling of 2026-10-12): the mark of her leg whose
@@ -706,15 +821,6 @@ struct BotBrain: Sendable {
         if distance <= 0 { return left < reach / speed + turn ? (mark, true) : nil }
         let toZone = distance / speed
         return toZone < left && left < toZone + 2 * reach / speed + turn ? (mark, false) : nil
-    }
-
-    /// The heading she steers off a boat `other` crossing her penalty turn's sweep (#488): away from it as
-    /// `penaltyKeepClear` steers, 35° off her heading, off any mark or the race area's edge.
-    private func penaltyDodgeHeading(_ b: SeatView.OwnBoat, _ view: SeatView, from other: SeatView.OtherBoat) -> Double {
-        let away = Self.away(from: other.position - b.position, b)
-        let clear = sailable(b.heading + away * deg2rad(35), wind: b.windDirection)
-        let heading = avoidMarks(b, view, desired: clear) ?? clear
-        return avoidEdges(b, view, desired: heading) ?? heading
     }
 
     /// One tick of the race, seconds, from the rules' tick count for a second (the brain holds no race, #98).
@@ -870,7 +976,11 @@ struct BotBrain: Sendable {
         }
         if penaltyClearing.since == nil, sweeps.isCrowded {
             penaltyClearing.since = view.time
-            penaltyClearing.heading = clearingHeading(b, view)
+            // Under fleet-rules@6, the clearing course's heading (#528), for the bear-away's few seconds.
+            penaltyClearing.heading = Self.turnsByCrossings(view)
+                ? penaltyEscapeHeading(b, view, ways: [-1, 1], angle: { _ in 2 * .pi }, horizon: table.seconds)
+                    ?? clearingHeading(b, view)
+                : clearingHeading(b, view)
         }
         let heading = penaltyClearing.heading
         guard let since = penaltyClearing.since, sweeps.isCrowded,
@@ -1512,7 +1622,7 @@ struct BotBrain: Sendable {
 
     /// Whether she is about to hit `other`, sailing `desired` at her speed for up to `lookahead` seconds: they come
     /// within `keepClearDistance` hull lengths, centre to centre.
-    private func isAboutToHit(_ other: SeatView.OtherBoat, _ b: SeatView.OwnBoat, _ view: SeatView, desired: Double,
+    func isAboutToHit(_ other: SeatView.OtherBoat, _ b: SeatView.OwnBoat, _ view: SeatView, desired: Double,
                               lookahead: Double) -> Bool {
         guard (other.position - b.position).length < 30 else { return false }
         return Self.closestApproach(of: other, to: b, heading: desired, lookahead: lookahead)
@@ -1537,7 +1647,7 @@ struct BotBrain: Sendable {
     }
 
     /// A heading that bears her away from a mark she is about to sail into, if there is one.
-    private func avoidMarks(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double) -> Double? {
+    func avoidMarks(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double) -> Double? {
         let ahead = Vec2.heading(desired)
         for obstacle in view.course.obstacles {
             let offset = obstacle.position - b.position
@@ -1594,7 +1704,7 @@ struct BotBrain: Sendable {
     /// is about to sail into it: the nearest to `desired`, towards the wind first, whose point a few
     /// seconds' sailing and a hull length ahead is in the race area. The edge costs her speed, never a
     /// penalty, but a boat pinned against it bow on turns away only at her class's slowest rate.
-    private func avoidEdges(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double) -> Double? {
+    func avoidEdges(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double) -> Double? {
         let ahead = max(b.speed, 1) * Self.edgeLookahead + view.boatClass.hull.length
         func isClear(_ heading: Double) -> Bool { view.course.isInRaceArea(b.position + Vec2.heading(heading) * ahead) }
         guard !isClear(desired) else { return nil }
