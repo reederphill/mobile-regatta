@@ -183,6 +183,9 @@ extension BotBrain {
         var side: EscapeSide?
         /// The course to clear water she first chose (#528 fix 3): she picks again round it, not round her heading.
         var toward: Double?
+        /// Racing, whether she has made her first clearing-course decision for the turn she owes next
+        /// (`clearingCourse`); cleared as each turn is served, so the next is decided afresh.
+        var isCourseChosen = false
     }
 
     /// What she knows of a stall (`centresStalled`).

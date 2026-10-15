@@ -27,22 +27,28 @@ import Testing
         #expect(hex64(six) == "0xb5f6b3e1a7f78b40")
     }
 
-    /// And skiff@8, the default class until #462's switch, sails exactly as before #462's bots layer (every change there is behind "the
-    /// class has the new planing rule", skiff@9's `stayOnSpeedShare` and `apparentWind`): all-bot races through the
-    /// start and the first beat, and through two laps with their runs, pinned on #462's core tip before any bot code
-    /// changed (re-pinned there on fleet-rules@6, #490's default, and on #508: the windward final approach and the lower
-    /// tacking speed by hand near her mark are every class's; the two laps again on #509, whose hold of a turn refused
-    /// near her mark is every class's too: the start and the first beat have none and kept their digest; the two laps
-    /// again on #518, whose pick of the leeward gate's mark is every class's: the start and the first beat reach no gate
-    /// and kept theirs; the two laps, seed 462, again on #517, whose circle round a boat taking a penalty is every
-    /// class's before a tack or gybe: it holds a turn off first 18.8 s before the gun, and others up the first beat, and
-    /// with the circle off they kept their digest; in the start and the first beat, seed 459, no circle holds any turn
-    /// off, and they kept theirs; the two laps again on #523, whose gate pick range and exit tack are every class's: the start and the first beat reach no gate and kept theirs; both again on #528, whose dodge past a turn's latest start
-    /// is every by-hand class's: with `penaltyLateDodgeSeconds` at zero both kept their digests; both again on #528's
-    /// rework, whose clearing course, held dodge and scanned way out are every by-hand class's under fleet-rules@6,
-    /// replacing the 35° steer-off: no constant returns it to the old path; the two laps again on its fix round, whose
-    /// way out commits to a direction and moves out of a pack in open water: the start and the first beat kept theirs; both again on its second fix round, whose way out keeps her and her turn's circle off the race area's edge; both again on its third, whose held way out is picked again round the heading she first chose, not the one she has come to (a long hold no longer ratchets her round), and is let go when her sweep clears; both again on its fifth, whose way out near the race area's edge takes the side with more water to it). On fleet-rules@6 since #517's default switch: the class is the test's subject, and on
-    /// fleet-rules@7 the two laps have a 21.2 incident called as 16.1.
+    /// And skiff@8, the default class until #462's switch, sails exactly as before #462's bots layer (every change there
+    /// is behind "the class has the new planing rule", skiff@9's `stayOnSpeedShare` and `apparentWind`): all-bot races
+    /// through the start and the first beat (seed 459), and through two laps with their runs (seed 462), pinned on #462's
+    /// core tip before any bot code changed. On fleet-rules@6 since #517's default switch: the class is the test's
+    /// subject, and on fleet-rules@7 the two laps have a 21.2 incident called as 16.1.
+    ///
+    /// Re-pinned since, each time for a bot change every class shares (the start and the first beat kept their digest
+    /// wherever the change never reaches them):
+    /// - fleet-rules@6 (#490's default) and #508 (the windward final approach, the lower tacking speed by hand near her
+    ///   mark): both.
+    /// - #509 (holding a turn refused near her mark), #518 (the leeward gate's mark pick), #523 (gate pick range and
+    ///   exit tack): the two laps only.
+    /// - #517 (the circle round a boat taking a penalty, before a tack or gybe): the two laps; it holds a turn off 18.8 s
+    ///   before the gun and others up the first beat, and with the circle off they kept their digest.
+    /// - #528 (penalty turns in clear water, every by-hand class's under fleet-rules@6): both, for the dodge past a turn's
+    ///   latest start (with `penaltyLateDodgeSeconds` at zero both kept theirs); both again for the rework's clearing
+    ///   course, held dodge and scanned way out, which replace the 35° steer-off with no constant to return it; then on
+    ///   each fix round that moved the way out (a committed direction and moving out of a pack, the race area's edge,
+    ///   picking again round the first heading chosen, the side with more water to the edge); the start and the first
+    ///   beat again on its eighth fix round (a way out released with each turn served, and none held in open water with
+    ///   no heading to sail): the two laps kept theirs; and back to the seventh round's on the ninth, which keeps that
+    ///   open-water turn-on to racing (its only reach into the start and the first beat was before the gun).
     @Test(.onSixRules) func skiffEightBotsAreBitIdentical() throws {
         let short = try Self.digest(seed: 459, boatClass: Self.skiffEight)
         let long = try Self.digest(seed: 462, boatClass: Self.skiffEight, seconds: 700)

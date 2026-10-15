@@ -552,6 +552,13 @@ struct BotBrain: Sendable {
         penaltyWaySeen = owed.direction
         if servedOne {
             penaltyClearing.isDone = true
+            // The next turn's way out and course to clear water are chosen fresh, from where she is then: a way out held
+            // for the turn just served (its heading, side and the way she first chose) says nothing of the next.
+            releaseEscape(view)
+            penaltyClearing.isCourseChosen = false
+            penaltyClearing.isCourse = false
+            penaltyClearing.side = nil
+            penaltyClearing.toward = nil
             // Between turns with a mark close aboard: she sails clear of it before the next, as under @5 (#102).
             if penaltyTurn != nil, let mark = nearestMark(b, view),
                mark.clearance < view.boatClass.hull.length * Self.penaltyMarkClearance, canPutOffToStartMargin(owed, b, view) {
@@ -678,11 +685,11 @@ struct BotBrain: Sendable {
     /// what is left of her turn is clear past her lookahead by `penaltyEscapeRelease` and no boat is about to hit her,
     /// then turns on. What she commits to is the direction (`EscapeSide`, once she steers off her heading): whenever the
     /// heading she holds stops keeping her room (`penaltyEscapeHolds`), every decision in close company, she picks it
-    /// again on that side, never back through the boats. Her time: while her latest start (`latestStartSeconds`) is to
-    /// come, and past it by no more than `penaltyLateDodgeSeconds`; then she turns on. Gated on the boat passing her
-    /// inside those seconds (#528 round 1), the dodge let 50 of the live all-National cell's calls go by turning on into
-    /// the boat at her latest start; ungated, the cell's own-turn calls fell from 98 to 84. Before her start, not over
-    /// the line early: that leaves her to her start plan.
+    /// again on that side, never back through the boats. With no heading she may sail (or none left on that side) and no
+    /// boat about to hit her, racing in open water she turns on, since holding a course there only burns her margin; at a
+    /// mark, or before the gun, she waits on her heading. A way out is per turn: serving one lets it go. Her time: while her latest start (`latestStartSeconds`) is to
+    /// come, and past it by no more than `penaltyLateDodgeSeconds`; then she turns on, whether or not the boat has
+    /// passed. Before her start, not over the line early: that leaves her to her start plan.
     private mutating func penaltyDodge(_ b: SeatView.OwnBoat, _ view: SeatView, _ owed: OwedPenalty, way: Double,
                                        keepClear: (heading: Double, away: Double, boat: SeatView.OtherBoat)?,
                                        locked: Bool) -> PenaltyDodge {
@@ -690,6 +697,11 @@ struct BotBrain: Sendable {
         let lookahead = keepClearLookahead
         let conflict = turnSweep(b, view, direction: way, angle: penaltyTurnLeft(b, owed, view, direction: way))
         let towards = keepClear.flatMap { $0.away != way ? $0 : nil }
+        let openWater = nearestMark(b, view) == nil
+        // Racing only (#528 fix round 9): before the gun a held way out is her start plan's, as before round 8. Traced,
+        // the turn-on before the gun released held ways out in the start area (490 of the live all-Club cell's 517) and
+        // moved its missed-penalty DSQs from 13 to 17, the all-National cell's from 5 to 6.
+        let turnsOnInOpenWater = openWater && b.status == .racing
         func release() { releaseEscape(view) }
         func escape(_ heading: Double) -> PenaltyDodge {
             // A way out into the race area's edge or a mark (a fallback, or a held heading the boats have closed on
@@ -710,14 +722,20 @@ struct BotBrain: Sendable {
             }
             // Once the heading stops keeping her room she picks it again, on the side she committed to, round the way
             // out she first chose (#528 fix 3), not the heading she has come to.
-            if !penaltyEscapeHolds(b, view, heading: held.heading, horizon: escapeHorizon(latest)),
-               let heading = penaltyEscapeHeading(b, view, ways: [way],
-                                                  angle: { self.penaltyTurnLeft(b, owed, view, direction: $0) },
-                                                  horizon: escapeHorizon(latest), side: held.side, around: held.toward,
-                                                  openWater: nearestMark(b, view) == nil) {
-                held.side = EscapeSide.latch(held.side, current: b.heading, heading: heading)
-                held.heading = heading
-                penaltyEscape = held
+            if !penaltyEscapeHolds(b, view, heading: held.heading, horizon: escapeHorizon(latest)) {
+                if let heading = penaltyEscapeHeading(b, view, ways: [way],
+                                                      angle: { self.penaltyTurnLeft(b, owed, view, direction: $0) },
+                                                      horizon: escapeHorizon(latest), side: held.side,
+                                                      around: held.toward, openWater: openWater) {
+                    held.side = EscapeSide.latch(held.side, current: b.heading, heading: heading)
+                    held.heading = heading
+                    penaltyEscape = held
+                } else if turnsOnInOpenWater, towards == nil {
+                    // None left on her side, racing in open water: holding a heading that no longer keeps her room only burns
+                    // her margin (the owner's rule: in open water she moves, never holds in the pack). She turns on.
+                    release()
+                    return .onward
+                }
             }
             return escape(held.heading)
         }
@@ -732,9 +750,12 @@ struct BotBrain: Sendable {
             penaltyTurn = other
             return .input(BoatInput(rudder: other * penaltyRudder(b, other, owed, view)))
         }
-        let heading = penaltyEscapeHeading(b, view, ways: [way], angle: { self.penaltyTurnLeft(b, owed, view, direction: $0) },
-                                           horizon: escapeHorizon(latest), openWater: nearestMark(b, view) == nil)
-            ?? towards?.heading ?? b.heading
+        // No heading she may sail and no boat about to hit her: racing in open water she turns on (holding her course
+        // there only burns her margin, the owner's rule); at a mark, or before the gun, she waits, holding her heading.
+        guard let heading = penaltyEscapeHeading(b, view, ways: [way],
+                                                 angle: { self.penaltyTurnLeft(b, owed, view, direction: $0) },
+                                                 horizon: escapeHorizon(latest), openWater: openWater)
+                ?? towards?.heading ?? (turnsOnInOpenWater ? nil : b.heading) else { return .onward }
         penaltyEscape = PenaltyEscape(heading: heading, since: view.time,
                                       side: EscapeSide.latch(nil, current: b.heading, heading: heading), toward: heading)
         return escape(heading)
@@ -773,9 +794,10 @@ struct BotBrain: Sendable {
         guard b.status == .racing, !owed.isStarted, sweeps.isCrowded, !startsBeforeHerTurn(owed, b, view),
               !isOnLastLeg(b, view), !putOffEndsAtAMark(b, view, owed), nearestMark(b, view) == nil else { return nil }
         let latest = latestStartSeconds(owed, b, view)
-        if penaltyClearing.since == nil {
+        // Her first decision for this turn (not the pre-start bear-away's `since`, which `clearingRoom` sets).
+        if !penaltyClearing.isCourseChosen {
             guard latest >= Self.penaltyMoveMinSeconds, hasTimeToTurnLater(owed, b, view) else { return .start }
-            penaltyClearing.since = view.time
+            penaltyClearing.isCourseChosen = true
             penaltyClearing.isCourse = false
             penaltyClearing.side = nil
             penaltyClearing.toward = nil

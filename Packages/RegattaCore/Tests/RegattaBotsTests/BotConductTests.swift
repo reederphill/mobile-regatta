@@ -1271,14 +1271,74 @@ import RegattaCore
             return (pilot.brain.turnSweep(view.own, view, direction: way)?.seconds ?? .infinity) < lookahead
         }
         let (race, way) = try Self.lateStartScene(seed: seed, latest: -0.2, others)
+        // Tick by tick until she puts her rudder over her turn's way: she holds off while the boat is in what is left
+        // of her sweep inside her lookahead, and starts once it clears or her late-dodge time
+        // (`penaltyLateDodgeSeconds` past her latest start) runs out, whichever comes first. In this scene the boat
+        // is still in it then (it runs down at her): she starts at the cap.
         var pilot = Pilot(seat: 0, plannedTack: nil, race: race, skill: 1, weaknesses: BotWeaknesses(skill: 1))
-        let input = try #require(pilot.drive(race)?.input)
-        #expect(input.rudderValue * way <= 0, "seed \(seed): she put her rudder over her turn's way at once")
+        var heldOff = 0
+        var start: (inSweep: Bool, latest: Double)?
+        for _ in 0..<Int(10 * Double(Race.tickRate)) where !race.isOver {
+            let view = race.seatView(for: 0)
+            let owed = try #require(view.own.penalty)
+            let angle = pilot.brain.penaltyTurnLeft(view.own, owed, view, direction: way)
+            let inSweep = (pilot.brain.turnSweep(view.own, view, direction: way, angle: angle)?.seconds ?? .infinity) < lookahead
+            let latest = pilot.brain.latestStartSeconds(owed, view.own, view)
+            if let input = pilot.drive(race)?.input, input.rudderValue * way > 0 {
+                start = (inSweep, latest)
+                break
+            }
+            heldOff += 1
+            race.step()
+        }
+        let started = try #require(start, "seed \(seed): never started")
+        #expect(heldOff > 0, "seed \(seed): she put her rudder over her turn's way at once")
+        let capped = started.latest <= -BotBrain.penaltyLateDodgeSeconds
+        #expect(!started.inSweep || capped,
+                "seed \(seed): started with the boat in her sweep at latest \(started.latest) s, inside her late-dodge time")
+        #expect(started.latest > -BotBrain.penaltyLateDodgeSeconds - 0.5,
+                "seed \(seed): held off to latest \(started.latest) s, past her late-dodge time")
         let crossed = Self.sailCrossings(race, seconds: 40, way: way)
         #expect(crossed.servedAt != nil, "seed \(seed): not served")
         #expect(!crossed.contact, "seed \(seed): contact")
         #expect(!crossed.kinds.contains { if case .disqualified(seat: 0, _) = $0 { true } else { false } },
                 "seed \(seed): disqualified")
+    }
+
+    /// #528 (review, fix round 8): a way out is per turn. Owing two turns and turning the first, holding a way out
+    /// chosen for it (a stale heading, side and first choice), the tick she sees the first served she lets it go: the
+    /// second turn's way out, with a boat in its sweep, is chosen fresh from where she is, and her course to clear water
+    /// is undecided again. Before the fix the first turn's way out carried into the second's sweep.
+    @Test func secondOwedTurnChoosesItsWayOutFresh() throws {
+        let others: [(ahead: Double, across: Double, running: Bool)] = [(3, 1.0, true)]
+        let lookahead = BotWeaknesses(skill: 1).keepClearLookahead
+        let seed = try firstSeed(in: 1...20) { seed in
+            let (race, way) = try Self.lateStartScene(seed: seed, latest: 3, others)
+            let pilot = Pilot(seat: 0, plannedTack: nil, race: race, skill: 1, weaknesses: BotWeaknesses(skill: 1))
+            let view = race.seatView(for: 0)
+            return (pilot.brain.turnSweep(view.own, view, direction: way)?.seconds ?? .infinity) < lookahead
+        }
+        let (race, way) = try Self.lateStartScene(seed: seed, latest: 3, others)
+        var pilot = Pilot(seat: 0, plannedTack: nil, race: race, skill: 1, weaknesses: BotWeaknesses(skill: 1))
+        // As her brain stood turning the first of two: her turn's way, two owed, a way out held since long ago.
+        let heading = race.boats[0].heading
+        let stale = wrapAngle(heading - way * deg2rad(50))
+        pilot.brain.penaltyTurn = way
+        pilot.brain.penaltyOwed = 2
+        pilot.brain.penaltyWaySeen = Int(way)
+        pilot.brain.penaltyEscape = .init(heading: stale, since: race.time - 30,
+                                          side: .init(from: heading, side: -way), toward: stale)
+        pilot.brain.penaltyClearing.isCourseChosen = true
+        pilot.brain.penaltyClearing.isCourse = true
+        pilot.brain.penaltyClearing.toward = stale
+        let decided = pilot.drive(race)
+        try #require(decided != nil)
+        if let escape = pilot.brain.penaltyEscape {
+            #expect(escape.since == race.time, "seed \(seed): the first turn's way out (since \(escape.since)) carried on")
+            #expect(escape.toward != stale, "seed \(seed): the second turn's way out kept the first's heading")
+        }
+        #expect(!pilot.brain.penaltyClearing.isCourseChosen && pilot.brain.penaltyClearing.toward == nil,
+                "seed \(seed): her course to clear water carried into the second turn")
     }
 
     /// #528 acceptance: mid-turn, tacked and bearing away to her gybe, just past her latest start, a boat runs
@@ -1397,12 +1457,19 @@ import RegattaCore
             let pilot = Pilot(seat: 0, plannedTack: nil, race: race, skill: 1, weaknesses: BotWeaknesses(skill: 1))
             let view = race.seatView(for: 0)
             let conflicts = [-1.0, 1.0].map { pilot.brain.turnSweep(view.own, view, direction: $0)?.seconds }
-            return conflicts.allSatisfy { $0 != nil } && conflicts.compactMap { $0 }.max()! >= lookahead
+            return conflicts.allSatisfy { $0 != nil }
+                && conflicts.compactMap { $0 }.max()! >= lookahead + BotBrain.penaltyThinStartMargin
         }
         let (race, _) = try Self.lateStartScene(seed: seed, latest: 9, locked: false, pack)
         let cleared = Self.sailToClearWater(race, seconds: 45)
         let starting = try #require(cleared.latestStarting, "seed \(seed): never started")
         #expect(starting > 2, "seed \(seed): started \(starting) s from her latest start")
+        // The thin margin is what starts her: at once inside `penaltyThinStartSeconds` of her latest start, but not
+        // further off, where the same scene has her sail her clearing course first.
+        #expect((cleared.startedAfter ?? .infinity) < 0.5, "seed \(seed): started after \(cleared.startedAfter ?? -1) s")
+        let further = try Self.lateStartScene(seed: seed, latest: BotBrain.penaltyThinStartSeconds + 3, locked: false, pack).race
+        let early = Self.sailToClearWater(further, seconds: 45)
+        #expect((early.startedAfter ?? .infinity) > 1, "seed \(seed): started after \(early.startedAfter ?? -1) s with her latest start \(BotBrain.penaltyThinStartSeconds + 3) s off")
         #expect(cleared.served && !cleared.disqualified, "seed \(seed): not served")
     }
 
