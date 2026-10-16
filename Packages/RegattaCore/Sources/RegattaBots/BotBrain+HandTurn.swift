@@ -177,6 +177,15 @@ extension BotBrain {
         var heading = 0.0
         /// Done for the turns she owes now: she turns.
         var isDone = false
+        /// Racing under fleet-rules@6, whether `heading` is her course to clear water (`clearingCourse`, #528).
+        var isCourse = false
+        /// The side of her heading she committed to sailing her course to clear water on (`EscapeSide`, #528).
+        var side: EscapeSide?
+        /// The course to clear water she first chose (#528 fix 3): she picks again round it, not round her heading.
+        var toward: Double?
+        /// Racing, whether she has made her first clearing-course decision for the turn she owes next
+        /// (`clearingCourse`); cleared as each turn is served, so the next is decided afresh.
+        var isCourseChosen = false
     }
 
     /// What she knows of a stall (`centresStalled`).
