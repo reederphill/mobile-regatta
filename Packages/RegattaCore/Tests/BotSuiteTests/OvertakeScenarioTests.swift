@@ -241,8 +241,8 @@ import Testing
         for i in 0..<(2 * Race.tickRate) { step(boat(1, -Double(i) * 0.01, -5 * length, heading: -12)) }
         let chosen = try #require(probe.records[1].passChosen)
         #expect(abs(chosen.lengths - 5) < 1e-9 && chosen.side == .leeward)
-        // Alongside to leeward, 0.8 lengths off, with a contact and the calls: hers on the bot (rule 12), the bot's on
-        // her (rule 11), and a bot-bot call and contact that stay out of the pair.
+        // Alongside to leeward, 0.8 lengths off, with a contact and the calls: one on the bot (rule 12, she its victim),
+        // one on her (she the offender), and a bot-bot call and contact that stay out of the pair.
         step(boat(1, -0.8 * length, 0), events: [
             .contact(SeatPair(0, 1)), .contact(SeatPair(1, 2)),
             .ruleCall(call(rule: .clearAstern, offender: 1, victim: 0)),

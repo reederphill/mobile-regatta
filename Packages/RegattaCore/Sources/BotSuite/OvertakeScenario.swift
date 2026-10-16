@@ -14,9 +14,11 @@ import RegattaCore
 
 /// Before the gun or on the first beat.
 public enum OvertakePhase: String, CaseIterable, Codable, Hashable, Sendable {
-    /// Placed `OvertakeScenario.prestartLead` before the gun just below the line's middle, eased, holding there.
+    /// Placed `OvertakeScenario.prestartLead` before the gun 1.5 hull lengths below the line, a quarter line length
+    /// from its middle, held stalled (luffed to a 15° sailing angle, sheets eased) so the current carries her onto her
+    /// spot by the gun (owner, #530 a).
     case prestart
-    /// Placed a second after the gun about a third up the beat.
+    /// Placed a second after the gun a sixth of the way up the beat (`beatStart`).
     case beat
 }
 
@@ -114,7 +116,8 @@ public struct OvertakeBotResult: Codable, Hashable, Sendable {
     public var callsByRule: [String: Int]
     /// Rule calls on the scripted boat with this bot the victim.
     public var callsOnHer: Int
-    /// The closest she came to the scripted boat, centre to centre, hull lengths.
+    /// The closest she came to the scripted boat, centre to centre, hull lengths; -1 when no tick was sailed (kept out
+    /// of the rows, and finite so the JSON encodes).
     public var closestApproach: Double
     /// The first tick of a sustained offset off her course (`OvertakeProbe`), as hull lengths astern of her along her
     /// heading, and its side; nil if none.
@@ -713,7 +716,7 @@ struct OvertakeProbe {
         }
         return OvertakeBotResult(
             seat: seat, tier: tier, contacts: record.contacts, repeatContacts: record.repeatContacts, callsByRule: record.callsByRule, callsOnHer: record.callsOnHer,
-            closestApproach: record.closest, passChosenLengths: record.passChosen?.lengths,
+            closestApproach: record.closest.isFinite ? record.closest : -1, passChosenLengths: record.passChosen?.lengths,
             passChosenSide: record.passChosen?.side,
             clearAheadSeconds: record.clearAheadTick.map { Double($0 - startTick) / Double(Race.tickRate) },
             outcome: outcome, dirtySeconds: Double(record.dirtyTicks) / Double(Race.tickRate))
@@ -781,7 +784,7 @@ public struct OvertakeGroupRow: Codable, Hashable, Sendable {
         callsOnHerPer100 = count(\.callsOnHer)
         botBotContactsPer100 = Double(races.reduce(0) { $0 + $1.botBotContacts }) * per100
         botBotCallsPer100 = Double(races.reduce(0) { $0 + $1.botBotCalls }) * per100
-        let closest = bots.map(\.closestApproach).sorted()
+        let closest = bots.map(\.closestApproach).filter { $0 >= 0 }.sorted()
         closestMin = closest.first
         closestP10 = closest.isEmpty ? nil : TickTimings.percentile(10, ofSorted: closest)
         closestUnder1 = closest.filter { $0 < 1.0 }.count

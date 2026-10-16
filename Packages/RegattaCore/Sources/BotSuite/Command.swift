@@ -92,8 +92,9 @@ public struct BotSuiteOptions: Hashable, Sendable {
           --overtake-current <c> with the overtake scenario: with, without or both (default) a current
           --overtake-astern <n>  with the overtake scenario: the first bot this many hull lengths astern of her,
                                  centre to centre (repeatable; default 2, 4 and 6; each further bot 2 more)
-          --overtake-control     with the overtake scenario: also sail each layout with her 40 hull lengths abeam to
-                                 leeward, so the bots have nobody ahead (the false-fire and tack-away rates)
+          --overtake-control     with the overtake scenario: also sail each layout with her 30 hull lengths straight
+                                 across the course, the bots read against a phantom of her (the false-fire and
+                                 tack-away rates)
         Exits 1 when the run misses the thresholds, 2 on a usage or setup error.
         """
 
