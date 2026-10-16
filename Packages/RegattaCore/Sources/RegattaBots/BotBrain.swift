@@ -554,7 +554,7 @@ struct BotBrain: Sendable {
             penaltyClearing.isDone = true
             // The next turn's way out and course to clear water are chosen fresh, from where she is then: a way out held
             // for the turn just served (its heading, side and the way she first chose) says nothing of the next.
-            releaseEscape(view)
+            releaseEscape()
             penaltyClearing.isCourseChosen = false
             penaltyClearing.isCourse = false
             penaltyClearing.side = nil
@@ -653,13 +653,13 @@ struct BotBrain: Sendable {
            turnSweep(b, view, direction: away, angle: penaltyTurnLeft(b, owed, view, direction: away)) == nil {
             way = away
             penaltyTurn = away
-            releaseEscape(view)
+            releaseEscape()
         }
         guard let clear = clearOfRounding(way) else { return markAhead.map { holdOff($0.mark) } ?? sailOn() }
         if clear != way {
             way = clear
             penaltyTurn = clear
-            releaseEscape(view)
+            releaseEscape()
         }
         switch penaltyDodge(b, view, owed, way: way, keepClear: keepClear, locked: locked) {
         case .onward: return BoatInput(rudder: way * penaltyRudder(b, way, owed, view))
@@ -702,7 +702,7 @@ struct BotBrain: Sendable {
         // the turn-on before the gun released held ways out in the start area (490 of the live all-Club cell's 517) and
         // moved its missed-penalty DSQs from 13 to 17, the all-National cell's from 5 to 6.
         let turnsOnInOpenWater = openWater && b.status == .racing
-        func release() { releaseEscape(view) }
+        func release() { releaseEscape() }
         func escape(_ heading: Double) -> PenaltyDodge {
             // A way out into the race area's edge or a mark (a fallback, or a held heading the boats have closed on
             // with none left on her side): she turns on, a turn keeps her where she is (#528 fix 2).
@@ -756,13 +756,13 @@ struct BotBrain: Sendable {
                                                  angle: { self.penaltyTurnLeft(b, owed, view, direction: $0) },
                                                  horizon: escapeHorizon(latest), openWater: openWater)
                 ?? towards?.heading ?? (turnsOnInOpenWater ? nil : b.heading) else { return .onward }
-        penaltyEscape = PenaltyEscape(heading: heading, since: view.time,
-                                      side: EscapeSide.latch(nil, current: b.heading, heading: heading), toward: heading)
+        penaltyEscape = PenaltyEscape(heading: heading, side: EscapeSide.latch(nil, current: b.heading, heading: heading),
+                                      toward: heading)
         return escape(heading)
     }
 
     /// Letting a way out go (`penaltyEscape`).
-    private mutating func releaseEscape(_ view: SeatView) {
+    private mutating func releaseEscape() {
         penaltyEscape = nil
     }
 
@@ -787,8 +787,13 @@ struct BotBrain: Sendable {
     /// She starts it anyway with a thin margin from `penaltyThinStartSeconds` of her latest start, the best way's first
     /// conflict her keep-clear lookahead and `penaltyThinStartMargin` into it, and at her latest start the best way
     /// (`penaltyWay`). Called with less than `penaltyMoveMinSeconds` of it, she has nothing to move with: she starts at
-    /// once. Nil where she doesn't: before her start (`clearingRoom`), 30° in, one way clear, on the last leg or with
-    /// her next mark close (#351, `putOffEndsAtAMark`), a mark close aboard (#461), or no heading she may sail.
+    /// once. With no heading she may sail as she first decides (#534: hemmed in by the boats, the race area's edge
+    /// or a mark's water), she starts at once too, the best way (`penaltyWay`), in the best water she has: holding her
+    /// plan's course in the pack to her latest start is the wait #528 removed. A course she holds with none left on her
+    /// side she holds. Nil where she doesn't: before her start (`clearingRoom`), 30° in, one way clear, on the last leg
+    /// or with her next mark close (#351, `putOffEndsAtAMark`), or a mark close aboard (#461). A start is latched by
+    /// `penaltyTurn`: set, `crossingsPenaltyInput` never asks again for that turn, so a sweep that slips after a thin
+    /// start meets `penaltyDodge` (dodge, then carry on), never the clearing course.
     private mutating func clearingCourse(_ b: SeatView.OwnBoat, _ owed: OwedPenalty, _ view: SeatView,
                                          _ sweeps: PenaltySweeps) -> PenaltyCourse? {
         guard b.status == .racing, !owed.isStarted, sweeps.isCrowded, !startsBeforeHerTurn(owed, b, view),
@@ -820,7 +825,9 @@ struct BotBrain: Sendable {
             penaltyClearing.heading = heading
             penaltyClearing.isCourse = true
         } else if !penaltyClearing.isCourse {
-            return nil
+            // No heading she may sail as she first decides: she turns now, in the best water she has (#534), not
+            // holding her plan's course in the pack.
+            return .start
         }
         return .steer(steer(b, toHeading: penaltyClearing.heading, view))
     }
