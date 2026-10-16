@@ -28,7 +28,8 @@ public struct BotSuiteOptions: Hashable, Sendable {
     /// don't finish and how wide they round the marks (`RaceObserver`), and add the tables to the report
     /// (`BotSuiteReport.diagnose`). The races, and the rest of the report, are the same with it or without.
     public var diagnose = false
-    /// `--scenario pack` (#525): sail the pack scenario (`PackScenario`) instead of the matrix. `--fleet-size` (the pack
+    /// `--scenario pack` (#525) or `overtake` (#530): sail that scenario (`PackScenario`, `OvertakeScenario`) instead of
+    /// the matrix. `--fleet-size` (the pack
     /// size), `--tier-mix`, `--seeds`, `--jobs`, `--json`, `--autohelm` and `--boat-class` apply to it as they do to the
     /// matrix; `--matrix`, `--thresholds`, `--profile-mix`, `--laps` and `--diagnose` do not.
     public var scenario: String?
@@ -38,6 +39,17 @@ public struct BotSuiteOptions: Hashable, Sendable {
     public var packOffsets: [Double] = []
     /// `--pack-above <metres>`: how far above the gate's line the bunch lies; nil for `PackScenario.defaultAbove`.
     public var packAbove: Double?
+    /// `--overtake-phase prestart|beat|both`: the overtake scenario's phases (`OvertakeScenario`, #530); all when empty.
+    public var overtakePhases: [OvertakePhase] = []
+    /// `--overtake-tack port|starboard|both`: the scripted boat's tacks; both when empty.
+    public var overtakeTacks: [OvertakeTack] = []
+    /// `--overtake-current with|without|both`: the venues the overtake scenario sails; nil for both.
+    public var overtakeCurrent: PackCurrent?
+    /// `--overtake-astern <hull lengths>`: the first bot's distances astern; all of `OvertakeScenario.defaultAstern`
+    /// when empty.
+    public var overtakeAstern: [Double] = []
+    /// `--overtake-control`: also sail each layout with the scripted boat far abeam to leeward, nobody ahead of the bots.
+    public var overtakeControl = false
     public var help = false
 
     public init() {}
@@ -65,11 +77,23 @@ public struct BotSuiteOptions: Hashable, Sendable {
                                  gate, sailed through it, and measured (no thresholds; exits 0 on a sailed run).
                                  Uses --fleet-size (pack size, default 4, 5 and 6), --tier-mix (default national),
                                  --seeds (default 16), --jobs, --json, --autohelm and --boat-class; takes none of
-                                 --matrix, --thresholds, --profile-mix, --laps or --diagnose
+                                 --matrix, --thresholds, --profile-mix, --laps or --diagnose.
+                                 overtake: a scripted boat at 60-70% of the polar on the first beat, or eased below
+                                 the line before the gun, with live bots placed astern of her on her tack (no
+                                 thresholds; exits 0 on a sailed run). Uses --fleet-size (her and the bots, default
+                                 2), --tier-mix (default national), --seeds (default 16), --jobs, --json, --autohelm
+                                 and --boat-class; takes none of the pack's or the matrix's own flags
           --pack-current <c>     with the pack scenario: with, without or both (default) a current
           --pack-offset <n>      with the pack scenario: the bunch's centre this many hull lengths across the gate from
                                  its middle (repeatable; default -6, 0 and 6; the gate is 10 hull lengths wide)
           --pack-above <m>       with the pack scenario: metres above the gate's line the bunch's centre lies (default 100)
+          --overtake-phase <p>   with the overtake scenario: prestart, beat or both (default)
+          --overtake-tack <t>    with the overtake scenario: her tack, port, starboard or both (default)
+          --overtake-current <c> with the overtake scenario: with, without or both (default) a current
+          --overtake-astern <n>  with the overtake scenario: the first bot this many hull lengths astern of her,
+                                 centre to centre (repeatable; default 2, 4 and 6; each further bot 2 more)
+          --overtake-control     with the overtake scenario: also sail each layout with her 40 hull lengths abeam to
+                                 leeward, so the bots have nobody ahead (the false-fire and tack-away rates)
         Exits 1 when the run misses the thresholds, 2 on a usage or setup error.
         """
 
@@ -127,6 +151,33 @@ public struct BotSuiteOptions: Hashable, Sendable {
                     throw BotSuiteError.usage("--pack-above: not a positive number: \(text)")
                 }
                 packAbove = above
+            case "--overtake-phase":
+                let text = try value(flag)
+                if text == "both" { overtakePhases = OvertakePhase.allCases; continue }
+                guard let phase = OvertakePhase(rawValue: text) else {
+                    throw BotSuiteError.usage("--overtake-phase: prestart, beat or both, not \(text)")
+                }
+                overtakePhases = [phase]
+            case "--overtake-tack":
+                let text = try value(flag)
+                if text == "both" { overtakeTacks = OvertakeTack.allCases; continue }
+                guard let tack = OvertakeTack(rawValue: text) else {
+                    throw BotSuiteError.usage("--overtake-tack: port, starboard or both, not \(text)")
+                }
+                overtakeTacks = [tack]
+            case "--overtake-current":
+                let text = try value(flag)
+                guard let current = PackCurrent(rawValue: text) else {
+                    throw BotSuiteError.usage("--overtake-current: with, without or both, not \(text)")
+                }
+                overtakeCurrent = current
+            case "--overtake-astern":
+                let text = try value(flag)
+                guard let astern = Double(text), astern.isFinite, astern > 0 else {
+                    throw BotSuiteError.usage("--overtake-astern: not a positive number: \(text)")
+                }
+                overtakeAstern.append(astern)
+            case "--overtake-control": overtakeControl = true
             case "-h", "--help": help = true
             default: throw BotSuiteError.usage("unknown argument: \(flag)")
             }
@@ -139,21 +190,31 @@ public struct BotSuiteOptions: Hashable, Sendable {
     /// `--scenario`'s own checks: a scenario it knows, with none of the matrix's flags it has no use for, and the
     /// scenario's flags only with it.
     private func validateScenario() throws {
-        guard let scenario else {
-            if packCurrent != nil || !packOffsets.isEmpty || packAbove != nil {
-                throw BotSuiteError.usage("--pack-current, --pack-offset and --pack-above need --scenario pack")
-            }
-            return
+        let packFlags = packCurrent != nil || !packOffsets.isEmpty || packAbove != nil
+        let overtakeFlags = !overtakePhases.isEmpty || !overtakeTacks.isEmpty || overtakeCurrent != nil
+            || !overtakeAstern.isEmpty || overtakeControl
+        if packFlags, scenario != "pack" {
+            throw BotSuiteError.usage("--pack-current, --pack-offset and --pack-above need --scenario pack")
         }
-        guard scenario == "pack" else { throw BotSuiteError.usage("--scenario: unknown scenario \(scenario) (pack)") }
+        if overtakeFlags, scenario != "overtake" {
+            throw BotSuiteError.usage("--overtake-phase, --overtake-tack, --overtake-current, --overtake-astern and "
+                + "--overtake-control need --scenario overtake")
+        }
+        guard let scenario else { return }
+        guard ["pack", "overtake"].contains(scenario) else {
+            throw BotSuiteError.usage("--scenario: unknown scenario \(scenario) (pack, overtake)")
+        }
         let refused = [("--matrix", matrixPath != nil), ("--thresholds", thresholdsPath != nil),
                        ("--profile-mix", !profileMixes.isEmpty), ("--laps", laps != nil), ("--diagnose", diagnose)]
             .filter(\.1).map(\.0)
         if !refused.isEmpty {
-            throw BotSuiteError.usage("--scenario pack takes none of \(refused.joined(separator: ", ")): it sails no matrix")
+            throw BotSuiteError.usage("--scenario \(scenario) takes none of \(refused.joined(separator: ", ")): it sails no matrix")
         }
-        if let size = fleetSizes.first(where: { $0 < PackScenario.packNeighbours + 1 }) {
+        if scenario == "pack", let size = fleetSizes.first(where: { $0 < PackScenario.packNeighbours + 1 }) {
             throw BotSuiteError.usage("--fleet-size \(size): a pack needs at least \(PackScenario.packNeighbours + 1) boats")
+        }
+        if scenario == "overtake", let size = fleetSizes.first(where: { $0 < 2 }) {
+            throw BotSuiteError.usage("--fleet-size \(size): the overtake scenario needs her and at least one bot")
         }
     }
 
@@ -312,22 +373,33 @@ public enum BotSuiteCommand {
         return report.passed ? 0 : 1
     }
 
-    /// `--scenario pack`: sails the scenario, prints its table and writes its JSON; no thresholds, so exit 0.
+    /// `--scenario pack` or `overtake`: sails the scenario, prints its table and writes its JSON; no thresholds, so
+    /// exit 0.
     private static func runScenario(_ options: BotSuiteOptions) throws -> Int32 {
-        let report = try PackScenario.run(options)
+        if options.scenario == "overtake" {
+            let report = try OvertakeScenario.run(options)
+            try emit(lines: report.lines, json: report.jsonData, options: options)
+        } else {
+            let report = try PackScenario.run(options)
+            try emit(lines: report.lines, json: report.jsonData, options: options)
+        }
+        return 0
+    }
+
+    /// A scenario's table, to stdout (stderr when the JSON goes there), and its JSON where `--json` says.
+    private static func emit(lines: [String], json: () throws -> Data, options: BotSuiteOptions) throws {
         let toStdout = options.jsonPath == "-"
-        for line in report.lines {
+        for line in lines {
             if toStdout { printError(line) } else { print(line) }
         }
         if let path = options.jsonPath {
-            let data = try report.jsonData()
+            let data = try json()
             if toStdout {
                 print(String(decoding: data, as: UTF8.self))
             } else {
                 try data.write(to: URL(fileURLWithPath: path))
             }
         }
-        return 0
     }
 
     private static func printError(_ line: String) {
