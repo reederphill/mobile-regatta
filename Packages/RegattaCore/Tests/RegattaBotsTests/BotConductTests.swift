@@ -144,12 +144,14 @@ import RegattaCore
 
     /// Sails `race` with both seats' bots for `seconds`, at `skill` (skill 1 unless given) or with `weaknesses` (each
     /// seat's, if given), cautious with `caution` (#104) if given: every event, and `each` after every step.
+    /// `avoids` says whether each seat's bot avoids a boat clearly not keeping clear of her (#537, `avoidsContact`).
     static func sail(_ race: Race, seconds: Double, planned: [Tack?] = [nil, nil], skill: Double = 1,
                      weaknesses: [BotWeaknesses?] = [nil, nil], caution: BotBrain.Caution? = nil,
-                     each: (Race) -> Void = { _ in }) -> [RaceEvent.Kind] {
+                     avoids: [Bool] = [true, true], each: (Race) -> Void = { _ in }) -> [RaceEvent.Kind] {
         var pilots = [0, 1].map {
             Pilot(seat: $0, plannedTack: planned[$0], race: race, skill: skill, weaknesses: weaknesses[$0], caution: caution)
         }
+        for i in pilots.indices { pilots[i].brain.avoidsContact = avoids[i] }
         var kinds: [RaceEvent.Kind] = []
         for _ in 0..<Int(seconds * Double(Race.tickRate)) where !race.isOver {
             for i in pilots.indices { _ = pilots[i].drive(race) }
@@ -576,17 +578,23 @@ import RegattaCore
 
     /// #103, #19 "they foul only by misjudging": a port boat that misjudges the encounter believes she holds her rights
     /// and sails on into the starboard boat, and is called under rule 10; judging it right, she ducks and nobody is
-    /// called. The starboard boat holds her course throughout.
+    /// called. The starboard boat holds her course throughout: she doesn't avoid the port boat (#537's `avoidsContact`
+    /// off). With it on she is still never called (#537): with the contact the hull's (fix round 2) she may pass the
+    /// port boat clear, and if they touch, the call is the port boat's under rule 10.
     @Test func misjudgingPortBoatSailsOnAndIsCalled() throws {
         let encounter = Self.portStarboard(seed: 11, early: 0, running: false)
         let judged = Self.sail(try encounter.race(), seconds: encounter.seconds, planned: encounter.planned,
-                               weaknesses: [nil, Self.misjudging(0)])
+                               weaknesses: [nil, Self.misjudging(0)], avoids: [false, true])
         #expect(Self.calls(judged).isEmpty)
         let misjudged = Self.sail(try encounter.race(), seconds: encounter.seconds, planned: encounter.planned,
-                                  weaknesses: [nil, Self.misjudging(1)])
+                                  weaknesses: [nil, Self.misjudging(1)], avoids: [false, true])
         let calls = Self.calls(misjudged)
         #expect(calls.first == "10 on 1", "\(calls)")
         #expect(!calls.contains { $0.hasSuffix("on 0") }, "\(calls)")
+        let avoided = Self.sail(try encounter.race(), seconds: encounter.seconds, planned: encounter.planned,
+                                weaknesses: [nil, Self.misjudging(1)])
+        #expect(Self.calls(avoided).first.map { $0 == "10 on 1" } ?? true, "\(Self.calls(avoided))")
+        #expect(!Self.calls(avoided).contains { $0.hasSuffix("on 0") }, "\(Self.calls(avoided))")
     }
 
     /// #103: she judges an encounter once, keeps that judgement while the other boat is near and forgets it once it is
@@ -1952,7 +1960,7 @@ import RegattaCore
         let water = switch kind {
         case .beating: Water(seed: seed)
         case .running: Water(seed: seed, running: true)
-        case .beforeTheGun: Water(seed: seed, toGun: 40, below: 12)
+        case .beforeTheGun: Water(seed: seed, toGun: 40, below: 5)
         }
         let own: BoatStatus = kind == .beforeTheGun ? .prestart : .racing
         let from = kind == .running ? water.run(.starboard) : water.beat(.starboard)
@@ -2256,5 +2264,150 @@ import RegattaCore
             let served = try Self.lookBeforeHerTack(scene(false))
             #expect(served.need == nil && !served.isClear, "seed \(seed): nor with her turn served")
         }
+    }
+}
+
+// MARK: - Avoiding a boat not keeping clear (#537)
+
+extension BotConductTests {
+    /// #537: seat 0 a starboard bot beating (before the gun, 20 s out and 5 lengths below the line, reaching at 70°, when
+    /// `prestart`); seat 1 a port boat
+    /// `seconds` of her sailing ahead on her course and `across` hull lengths to starboard of it: stalled in irons
+    /// (`stalled`: 10° off head to wind on port, all but stopped, autohelm off), or sailing her beat straight at that
+    /// point to arrive with her. `swapped`: seat 0 on port and seat 1 on starboard, so seat 0 keeps clear. `ghost`:
+    /// seat 1 has finished. `third`: seat 2 sailing beside seat 0, a hull length and a bit to port.
+    static func avoidScene(seed: UInt64 = 3, seconds: Double, across: Double = 0.3, stalled: Bool = true,
+                           prestart: Bool = false, swapped: Bool = false, ghost: Bool = false,
+                           third: Bool = false) throws -> Race {
+        let water = prestart ? Water(seed: seed, toGun: 20, below: 5) : Water(seed: seed, seats: third ? 3 : 2)
+        let status: BoatStatus = prestart ? .prestart : .racing
+        let own: Tack = swapped ? .port : .starboard
+        let theirs: Tack = swapped ? .starboard : .port
+        let speed = water.up.speed
+        // Before the gun she reaches across below the line, as she does 20 s out (her plan there tacks by hand from a beat).
+        let heading = prestart ? water.heading(own, deg2rad(70)) : water.beat(own)
+        let forward = Vec2.heading(heading)
+        let meet = water.centre + forward * speed * seconds + forward.rightPerp * water.length * across
+        var placements = [Placement(position: water.centre, heading: heading, speed: speed, status: status)]
+        if stalled {
+            let irons = theirs == .port ? water.wind + deg2rad(10) : water.wind - deg2rad(10)
+            placements.append(Placement(position: meet, heading: irons, speed: 0.1, status: ghost ? .finished : status))
+        } else {
+            let theirHeading = water.beat(theirs)
+            placements.append(Placement(position: meet - Vec2.heading(theirHeading) * speed * seconds, heading: theirHeading,
+                                        speed: speed, status: ghost ? .finished : status))
+        }
+        if third {
+            placements.append(Placement(position: water.centre - forward.rightPerp * water.length * 1.6,
+                                        heading: heading, speed: speed, status: status))
+        }
+        return try place(water, placements) { snapshot in
+            if stalled { snapshot.seats[1].boat.autohelm = nil }
+        }
+    }
+
+    /// Seat 0's live bot at skill 1 on `race`, and what she makes of seat 1 now (`notKeepingClear`).
+    static func judged(_ race: Race, prestart: Bool = false) throws -> (pilot: Pilot, view: SeatView, verdict: BotBrain.NotKeepingClear?) {
+        let pilot = Pilot(seat: 0, plannedTack: nil, race: race)
+        let view = race.seatView(for: 0)
+        let other = try #require(view.others.first { $0.seat == 1 })
+        return (pilot, view, pilot.brain.notKeepingClear(other, view.own, view))
+    }
+
+    /// #537 build 1: a port boat stalled 1.5 s ahead of a starboard bot can't keep clear (`.cannot`), racing and
+    /// before her start.
+    @Test func aStalledPortBoatAheadCannotKeepClear() throws {
+        #expect(try Self.judged(Self.avoidScene(seconds: 1.5)).verdict == .cannot)
+        #expect(try Self.judged(Self.avoidScene(seconds: 1.5, prestart: true)).verdict == .cannot)
+    }
+
+    /// #537 build 1: a port boat sailing straight on into her inside the horizon isn't keeping clear (`.isNot`): at a
+    /// first sighting she counts as turning not at all.
+    @Test func aPortBoatSailingStraightOntoHerIsNotKeepingClear() throws {
+        #expect(try Self.judged(Self.avoidScene(seconds: 1.5, stalled: false)).verdict == .isNot)
+    }
+
+    /// #537 build 1: no verdict on a port boat already bearing away to duck her (seen turning at her last decision),
+    /// nor on one 5 s out, nor on a ghost, nor on a boat she must keep clear of herself.
+    @Test func aBoatKeepingClearOrNotHerConcernIsLeftAlone() throws {
+        // Ducking: aiming 0.3 lengths to port of her (hull to hull, 0.75 lengths passes clear: #537 fix round 2), seen
+        // 0.3 s ago 9° higher, bearing away at 30°/s.
+        var (pilot, view, verdict) = try Self.judged(Self.avoidScene(seconds: 2.4, across: -0.3, stalled: false))
+        #expect(verdict == .isNot, "straight on, she isn't keeping clear")
+        let other = try #require(view.others.first { $0.seat == 1 })
+        pilot.brain.glimpsed = [nil, BotBrain.Seen(time: view.time - 0.3, heading: other.heading - deg2rad(9), speed: other.speed)]
+        #expect(pilot.brain.notKeepingClear(other, view.own, view) == nil, "bearing away, she is ducking")
+
+        #expect(try Self.judged(Self.avoidScene(seconds: 5)).verdict == nil, "5 s out")
+        #expect(try Self.judged(Self.avoidScene(seconds: 5, stalled: false)).verdict == nil, "5 s out, sailing")
+        #expect(try Self.judged(Self.avoidScene(seconds: 1.5, ghost: true)).verdict == nil, "a ghost")
+        #expect(try Self.judged(Self.avoidScene(seconds: 1.5, swapped: true)).verdict == nil, "she keeps clear herself")
+    }
+
+    /// Sails seat 0's live bot alone on `race` for `seconds`, avoiding contact unless `avoids` is false: whether she
+    /// touched seat 1, the least gap between their centres, and how far she had turned 1.5 s in, radians (positive to
+    /// starboard).
+    static func sailPast(_ race: Race, seconds: Double, avoids: Bool = true) -> (contact: Bool, gap: Double, firstTurn: Double) {
+        var pilot = Pilot(seat: 0, plannedTack: nil, race: race)
+        pilot.brain.avoidsContact = avoids
+        let start = race.boats[0].heading
+        var contact = false
+        var gap = Double.infinity
+        var firstTurn = 0.0
+        for tick in 0..<Int(seconds * Double(Race.tickRate)) where !race.isOver {
+            _ = pilot.drive(race)
+            race.step()
+            if tick == Int(1.5 * Double(Race.tickRate)) { firstTurn = wrapAngle(race.boats[0].heading - start) }
+            gap = min(gap, (race.boats[1].position - race.boats[0].position).length)
+            if race.drainEvents().contains(where: { if case .contact = $0.kind { true } else { false } }) { contact = true }
+        }
+        return (contact, gap, firstTurn)
+    }
+
+    /// #537 build 2: racing and before her start, a starboard bot turns away from a port boat stalled 3 s ahead and a
+    /// touch to starboard (to port, bearing away) once contact is inside the horizon, and doesn't touch her; holding on,
+    /// as before #537, she did.
+    @Test func rightOfWayBotTurnsAwayFromAStalledBoat() throws {
+        // Before her start her plan luffs her up from her reach; the stalled boat is further to windward there.
+        for (prestart, across) in [(false, 0.3), (true, 0.9)] {
+            let scene = { try Self.avoidScene(seconds: prestart ? 2.5 : 3, across: across, prestart: prestart) }
+            let held = Self.sailPast(try scene(), seconds: 6, avoids: false)
+            #expect(held.contact, "prestart \(prestart): holding on she touches her")
+            let avoided = Self.sailPast(try scene(), seconds: 6)
+            #expect(!avoided.contact, "prestart \(prestart): gap \(avoided.gap) m")
+            #expect(avoided.firstTurn < -deg2rad(5), "prestart \(prestart): turned \(rad2deg(avoided.firstTurn))°, away to port")
+        }
+    }
+
+    /// #537 build 2: 5 s out from a stalled boat she has nothing to avoid yet, and holds her course: no lane given up
+    /// before the trigger.
+    @Test func rightOfWayBotHoldsCourseFiveSecondsOut() throws {
+        for prestart in [false, true] {
+            let (pilot, view, _) = try Self.judged(Self.avoidScene(seconds: 5, prestart: prestart))
+            #expect(pilot.brain.avoidingContact(view.own, view, .neutral, desired: view.own.heading) == nil,
+                    "prestart \(prestart)")
+        }
+    }
+
+    /// #537 build 2: never towards any boat. With a third boat sailing beside her on the side away from the stalled
+    /// boat, she doesn't turn into her: she holds on (nil), or turns the other way.
+    @Test func rightOfWayBotDoesNotTurnIntoABoatOnTheAwaySide() throws {
+        let race = try Self.avoidScene(seconds: 1.5, third: true)
+        let (pilot, view, verdict) = try Self.judged(race)
+        #expect(verdict == .cannot)
+        let input = pilot.brain.avoidingContact(view.own, view, .neutral, desired: view.own.heading)
+        #expect(input.map { $0.rudderValue >= 0 } ?? true, "ruddered to port, into the third boat: \(String(describing: input))")
+    }
+
+    /// #537 Q1 (placeholder): racing, the suite's hunter hunts as #355 has her; the avoidance is not hers there.
+    @Test func racingHunterIsUnchangedByTheAvoidance() throws {
+        let race = try Self.avoidScene(seconds: 1.5)
+        let pilot = Pilot(seat: 0, plannedTack: nil, race: race, profile: .hunter)
+        let view = race.seatView(for: 0)
+        let b = view.own
+        let decision = pilot.brain.holding(b, view, .neutral, desired: b.heading)
+        let hunted = pilot.brain.hunting(b, view, .neutral, desired: b.heading).0
+        #expect(decision.input == pilot.brain.clearingQuarter(b, view, hunted))
+        #expect(pilot.brain.avoidingContact(b, view, .neutral, desired: b.heading) != nil, "a live bot would avoid her")
     }
 }

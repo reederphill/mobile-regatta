@@ -19,12 +19,14 @@ import Testing
     /// (re-pinned on #508, whose windward final approach every class sails; and on #517, whose circle round a boat
     /// taking a penalty is every class's before a tack or gybe: both races have boats turning one near a boat about to
     /// tack, whose tack the circle holds off first 13.9 s after the gun on skiff@7 and 10.9 s after it on skiff@6, and
-    /// with the circle off both kept their digests).
+    /// with the circle off both kept their digests; and on #537, whose right-of-way bot turns away from a boat clearly not
+    /// keeping clear of her: with `avoidsContact` off both kept their digests; and on its first and second fix rounds,
+    /// every change behind `avoidsContact` too).
     @Test(.onFiveRules) func skiffSevenBotsAreBitIdentical() throws {
         let seven = try Self.digest(seed: 459, boatClass: BoatClassFile.bundled(id: "skiff", version: 7))
         let six = try Self.digest(seed: 459, boatClass: BoatClassFile.bundled(id: "skiff", version: 6))
-        #expect(hex64(seven) == "0xa14310d235ced195")
-        #expect(hex64(six) == "0xb5f6b3e1a7f78b40")
+        #expect(hex64(seven) == "0xb2dbe90cbe21d893")
+        #expect(hex64(six) == "0xd295498f6a00e8f9")
     }
 
     /// And skiff@8, the default class until #462's switch, sails exactly as before #462's bots layer (every change there
@@ -49,11 +51,16 @@ import Testing
     ///   beat again on its eighth fix round (a way out released with each turn served, and none held in open water with
     ///   no heading to sail): the two laps kept theirs; and back to the seventh round's on the ninth, which keeps that
     ///   open-water turn-on to racing (its only reach into the start and the first beat was before the gun).
+    /// - #537 (a right-of-way bot turns away from a boat clearly not keeping clear of her, and taps only once clear of
+    ///   her): both; with `avoidsContact` off both kept their digests. Both again on its first fix round (a start luff
+    ///   wins over the avoidance, the tap's mirrored look narrowed, holding her heading for a boat met only on her
+    ///   plan's): every change is behind `avoidsContact`. Both again on its second (the contact the hull's, a boat
+    ///   responding never tripping it, the tap's look along her bow's swing): behind `avoidsContact` too.
     @Test(.onSixRules) func skiffEightBotsAreBitIdentical() throws {
         let short = try Self.digest(seed: 459, boatClass: Self.skiffEight)
         let long = try Self.digest(seed: 462, boatClass: Self.skiffEight, seconds: 700)
-        #expect(hex64(short) == "0x39a40d128a32de05")
-        #expect(hex64(long) == "0xda0ca57836844a9d")
+        #expect(hex64(short) == "0xa8cd5a31d1d12893")
+        #expect(hex64(long) == "0x998958b877248c7e")
     }
 
     // MARK: - skiff@8: tacks and gybes by hand

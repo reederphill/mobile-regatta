@@ -75,6 +75,8 @@ public struct BotDecision: Hashable, Sendable {
     var play: BotBrain.FleetPlay.Kind? = nil
     /// Whether `input` is a combative bot's luff at a windward boat before her start (#337, `startLuffing`).
     var startLuff = false
+    /// Whether `input` avoids a boat clearly not keeping clear of her (#537, `avoidingContact`).
+    var avoidsContact = false
     /// Whether she lets the rudder go, truly centred, stalled in irons (#459, `BotBrain.centresStalled`): her helm sends
     /// it as it is and holds no angle by hand (`BotHelm.input`), so the class's irons recovery can fall her off.
     var centred = false
@@ -220,10 +222,15 @@ struct BotBrain: Sendable {
     var penaltyEscape: PenaltyEscape?
     /// The boats around her as she saw them at her last decision, by seat (`guarded`): the cautious bot's only.
     var seen: [Seen?] = []
+    /// The boats around her as she saw them at her last decision, by seat (`notKeepingClear`, #537): every bot's.
+    var glimpsed: [Seen?] = []
     /// Whether she holds her aim within her proper course while told she is restricted under rule 17
     /// (`properCourseLimited`, #346). A test seam: always true in play; only tests that compare her steering with the
     /// limit left out set it false.
     var limitsProperCourse = true
+    /// Whether, as the right-of-way boat, she avoids a boat clearly not keeping clear of her (`avoidingContact`, #537).
+    /// A test seam: always true in play; only tests that sail her without it, to show what it changes, set it false.
+    var avoidsContact = true
 
     /// The stream of her seed her own draws come from.
     static let brainStream: UInt64 = 0x6272_6169_6e64_7277 // "braindrw"
@@ -270,6 +277,7 @@ struct BotBrain: Sendable {
                let input = guarded(view, decision.input) { decision.input = input }
             see(view)
         }
+        glimpse(view)
         noteStartLuff(view, decision)
         if decision.input.ease, view.own.twa < BoatDynamics.noGoAngle(view.boatClass.polar) {
             decision.input = decision.input.eased(false)
@@ -396,14 +404,28 @@ struct BotBrain: Sendable {
         return decision
     }
 
-    /// Her decision as the right-of-way boat, `input` her plan's helm: holding her course (`holdingCourse`, #228), or for
-    /// the suite's hunter hunting (`hunting`, #355), then clearing her quarter. `desired` is the heading her plan sails.
+    /// Her decision as the right-of-way boat, `input` her plan's helm: avoiding a boat clearly not keeping clear of her
+    /// (`avoidingContact`, #537), else holding her course (`holdingCourse`, #228), or for the suite's hunter hunting
+    /// (`hunting`, #355), then clearing her quarter. `desired` is the heading her plan sails.
     func holding(_ b: SeatView.OwnBoat, _ view: SeatView, _ input: BoatInput, desired: Double) -> BotDecision {
         guard tactics.hunts else {
+            // Avoiding a boat clearly not keeping clear of her comes first (#537): a boat responding to her, one she
+            // luffs that drops astern or luffs too, never trips it (`notKeepingClear`), so her luff runs as before.
+            if let avoided = avoidingContact(b, view, input, desired: desired) {
+                var decision = BotDecision(input: clearingQuarter(b, view, avoided))
+                decision.avoidsContact = true
+                return decision
+            }
             // #337: a combative live bot luffs a windward boat before her start (`startLuffing`).
             let luffed = startLuffing(b, view, input, desired: desired)
             var decision = BotDecision(input: clearingQuarter(b, view, luffed ?? holdingCourse(b, view, input)))
             decision.startLuff = luffed != nil && decision.input == luffed
+            return decision
+        }
+        // The hunter avoids contact only before her start (#537 Q1, placeholder): racing, she hunts as #355 has her.
+        if b.status != .racing, let avoided = avoidingContact(b, view, input, desired: desired) {
+            var decision = BotDecision(input: clearingQuarter(b, view, avoided))
+            decision.avoidsContact = true
             return decision
         }
         let (held, step) = hunting(b, view, input, desired: desired)
@@ -1245,9 +1267,11 @@ struct BotBrain: Sendable {
     }
 
     /// Whether a tack or gybe begun now turns clear: no mark close enough for the turn to swing her onto, clear of
-    /// every boat (`tapIsClear`, #101), and for the suite's hunter not at a boat keeping clear of her.
+    /// every boat (`tapIsClear`, #101), for the suite's hunter not at a boat keeping clear of her, and not with a boat
+    /// clearly not keeping clear of her inside the horizon (`tapMeetsBoatNotKeepingClear`, #537).
     func isClearToTurn(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
         isClearOfMarks(b, view, lengths: Self.tapMarkClearance) && tapIsClear(b, view) && !tapTurnsAtKeepClearBoat(b, view)
+            && !tapMeetsBoatNotKeepingClear(b, view)
     }
 
     /// The held input that sails `aim` on her tack under the autohelm (ADR 0007). Once the autohelm holds

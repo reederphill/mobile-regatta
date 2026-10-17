@@ -45,6 +45,9 @@ public struct BotDriver: Sendable {
     public private(set) var tackOnWindTaps = 0
     public private(set) var coverTaps = 0
     public private(set) var startLuffDecisions = 0
+    /// Decisions she avoided a boat clearly not keeping clear of her on (#537, `BotBrain.avoidingContact`): the suite's
+    /// trace; nothing reads it in play.
+    public private(set) var avoidContactDecisions = 0
 
     private(set) var brain: BotBrain
     /// Her own hand on the helm for a class whose autohelm doesn't hold a centred rudder (#434); idle otherwise.
@@ -148,6 +151,7 @@ public struct BotDriver: Sendable {
         case .holdLane, nil: break
         }
         if decision.startLuff { startLuffDecisions += 1 }
+        if decision.avoidsContact { avoidContactDecisions += 1 }
         let next = race.tick + 1
         race.apply(decision.input, seat: seat, atTick: next)
         if let tap = decision.tap { race.tap(tap, seat: seat, atTick: next) }
