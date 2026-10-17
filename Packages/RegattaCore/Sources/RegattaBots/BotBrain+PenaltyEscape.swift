@@ -10,10 +10,9 @@ import RegattaCore
 
 extension BotBrain {
     /// A way out of a boat crossing her penalty turn's sweep she has chosen and holds until clear (#528): the heading
-    /// she steers, since when, and the direction she committed to.
+    /// she steers and the direction she committed to.
     struct PenaltyEscape: Sendable, Equatable {
         var heading: Double
-        var since: Double
         /// The way out she has committed to, once she steers off her heading (`EscapeSide`).
         var side: EscapeSide?
         /// The heading she first chose away from the boats (#528 fix 3): she picks again round it, never round the
