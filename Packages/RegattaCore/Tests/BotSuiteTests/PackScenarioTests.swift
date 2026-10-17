@@ -39,11 +39,18 @@ import Testing
     @Test func withoutAScenarioNothingChanges() throws {
         let plain = try BotSuiteOptions(arguments: ["--seeds", "2", "--fleet-size", "5", "--diagnose"])
         #expect(plain.scenario == nil && plain.packCurrent == nil && plain.packOffsets.isEmpty && plain.packAbove == nil)
-        for flag in ["--scenario", "--pack-current", "--pack-offset", "--pack-above"] {
+        #expect(plain.overtakePhases.isEmpty && plain.overtakeTacks.isEmpty && plain.overtakeCurrent == nil
+            && plain.overtakeAstern.isEmpty && !plain.overtakeControl)
+        for flag in ["--scenario", "--pack-current", "--pack-offset", "--pack-above", "--overtake-phase", "--overtake-tack",
+                     "--overtake-current", "--overtake-astern", "--overtake-control"] {
             #expect(BotSuiteOptions.usage.contains(flag), "\(flag) is in --help")
         }
         for flag in ["--pack-current", "--pack-offset", "--pack-above"] {
             #expect(throws: BotSuiteError.self) { try BotSuiteOptions(arguments: [flag, "0"]) }
+        }
+        for flags in [["--overtake-phase", "beat"], ["--overtake-tack", "port"], ["--overtake-current", "with"],
+                      ["--overtake-astern", "2"], ["--overtake-control"]] {
+            #expect(throws: BotSuiteError.self) { try BotSuiteOptions(arguments: flags) }
         }
         // The matrix is what it was: the pack scenario's venues and layouts add nothing to it.
         let matrix = try plain.matrix()
