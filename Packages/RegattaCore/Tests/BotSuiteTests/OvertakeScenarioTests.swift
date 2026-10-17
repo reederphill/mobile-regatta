@@ -191,10 +191,10 @@ import Testing
 
     /// Owner (#530 c): a call on her stands, but she is never disqualified for the turn she never sails, and she stays
     /// a full rules participant: the bot's seat view gives her right of way as the race's rules relation does, every
-    /// tick, and never a ghost. Seed 1, National, her stalled on port before the gun: a bot tacks onto starboard into
-    /// her, and she is called under rule 10.
+    /// tick, and never a ghost. Seed 11, National, her stalled on port before the gun: a bot meets her there,
+    /// and she is called. (Seed 1 until #537: there the bot now turns away from her, stalled, and nothing is called.)
     @Test func herPenaltiesAreWaivedAndTheBotsSeeHerRights() throws {
-        let cell = OvertakeCell(seed: 1, layout: OvertakeLayout(phase: .prestart, tack: .port, current: false, astern: 4,
+        let cell = OvertakeCell(seed: 11, layout: OvertakeLayout(phase: .prestart, tack: .port, current: false, astern: 4,
                                                                 across: 1, fleetSize: 2, control: false), tierMix: .national)
         var ticks = 0, mismatches = 0, ghosts = 0, herKeepsClear = 0
         let result = try OvertakeScenario.sail(cell) { race, _ in

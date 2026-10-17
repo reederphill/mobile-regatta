@@ -15,7 +15,10 @@ import RegattaCore
 //   rudder a turn towards a boat that must keep clear of her inside the time it takes her to keep clear
 //   (`holdingCourse`, rule 16.1); turning off a mark that way, she holds her course instead while it clears the mark
 //   (`evasiveHeading`). She never gives her lane up to such a boat either: nothing here has her give way when she
-//   has right of way. A turn her autohelm makes following a shift isn't hers.
+//   has right of way. A turn her autohelm makes following a shift isn't hers. The one exception (#537): a boat that
+//   must keep clear and clearly isn't (stopped, or sailing straight on into her, `notKeepingClear`), with contact inside
+//   the escape horizon, she turns away from, the least turn, never towards any boat (`avoidingContact`,
+//   `BotBrain+AvoidContact.swift`), and she tacks or gybes only once clear of her (`tapMeetsBoatNotKeepingClear`).
 // - She taps a tack or gybe only clear of every boat (`tapIsClear`), racing and before her start (#280): a boat
 //   tacking keeps clear (rule 13), and one that acquires right of way by it gives room (rule 15).
 //   "Give a turning boat her circle" (#517): a boat taking a penalty is to that look a circle of water where she is,
@@ -38,7 +41,8 @@ import RegattaCore
 // (`startLuff`) and easing to drop astern when that isn't enough; she taps only clear of every boat, misjudges as she
 // does racing, and keeps clear of every boat 30° into a penalty turn (rule 21.2, `penaltyInput`). She doesn't hold her
 // course as the right-of-way boat there: she steers her approach to the line (#280 measured holding course before the
-// gun at on time 0.55 against the start gate's 0.60).
+// gun at on time 0.55 against the start gate's 0.60), but for turning away from a boat clearly not keeping clear of her,
+// as racing (#537: a boat stopped below the line is the commonest).
 extension BotBrain {
     /// Hull lengths, centre to centre, inside which a turn of hers towards a boat that must keep clear of her takes
     /// that boat's room (`holdingCourse`).

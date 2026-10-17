@@ -64,7 +64,7 @@ A boat that broke a rule of Part 2 isn't penalised for it, because she was compe
 _Avoid_: acquittal, cleared
 
 **Hold course**:
-What a right-of-way boat does to keep her rights: rudder centred. On the default class (autohelm off, ADR 0011) a player sails straight on her heading while a bot holds her angle by hand (`BotHelm`), still following a shift; where the autohelm is on, it holds her wind angle. A turn the autohelm makes following a shift is still a course change under rule 16.1, but not one she initiated. Except while restricted under rule 17: a bot then bears away against a shift that would carry her above her proper course.
+What a right-of-way boat does to keep her rights: rudder centred. On the default class (autohelm off, ADR 0011) a player sails straight on her heading while a bot holds her angle by hand (`BotHelm`), still following a shift; where the autohelm is on, it holds her wind angle. A turn the autohelm makes following a shift is still a course change under rule 16.1, but not one she initiated. Except while restricted under rule 17: a bot then bears away against a shift that would carry her above her proper course; and a bot turns away, the least turn and never towards any boat, from a boat clearly not keeping clear of her (stopped, or not responding: sailing straight on into her) once contact, hull to hull, is inside the escape horizon (#537).
 _Avoid_: hold heading, stand on
 
 **Defend lane**:
