@@ -586,14 +586,20 @@ import RegattaCore
         let judged = Self.sail(try encounter.race(), seconds: encounter.seconds, planned: encounter.planned,
                                weaknesses: [nil, Self.misjudging(0)], avoids: [false, true])
         #expect(Self.calls(judged).isEmpty)
+        var unavoided = Double.infinity, avoidedGap = Double.infinity
+        func gap(_ race: Race) -> Double { (race.boats[0].position - race.boats[1].position).length }
         let misjudged = Self.sail(try encounter.race(), seconds: encounter.seconds, planned: encounter.planned,
-                                  weaknesses: [nil, Self.misjudging(1)], avoids: [false, true])
+                                  weaknesses: [nil, Self.misjudging(1)], avoids: [false, true],
+                                  each: { unavoided = min(unavoided, gap($0)) })
         let calls = Self.calls(misjudged)
         #expect(calls.first == "10 on 1", "\(calls)")
         #expect(!calls.contains { $0.hasSuffix("on 0") }, "\(calls)")
         let avoided = Self.sail(try encounter.race(), seconds: encounter.seconds, planned: encounter.planned,
-                                weaknesses: [nil, Self.misjudging(1)])
-        #expect(Self.calls(avoided).first.map { $0 == "10 on 1" } ?? true, "\(Self.calls(avoided))")
+                                weaknesses: [nil, Self.misjudging(1)], each: { avoidedGap = min(avoidedGap, gap($0)) })
+        // #538 review: with the avoidance on, the starboard boat turns away (they pass further apart, which fails
+        // when it doesn't run), and any call stays the port boat's.
+        #expect(avoidedGap > unavoided, "avoiding: \(avoidedGap) m, not: \(unavoided) m")
+        #expect(Self.calls(avoided).allSatisfy { $0 == "10 on 1" }, "\(Self.calls(avoided))")
         #expect(!Self.calls(avoided).contains { $0.hasSuffix("on 0") }, "\(Self.calls(avoided))")
     }
 
@@ -2335,7 +2341,7 @@ extension BotConductTests {
         var (pilot, view, verdict) = try Self.judged(Self.avoidScene(seconds: 2.4, across: -0.3, stalled: false))
         #expect(verdict == .isNot, "straight on, she isn't keeping clear")
         let other = try #require(view.others.first { $0.seat == 1 })
-        pilot.brain.glimpsed = [nil, BotBrain.Seen(time: view.time - 0.3, heading: other.heading - deg2rad(9), speed: other.speed)]
+        pilot.brain.glimpsed = [[], [BotBrain.Glimpse(time: view.time - 0.3, position: other.position - other.velocity * 0.3, heading: other.heading - deg2rad(9), speed: other.speed)]]
         #expect(pilot.brain.notKeepingClear(other, view.own, view) == nil, "bearing away, she is ducking")
 
         #expect(try Self.judged(Self.avoidScene(seconds: 5)).verdict == nil, "5 s out")
@@ -2395,8 +2401,14 @@ extension BotConductTests {
         let race = try Self.avoidScene(seconds: 1.5, third: true)
         let (pilot, view, verdict) = try Self.judged(race)
         #expect(verdict == .cannot)
+        // #538 review: alone, the avoidance turns her to port, away (so a broken avoidance fails here); with the third
+        // boat there, never into it: no turn, or one to starboard.
+        let alone = try Self.judged(Self.avoidScene(seconds: 1.5))
+        let away = try #require(alone.pilot.brain.avoidingContact(alone.view.own, alone.view, .neutral,
+                                                                  desired: alone.view.own.heading))
+        #expect(away.rudderValue < 0, "alone, she turns away to port: \(away)")
         let input = pilot.brain.avoidingContact(view.own, view, .neutral, desired: view.own.heading)
-        #expect(input.map { $0.rudderValue >= 0 } ?? true, "ruddered to port, into the third boat: \(String(describing: input))")
+        #expect((input?.rudderValue ?? 0) >= 0, "ruddered to port, into the third boat: \(String(describing: input))")
     }
 
     /// #537 Q1 (placeholder): racing, the suite's hunter hunts as #355 has her; the avoidance is not hers there.

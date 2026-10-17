@@ -83,7 +83,7 @@ import RegattaCore
     /// race area's side a little to leeward, the duck would sail her into it, so she turns off it to the
     /// nearest heading that stays in the area. Nowhere near the edge, she ducks as ever.
     @Test func keepingClearNearTheEdgeTurnsOffIt() throws {
-        func evasive(inFromTheSide inward: Double) throws -> (heading: Double?, duck: Double, view: SeatView) {
+        func evasive(inFromTheSide inward: Double, scorer: Bool = false) throws -> (heading: Double?, duck: Double, view: SeatView) {
             let race = botRace(seats: [.bot, .human], seed: 7)
             let c = race.course
             let wind = race.seatView(for: 0).own.windDirection
@@ -107,7 +107,9 @@ import RegattaCore
             try race.importSnapshot(snapshot)
             let view = race.seatView(for: 0)
             #expect(view.own.tack == .port && view.others[0].rightOfWay?.keepClear == 0)
-            let brain = BotBrain(style: BotStyle(skill: 0.5, startSpot: 0.5, finishSpot: 0.7, timingSlack: 0, penaltyDirection: 1))
+            var brain = BotBrain(style: BotStyle(skill: 0.5, startSpot: 0.5, finishSpot: 0.7, timingSlack: 0, penaltyDirection: 1))
+            // `racingKeepClear`'s own duck, the shared scorer (#531) aside unless `scorer`.
+            brain.scoresKeepClear = scorer
             // Her give-way manoeuvre under rule 10, the edge aside.
             let duck = brain.racingKeepClear(view.own, view, from: view.others[0], rule: .portStarboard,
                                              desired: view.own.heading, lookahead: brain.keepClearLookahead)
@@ -142,6 +144,10 @@ import RegattaCore
                 #expect(!staysIn(near.duck + way * Double(nearer) * step, near.view), "a nearer heading stays in")
             }
         }
+        // On the shared scorer (#531): she keeps clear in open water, and near the side its heading stays in too.
+        #expect(try evasive(inFromTheSide: 150, scorer: true).heading != nil, "in open water she keeps clear")
+        let scored = try evasive(inFromTheSide: 12, scorer: true)
+        #expect(staysIn(try #require(scored.heading), scored.view))
     }
 
     /// The bot suite's profiles (#231): the baseline sails the groove only; the tactician leaves it.

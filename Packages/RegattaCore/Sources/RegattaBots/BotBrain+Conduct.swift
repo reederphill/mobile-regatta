@@ -317,7 +317,19 @@ extension BotBrain {
             let lookahead = (ontoPort && other.tack == .starboard ? Self.tapOntoPortLookahead : Self.tapLookahead) * tapLookaheadScale
             let approach = Self.closestApproach(of: other, to: b, heading: heading, speed: speed, lookahead: lookahead)
             guard approach >= min(clear, gap) else { return false }
-            guard caution != nil else { return true }
+            // A live bot racing on the shared scorer (#531, racing only: Q6) looks along the tack she will sail too,
+            // `other` rolled as the scorer rolls her against a tack (`tackReaction`: rule 13, nobody gives way to her).
+            // Not a gybe: refused near a mark of a run, the closest course to it (`refusedTurnAim`) turned her at a
+            // boat that tacked a tick later (`rightOfWayBotNeverRuddersTowardAKeepClearBoat`, skill 0.7, seed 20).
+            if caution == nil {
+                guard usesKeepClearScorer(b), Self.tracksTheTap, abs(sailingAngle(b)) < .pi / 2 else { return true }
+                let sailed = track ?? tapTrack(b, view, seconds: Self.tapOntoPortLookahead * tapLookaheadScale)
+                track = sailed
+                let steps = min(sailed.count, Int((lookahead / Self.keepClearPredictionStep).rounded()))
+                let theirs = predictedTrack(of: other, tackReaction(of: other, b, view), view, steps: steps)
+                let closest = zip(sailed, theirs).map { ($1 - $0).length }.min() ?? gap
+                return closest >= min(clear, gap)
+            }
             let sailed = track ?? tapTrack(b, view, seconds: Self.tapOntoPortLookahead * tapLookaheadScale)
             track = sailed
             return tapApproach(of: other, track: sailed, lookahead: lookahead, view) >= min(clear, gap)
@@ -352,4 +364,10 @@ extension BotBrain {
 extension RacingRule {
     /// Rule 21: a boat returning to start or taking a penalty keeps clear (`Race.rightsOfWay(of:)`, #337).
     var isRule21: Bool { self == .returningToStart || self == .takingAPenalty }
+}
+
+extension BotBrain {
+    /// Whether a live bot racing tests the tack she will sail (`tapTrack`) against the scorer's roll-out in `tapIsClear`
+    /// (#531 C). WIP: on; a seam to attribute moves while the round is open.
+    static let tracksTheTap = true
 }

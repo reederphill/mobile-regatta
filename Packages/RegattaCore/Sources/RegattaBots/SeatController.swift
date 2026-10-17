@@ -76,15 +76,17 @@ public struct SeatControllers: Sendable {
     public mutating func drive(_ race: Race) {
         guard !race.isOver else { return }
         let deciding = seats.indices.filter { seats[$0].driver?.decides(atTick: race.tick) ?? false }
+        // Which boats people sail, as a player could tell (#531): only when any does.
+        let humans = seats.contains(where: \.isHuman) ? seats.map(\.isHuman) : []
         for (seat, view) in zip(deciding, race.seatViews(for: deciding)) {
             switch seats[seat] {
             case .human:
                 continue
             case .bot(var driver):
-                driver.drive(race, seeing: view)
+                driver.drive(race, seeing: view, humans: humans)
                 seats[seat] = .bot(driver)
             case .dropped(var driver):
-                driver.drive(race, seeing: view)
+                driver.drive(race, seeing: view, humans: humans)
                 seats[seat] = .dropped(driver)
             }
         }

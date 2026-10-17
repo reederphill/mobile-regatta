@@ -362,6 +362,8 @@ extension BotBrain {
         if tactics.seeksPuffs { headed += puffAdvantage(b, view, over: tack) }
         headed += pressure
         if tactics.seeksClearAir && tack == b.tack && b.shadow < Self.dirtyAir { headed += Self.dirtyAirWeight }
+        // Passing a boat ahead (#531 Q4): every tier at least considers a tack to clear air.
+        if tack == b.tack, keepClearLatch?.lane != nil { headed += Self.overtakeWeight }
         if let play = fleetPlay(b, view, planned: tack, headed: shifted, lean: headed, threshold: threshold,
                                 overstood: overstood) {
             guard play.play == .holdLane else {

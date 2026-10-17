@@ -8,8 +8,8 @@ import RegattaCore
 // (`avoidingContact`). Nothing changes before that trigger: no lane is given up early, no slowing, no keeping station
 // ("no orderly bots"), and a turn away from a boat that had no escape is no 16.1 foul on the bot.
 //
-// Racing and before her start, for every live bot and the cautious bot; the suite's hunter only before her start
-// (#537 Q1, placeholder: racing, her hunting stays as #355 has it). Internal: nothing shows it.
+// Racing and before her start, for every live bot and the cautious bot. The suite's hunter avoids so only before her
+// start: racing, her hunting stays as #355 has it (#537 Q1, placeholder). Internal: nothing shows it.
 extension BotBrain {
     /// Why a boat that must keep clear of her is clearly not keeping clear (`notKeepingClear`, #537). The definition
     /// #531's roll-out reuses: `.cannot` is its "can't" state (a stopped boat doesn't react), `.isNot` its "won't".
@@ -35,17 +35,24 @@ extension BotBrain {
 
     /// Notes every boat as she sees it now, for `notKeepingClear` at her next decision (#537): every bot's, kept apart
     /// from the cautious bot's `seen` so nothing of hers moves.
+    /// The memory keeps `memorySeconds` of sightings by seat (#531's measured motion, `measuredMotion`); the last is her
+    /// last decision's.
     mutating func glimpse(_ view: SeatView) {
         for other in view.others {
-            if other.seat >= glimpsed.count { glimpsed += Array(repeating: nil, count: other.seat + 1 - glimpsed.count) }
-            glimpsed[other.seat] = Seen(time: view.time, heading: other.heading, speed: other.speed)
+            if other.seat >= glimpsed.count { glimpsed += Array(repeating: [], count: other.seat + 1 - glimpsed.count) }
+            var sightings = glimpsed[other.seat]
+            sightings.append(Glimpse(time: view.time, position: other.position, heading: other.heading, speed: other.speed))
+            if let kept = sightings.firstIndex(where: { view.time - $0.time <= Self.memorySeconds + 1e-9 }), kept > 0 {
+                sightings.removeFirst(kept)
+            }
+            glimpsed[other.seat] = sightings
         }
     }
 
     /// The rate `other` has been turning at since her last decision, radians a second (positive to starboard), clamped
     /// to `guardTurnRate`: 0 at a first sighting (`glimpsed`).
     func observedTurnRate(of other: SeatView.OtherBoat, _ view: SeatView) -> Double {
-        guard other.seat < glimpsed.count, let last = glimpsed[other.seat], view.time > last.time else { return 0 }
+        guard other.seat < glimpsed.count, let last = glimpsed[other.seat].last, view.time > last.time else { return 0 }
         return (wrapAngle(other.heading - last.heading) / (view.time - last.time))
             .clamped(to: -Self.guardTurnRate...Self.guardTurnRate)
     }
@@ -121,7 +128,7 @@ extension BotBrain {
     /// (`glimpsed`) opens the distance between them at `respondingRate` or more. Turning away, or slowing to drop
     /// astern, she is keeping clear. Unknown at a first sighting: no.
     func isResponding(_ other: SeatView.OtherBoat, _ view: SeatView) -> Bool {
-        guard other.seat < glimpsed.count, let last = glimpsed[other.seat], view.time > last.time else { return false }
+        guard other.seat < glimpsed.count, let last = glimpsed[other.seat].last, view.time > last.time else { return false }
         let away = (other.position - view.own.position).normalized
         let change = other.velocity - Vec2.heading(last.heading) * last.speed
         return change.dot(away) / (view.time - last.time) >= Self.respondingRate
