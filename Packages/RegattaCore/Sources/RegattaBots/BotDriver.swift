@@ -134,10 +134,12 @@ public struct BotDriver: Sendable {
 
     /// Decides on `view`, the seat's view of `race` now (a decision tick of a race not over), and sends the
     /// decision for the next tick: `drive(_:)` with the view built by the caller, as `SeatControllers` builds
-    /// the fleet's together.
+    /// the fleet's together. `humans`, by seat, the seats people sail (`SeatControllers`): the keep-clear scorer never
+    /// rolls one giving way (#531). Empty when the caller doesn't say: every boat a bot's.
     @discardableResult
-    mutating func drive(_ race: Race, seeing view: SeatView) -> BotDecision {
+    mutating func drive(_ race: Race, seeing view: SeatView, humans: [Bool] = []) -> BotDecision {
         precondition(view.seat == seat && view.tick == race.tick, "seat \(seat) at tick \(race.tick) given the view of seat \(view.seat) at tick \(view.tick)")
+        if brain.humanSeats != humans { brain.humanSeats = humans }
         var decision = brain.decide(helm.view(view))
         decision.input = helm.input(decision.input, view, tapping: decision.tap != nil, centred: decision.centred,
                                     holdsHerAngle: decision.holdsHerAngle)
