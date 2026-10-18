@@ -25,11 +25,19 @@ import Testing
     static func race(seed: UInt64, boatClass: BoatClassFile, seats: Int = 8) throws -> Race {
         var catalog = RaceFileCatalog()
         try catalog.boatClasses.add(boatClass)
-        let setup = try RaceSetup(raceSeed: RaceSeed(seed), seats: Array(repeating: .bot, count: seats), laps: 2,
+        let setup = try RaceSetup(raceSeed: RaceSeed(seed), seats: Array(repeating: .bot, count: max(seats, 2)), laps: 2,
                                   startSequenceTicks: 45 * Race.tickRate, boatClass: boatClass.ref,
                                   rulesConfiguration: BotConductTests.waterRules)
-        return try Race(setup: setup, files: RaceFiles(resolving: setup, from: catalog),
-                        mode: .authoritative(windSeed: WindSeed(seed &* 0x9E37_79B9_7F4A_7C15 &+ 1)))
+        let race = try Race(setup: setup, files: RaceFiles(resolving: setup, from: catalog),
+                            mode: .authoritative(windSeed: WindSeed(seed &* 0x9E37_79B9_7F4A_7C15 &+ 1)))
+        if seats == 1 {
+            // A race is two seats at least (`RaceSetup.fleetSizes`): seat 1 is a ghost far off from the first tick, so seat 0 sails alone (#539).
+            var snapshot = race.exportSnapshot()
+            snapshot.seats[1].boat.status = .dsq
+            snapshot.seats[1].boat.position = race.course.raceArea.centre + race.course.right * 5_000
+            try race.importSnapshot(snapshot)
+        }
+        return race
     }
 
     /// Each seat's position every second for `seconds`, the fleet sailed by bots; steering by hand perfectly if
@@ -44,25 +52,27 @@ import Testing
             : allBots(race)
         var track: [[Vec2]] = []
         sail(race, &controllers, ticks: seconds * Race.tickRate) { race in
-            if race.tick % Race.tickRate == 0 { track.append(race.boats.map(\.position)) }
+            if race.tick % Race.tickRate == 0 { track.append(race.boats.prefix(seats).map(\.position)) }
         }
         return track
     }
 
-    /// A seeded bot race sailed with the autohelm off: the bots steer by hand and sail within a tolerance of today's
-    /// track. Two bots, so the track is the helm's, not the fleet's: in a full fleet one tap a tick apart changes who
+    /// A seeded bot race sailed with the autohelm off: the bot steers by hand and sails within a tolerance of today's
+    /// track. One bot (#539), so the track is the helm's, not the fleet's: in a full fleet one tap a tick apart changes who
     /// meets whom, and the tracks part on the first beat (seed 5's eight bots drifted 20 lengths apart in 90 s while each
-    /// helm sails as well as ever). Five minutes, the start, a beat and a run: neither strays more than 2 hull lengths
+    /// helm sails as well as ever). Five minutes, the start, a beat and a run: she never strays more than 1.5 hull lengths
     /// (0.6 when written). With it on (the value set true), today's race to the bit, the full fleet's too.
     @Test func sameTrackWithAutohelmOff() throws {
         let seed: UInt64 = 6
         let fleet = try Self.track(seed: seed, boatClass: Self.autohelmOn(), seconds: 90)
         #expect(try Self.track(seed: seed, boatClass: Self.skiff(holds: true), seconds: 90) == fleet)
 
-        let today = try Self.track(seed: seed, boatClass: Self.autohelmOn(), seconds: 300, seats: 2)
-        #expect(try Self.track(seed: seed, boatClass: Self.skiff(holds: true), seconds: 300, seats: 2) == today)
+        let seats = 1
+        let today = try Self.track(seed: seed, boatClass: Self.autohelmOn(), seconds: 300, seats: seats)
+        #expect(try Self.track(seed: seed, boatClass: Self.skiff(holds: true), seconds: 300, seats: seats) == today)
         // #435: steering by hand perfectly; the app's bots steer as well as their skill lets them, and stray further.
-        let off = try Self.track(seed: seed, boatClass: Self.skiff(holds: false), seconds: 300, seats: 2, perfectHands: true)
+        let off = try Self.track(seed: seed, boatClass: Self.skiff(holds: false), seconds: 300, seats: seats,
+                                 perfectHands: true)
         #expect(off.count == today.count)
         let hull = try Self.autohelmOn().content.hull.length
         var worst = 0.0
@@ -74,20 +84,17 @@ import Testing
                 total += d
             }
         }
-        let mean = total / Double(today.count * 2)
-        // #508: 1.25 measured on seed 5 (1 held until then). Both sail the windward mark's final approach on the same
-        // boards; out of its last tack the hand-steered boat is a length ahead along the same track to the offset mark.
-        // #531: seed 6 (0.40, with the racing scorer on or off). On seed 5 the scorer's first crossing (24 s after the
-        // gun, the port boat luffing to cross ahead) put seat 1 slow by the windward mark, where her tap waits for
-        // `tackingSpeed` and her hand tack goes at `nearMarkTackingSpeed` (#508): 2.50. The two-bot scene is chaotic:
-        // on main (scorer off) this test passed on only 4 of 16 seeds, so it was already pinned to luck (#539). Worst
-        // error in hull lengths, seeds 1-16 (pass < 1.5):
+        let mean = total / Double(today.count * seats)
+        // #539: two boats were dropped because on 10 of 16 seeds they split > 0.5 L by 85 s from sub-second timing
+        // differences, before any mark. One boat, with her hand nudging through the dead band (#545), seeds 1-16, worst
+        // and mean in hull lengths (pass: worst < 1.5, mean < 0.5):
         //   seed      1     2     3     4     5     6     7     8     9    10    11    12    13    14    15    16
-        //   on     15.1  48.0  0.88  3.70  2.50  0.40  24.9  1.17  24.9  27.1  18.1  0.73  10.4  23.2  27.6  13.1
-        //   off    15.1  48.0  1.04  3.70  1.25  0.40  24.9  19.0  0.98  27.1  18.1  5.49  10.4  23.3  27.6  10.2
-        // 4 pass either way; only 3 and 6 pass both, and 6 has the most room.
-        #expect(worst < 1.5, "a bot strayed \(worst) hull lengths from today's track")
-        #expect(mean < 0.5, "the bots strayed \(mean) hull lengths on average")
+        //   worst  0.57  0.35  0.15  0.11  0.33  0.13  0.27  0.08  0.57  0.14  10.8  0.22  0.16  21.9  0.28  0.26
+        //   mean   0.20  0.10  0.06  0.05  0.09  0.04  0.09  0.04  0.21  0.06  2.87  0.07  0.06  4.07  0.06  0.12
+        // 14 of 16 pass (10 of 16 on main, centring inside the band). Seed 11 tacks at 81 s where the autohelm's boat
+        // holds on, 0.12 L apart on the same course; seed 14 parts out of a turn at 195 s. Seed 6 (#531) stays.
+        #expect(worst < 1.5, "the bot strayed \(worst) hull lengths from today's track")
+        #expect(mean < 0.5, "the bot strayed \(mean) hull lengths on average")
     }
 
     /// #459: a rudder her brain lets go in irons (`BotDecision.centred`) is sent truly centred and she holds no angle,
