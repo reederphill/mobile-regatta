@@ -17,7 +17,7 @@ import Testing
         var controllers = SeatControllers(race.boats.indices.map { .bot(driver($0, race.setup.raceSeed)) })
         var track: [[Vec2]] = []
         sail(race, &controllers, ticks: seconds * Race.tickRate) { race in
-            if race.tick % Race.tickRate == 0 { track.append(race.boats.map(\.position)) }
+            if race.tick % Race.tickRate == 0 { track.append(race.boats.prefix(seats).map(\.position)) }
         }
         return track
     }
@@ -75,18 +75,19 @@ import Testing
     }
 
     /// Skill 1.0 steers by hand perfectly: none of the three, so with the autohelm off she sails `BotHelm`'s own track,
-    /// within #434's tolerance of the autohelm's (seed 6's two bots, seed 5's until #531: `sameTrackWithAutohelmOff`;
-    /// five minutes: the start, a beat and a run; 2 hull lengths at worst, 1 on average). Club hand steering on the same
-    /// bots leaves that track; with the autohelm on, hand steering is never felt and the race is today's to the bit.
+    /// within #434's tolerance of the autohelm's (seed 6's lone bot: `sameTrackWithAutohelmOff`; five minutes: the start,
+    /// a beat and a run; 2 hull lengths at worst, 1 on average). Club hand steering on the same bot leaves that track; with
+    /// the autohelm on, hand steering is never felt and the race is today's to the bit.
     ///
-    /// #531: the two-bot scene is chaotic. On main (racing scorer off) it passed on only 4 of 16 seeds, so it was
-    /// already pinned to luck (#539). Worst error in hull lengths of the scene, seeds 1-16, scorer on and off:
+    /// #539: two boats were dropped because on 10 of 16 seeds they split > 0.5 L by 85 s from sub-second timing
+    /// differences, before any mark. One boat, with her hand nudging through the dead band (#545), seeds 1-16, worst and
+    /// mean in hull lengths (pass: worst < 2, mean < 1):
     ///
     ///     seed      1     2     3     4     5     6     7     8     9    10    11    12    13    14    15    16
-    ///     on     15.1  48.0  0.88  3.70  2.50  0.40  24.9  1.17  24.9  27.1  18.1  0.73  10.4  23.2  27.6  13.1
-    ///     off    15.1  48.0  1.04  3.70  1.25  0.40  24.9  19.0  0.98  27.1  18.1  5.49  10.4  23.3  27.6  10.2
+    ///     worst  0.57  0.35  0.15  0.11  0.33  0.13  0.27  0.08  0.57  0.14  10.8  0.22  0.16  21.9  0.28  0.26
+    ///     mean   0.20  0.10  0.06  0.05  0.09  0.04  0.09  0.04  0.21  0.06  2.87  0.07  0.06  4.07  0.06  0.12
     ///
-    /// Only 3 and 6 pass both ways; seed 6 has the most room (0.40 L).
+    /// 14 of 16 pass (12 of 16 on main, centring inside the band); seed 6 (#531) stays.
     @Test func skillOneMatchesAutohelm() throws {
         let top = BotWeaknesses(skill: 1)
         #expect(top.shiftLag == 0 && top.wander == 0 && top.overshoot == 0)
@@ -97,11 +98,14 @@ import Testing
         }
 
         let seed: UInt64 = 6
+        let seats = 1
         let off = try BotHelmTests.skiff(holds: false)
-        let autohelm = try Self.track(seed: seed, boatClass: BotHelmTests.autohelmOn(), seconds: 300) { seat, raceSeed in
+        let autohelm = try Self.track(seed: seed, boatClass: BotHelmTests.autohelmOn(), seconds: 300,
+                                      seats: seats) { seat, raceSeed in
             BotDriver(seat: seat, raceSeed: raceSeed)
         }
-        let perfect = try Self.track(seed: seed, boatClass: off, seconds: 300, driver: Self.steering(like: top))
+        let perfect = try Self.track(seed: seed, boatClass: off, seconds: 300, seats: seats,
+                                     driver: Self.steering(like: top))
         #expect(perfect.count == autohelm.count)
         let hull = try BotHelmTests.autohelmOn().content.hull.length
         var worst = 0.0
@@ -114,13 +118,101 @@ import Testing
             }
         }
         #expect(worst < 2, "a perfect hand strayed \(worst) hull lengths from the autohelm's track")
-        #expect(total / Double(autohelm.count * 2) < 1)
+        #expect(total / Double(autohelm.count * seats) < 1)
 
-        let club = try Self.track(seed: seed, boatClass: off, seconds: 120, driver: Self.steering(like: .clubHandSteering))
+        let club = try Self.track(seed: seed, boatClass: off, seconds: 120, seats: seats,
+                                  driver: Self.steering(like: .clubHandSteering))
         #expect(club != Array(perfect.prefix(club.count)), "Club hand steering sailed the perfect hand's track")
-        let clubOnAutohelm = try Self.track(seed: seed, boatClass: BotHelmTests.autohelmOn(), seconds: 120,
+        let clubOnAutohelm = try Self.track(seed: seed, boatClass: BotHelmTests.autohelmOn(), seconds: 120, seats: seats,
                                             driver: Self.steering(like: .clubHandSteering))
         #expect(clubOnAutohelm == Array(autohelm.prefix(clubOnAutohelm.count)))
+    }
+
+    /// Radians the smallest rudder she can send turns `boatClass` on a beam reach at `speed` (m/s, in 10 knots): 7/127
+    /// (`BoatInput`'s int8, 6/127 inside `Autohelm.deadBand`) held for `ticks` race ticks, then centred, read once she
+    /// stops turning (#545).
+    static func pulseYaw(_ boatClass: BoatClass, speed: Double, ticks: Int) -> Double {
+        let pulse = BoatInput(rudder: 7 as Int8).rudderValue
+        let env = BoatDynamics.Environment.constant(windDirection: 0, windSpeed: metresPerSecond(knots: 10))
+        var state = BoatDynamics.State(heading: -.pi / 2, speed: speed)
+        let start = state.heading
+        for tick in 0..<(ticks + 30) {
+            state = BoatDynamics.advance(state, control: .init(rudder: tick < ticks ? pulse : 0), env: env,
+                                         boatClass: boatClass, dt: Race.dt)
+        }
+        #expect(state.rudder == 0)
+        return abs(wrapAngle(state.heading - start))
+    }
+
+    /// The held course's tolerance for `boatClass` (#545): the yaw of the smallest pulse a bot can send, 7/127 for one
+    /// decision (`BotDriver.decisionInterval`), at full way, or 0.1° if that's less.
+    static func heldCourseTolerance(_ boatClass: BoatClass) -> Double {
+        max(deg2rad(0.1), pulseYaw(boatClass, speed: metresPerSecond(knots: 7), ticks: BotDriver.decisionInterval))
+    }
+
+    /// #545: the smallest pulse she can send, for one race tick and for one decision, on skiff@9 (the default class) and
+    /// on the skiff the track tests sail, at boat speeds either side of full steerage.
+    @Test func smallestPulseYaw() throws {
+        for (name, boatClass) in [("skiff@9", try BoatClassFile.bundled(id: "skiff", version: 9).content),
+                                  ("skiff(holds: false)", try BotHelmTests.skiff(holds: false).content)] {
+            var decision = 0.0
+            for knots in [2, 3.5, 4.67, 7] {
+                let speed = metresPerSecond(knots: knots)
+                let tick = Self.pulseYaw(boatClass, speed: speed, ticks: 1)
+                decision = Self.pulseYaw(boatClass, speed: speed, ticks: BotDriver.decisionInterval)
+                print("HELM-PULSE \(name) \(knots) kn: one tick \(rad2deg(tick))°, one decision \(rad2deg(decision))°")
+                #expect(tick > 0 && decision > tick)
+            }
+            print("HELM-PULSE \(name) T = \(rad2deg(Self.heldCourseTolerance(boatClass)))°")
+            #expect(Self.heldCourseTolerance(boatClass) == max(deg2rad(0.1), decision))
+        }
+    }
+
+    /// #545: a perfect hand holds her aim through the rudder's dead band to within one pulse's yaw
+    /// (`heldCourseTolerance`), on a reach in a wind veering steadily 1° every 10 s and on the groove upwind as the breeze builds
+    /// from 4 to 8 knots, so her groove's angle moves; and on average she sits on it, not to one side.
+    @Test func perfectHandHoldsHerAimThroughTheDeadBand() throws {
+        // By seconds since the scene's first tick (`scriptedRace` starts ten minutes before the gun).
+        func seconds(_ tick: Int) -> Double { max(0, Double(tick + 600 * Race.tickRate)) / Double(Race.tickRate) }
+        let scenes: [(name: String, angle: (BoatClass) -> Double, wind: (Int) -> GroundWind)] = [
+            ("reach", { _ in deg2rad(70) }, { tick in
+                GroundWind(direction: deg2rad(seconds(tick) / 10), speed: metresPerSecond(knots: 10))
+            }),
+            // 4 to 8 knots, where the skiff's groove comes down from 52° to 45° (it is 45° from 8 to 16).
+            ("groove", { $0.polar.bestUpwind(tws: metresPerSecond(knots: 4)).twa }, { tick in
+                GroundWind(direction: 0, speed: metresPerSecond(knots: 4 + 4 * min(seconds(tick) / 60, 1)))
+            }),
+        ]
+        for (name, file) in [("skiff@9", try BoatClassFile.bundled(id: "skiff", version: 9)),
+                             ("skiff(holds: false)", try BotHelmTests.skiff(holds: false))] {
+            let tolerance = Self.heldCourseTolerance(file.content)
+            for scene in scenes {
+                let race = try Self.scriptedRace(boatClass: file, sailingAngle: scene.angle(file.content), wind: scene.wind)
+                var helm = BotHelm()
+                let from = race.tick + 5 * Race.tickRate
+                var worst = 0.0
+                var total = 0.0
+                var count = 0
+                var pulses = 0
+                for _ in 0..<(60 * Race.tickRate) {
+                    Self.hold(race, &helm, seconds: 1 / Double(Race.tickRate))
+                    let boat = race.boats[0]
+                    guard race.tick >= from, let held = helm.held else { continue }
+                    let aim = held.aim(tws: boat.polarWindSpeed(in: race.boatClass),
+                                       grooveTWS: boat.grooveWindSpeed(in: race.boatClass), boatClass: race.boatClass)
+                    let off = wrapAngle(aim - boat.sailingAngle)
+                    worst = max(worst, abs(off))
+                    if boat.desiredRudder != 0 && race.tick % 3 == 0 { pulses += 1 }
+                    total += off
+                    count += 1
+                }
+                let mean = total / Double(max(count, 1))
+                print("HELM-HOLD \(name) \(scene.name): worst \(rad2deg(worst))°, mean \(rad2deg(mean))° (T \(rad2deg(tolerance))°), \(pulses) pulses")
+                #expect(count > 50 * Race.tickRate, "she held no angle")
+                #expect(worst <= tolerance, "\(name) \(scene.name): she sat \(rad2deg(worst))° off her aim")
+                #expect(abs(mean) <= tolerance / 4, "\(name) \(scene.name): she sat \(rad2deg(mean))° to one side")
+            }
+        }
     }
 
     /// Seconds after a 10° shift at 20 s until seat 0, held on a reach by a helm with `weaknesses`' shift lag (and no

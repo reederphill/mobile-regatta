@@ -7,9 +7,10 @@ import RegattaCore
 /// centred (`Autohelm.engage`: her angle, or the groove within a snap of it) and turns it into a held rudder each
 /// decision with the autohelm's own rudder law (`Autohelm.rudder`): she sails the same track either way, close to it
 /// rather than bit for bit, since she steers ten times a second where the autohelm steers every tick. A correction inside
-/// the autohelm's dead band (`Autohelm.deadBand`, about 0.5° of error at the class's gain) is a centred rudder, so she can
-/// sit that far off her aim; and she steers by the headed angle she sees under a backwind header, where the race's
-/// autohelm holds a groove's heading through it (#377).
+/// the autohelm's dead band (`Autohelm.deadBand`, about 0.5° of error at the class's gain) would be a centred rudder, so
+/// she nudges through it (#545, `pulsed`): the smallest rudder the race steers by, for one decision, once she is half a
+/// nudge's yaw off her aim, an input any player could send. And she steers by the headed angle she sees under a
+/// backwind header, where the race's autohelm holds a groove's heading through it (#377).
 ///
 /// Her brain reads the angle it holds as her autohelm's (`view(_:)`), so it decides exactly as it does with the
 /// autohelm on. A rudder her brain holds off centre is hers, and lets the angle go: so too every tack and gybe on a
@@ -82,14 +83,31 @@ struct BotHelm: Sendable, Equatable {
         guard !hand.isPerfect else {
             let rudder = helm.rudder(sailingAngle: angle, boomSide: own.boomSide, tws: own.polarWindSpeed,
                                      grooveTWS: own.grooveWindSpeed, boatClass: boatClass)
-            return BoatInput(rudder: rudder, ease: input.ease)
+            return BoatInput(rudder: Self.pulsed(rudder, boatClass, speed: own.speed), ease: input.ease)
         }
         // By hand: her angle read against the wind she steers by, not the wind at her.
         let wind = hand.steer(&steering, own: own, tick: view.tick, downwind: helm.target.isDownwind)
         let steeredAngle = own.boomSide.sailingAngle(relativeWind: wrapAngle(wind.direction - own.heading))
         let rudder = helm.rudder(sailingAngle: steeredAngle, boomSide: own.boomSide, tws: wind.tws,
                                  grooveTWS: wind.grooveTWS, boatClass: boatClass)
-        return BoatInput(rudder: rudder, ease: input.ease)
+        return BoatInput(rudder: Self.pulsed(rudder, boatClass, speed: own.speed), ease: input.ease)
+    }
+
+    /// The smallest rudder the race steers by (#545): `BoatInput`'s 7/127, since 6/127 is inside `Autohelm.deadBand`.
+    static let pulse: Int8 = 7
+
+    /// The rudder she sends for `rudder`, her helm's law's (`Autohelm.rudder`), sailing `boatClass` at `speed` (#545).
+    /// Above the dead band, as it is. Inside it, centred, unless her error (the law's rudder over its gain) is at least
+    /// half the yaw of one `pulse` held for a decision at her speed: then that pulse, towards her aim. A pulse takes
+    /// her a pulse's yaw towards it, so she sails within half a pulse's yaw of her aim, and a pulse never takes her more than that past it.
+    static func pulsed(_ rudder: Double, _ boatClass: BoatClass, speed: Double) -> Int8 {
+        let sent = BoatInput(rudder: rudder).rudder
+        guard abs(BoatInput(rudder: sent).rudderValue) <= Autohelm.deadBand else { return sent }
+        let steering = boatClass.steering
+        let yaw = BoatInput(rudder: pulse).rudderValue * steering.turnRate(speed: speed)
+            * Double(BotDriver.decisionInterval) * Race.dt
+        guard rudder != 0, abs(rudder) / steering.autohelm.gain >= yaw / 2 else { return 0 }
+        return rudder < 0 ? -pulse : pulse
     }
 }
 
