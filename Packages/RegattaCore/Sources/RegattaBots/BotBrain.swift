@@ -227,8 +227,12 @@ struct BotBrain: Sendable {
     /// Which seats are people's boats, by seat (`SeatControllers.drive`, #531): the keep-clear scorer never rolls one
     /// giving way (`reaction`). Empty: every boat a bot's.
     var humanSeats: [Bool] = []
-    /// The side she is committed to keeping clear racing (`scoreRacingKeepClear`, #531), written in `sail`.
+    /// The side she is committed to keeping clear racing (`scoreRacingKeepClear`, #531), written in `sail`: cleared at
+    /// any decision the scorer doesn't make (a turn by hand, a penalty, off the course) and when her tack has changed
+    /// since it was written (`keepClearLatchTack`), as its side and lane are her tack's.
     var keepClearLatch: KeepClearLatch?
+    /// The tack she was on when `keepClearLatch` was written.
+    var keepClearLatchTack: Tack?
     /// The tack the racing scorer chose, until it is over (#531, `KeepClearTack`), written in `sail`.
     var keepClearTack: KeepClearTack?
     /// Whether she keeps clear racing on the shared scorer (`scoreRacingKeepClear`, #531). A test seam: always true in
@@ -316,6 +320,10 @@ struct BotBrain: Sendable {
             takingOver = false
             adopt(view)
         }
+        // Her latched side is the scorer's of this decision only if it makes one, and on the tack it was latched on.
+        if keepClearLatchTack != boat.tack { keepClearLatch = nil }
+        var scorerDecided = false
+        defer { if !scorerDecided { keepClearLatch = nil } }
         let byHand = Self.turnsByHand(view)
         guard boat.isOnCourse else {
             handTurn = nil
@@ -367,6 +375,8 @@ struct BotBrain: Sendable {
             let decided = scoreRacingKeepClear(boat, view, desired: desired, lookahead: keepClearLookahead,
                                                tackable: tackable, overtakes: aim.tack == boat.tack)
             keepClearLatch = decided?.latch
+            keepClearLatchTack = boat.tack
+            scorerDecided = true
             if let decided, decided.tacks, let threat = decided.threat {
                 keepClearTack = KeepClearTack(escaping: threat, toTack: boat.tack.other, since: view.time)
                 keepClearLatch = nil

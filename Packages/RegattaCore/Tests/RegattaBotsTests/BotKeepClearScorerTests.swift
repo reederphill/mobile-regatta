@@ -137,18 +137,30 @@ extension BotConductTests {
                 brain.glimpsed = [[], [BotBrain.Glimpse(time: view.time - 0.5, position: other.position - other.velocity * 0.5,
                                                         heading: other.heading - BotBrain.guardTurnRate * 0.5,
                                                         speed: other.speed)]]
-                guard !brain.tapIsClear(b, view) else { continue } // bearing away across her tack
+                // The predictor kept, her tack as a straight line onto the new heading at the tap's speed share
+                // (`closestApproach`'s reckoning): the scenes where that alone clears the turning boat.
+                let lookahead = BotBrain.tapLookahead * brain.tapLookaheadScale
+                let dt = BotBrain.keepClearPredictionStep
+                let steps = Int((lookahead / dt).rounded())
+                let theirs = brain.predictedTrack(of: other, brain.tackReaction(of: other, b, view), view, steps: steps)
+                let line = Vec2.heading(2 * b.windDirection - b.heading) * (b.speed * BotBrain.tapSpeedShare)
+                let straight = (1...steps).map { b.position + line * (Double($0) * dt) }
+                let clear = min(view.boatClass.hull.length * brain.tapClearanceLengths, (other.position - b.position).length)
+                guard zip(straight, theirs).map({ ($1 - $0).length }).min() ?? 0 >= clear else { continue }
+                // Only her real track (`tapTrack`) against the same roll-out can refuse it.
+                let track = brain.tapTrack(b, view, seconds: BotBrain.tapOntoPortLookahead * brain.tapLookaheadScale)
+                let real = zip(track, theirs).map { ($1 - $0).length }.min() ?? .infinity
+                guard real < clear else { continue }
                 found += 1
-                brain.scoresKeepClear = false
-                #expect(brain.tapIsClear(b, view), "ahead \(ahead), across \(across): the straight line alone clears it")
+                #expect(!brain.tapIsClear(b, view), "ahead \(ahead), across \(across): her track passes \(real) m off")
             }
         }
-        #expect(found > 0, "no tack refused for its real track")
+        #expect(found > 0, "no tack whose straight line clears and whose real track fouls")
     }
 
     /// #531 (design point 5): the tack track `tapIsClear` sails (`tapTrack`, the autohelm's tap) against one real tack
-    /// by hand on the default class: where her hand puts her in the 3 s of the tap's lookahead is within a hull length
-    /// of where the track does.
+    /// by hand on the default class: where her hand puts her in the 3 s of the tap's lookahead is within 0.75 of a hull
+    /// length of where the track does, sampled at the track's own tenths of a second from the tick it was taken at.
     @Test func tapTrackFollowsARealTackByHand() throws {
         let water = Water(seed: 3)
         let race = try Self.place(water, [
@@ -159,18 +171,25 @@ extension BotConductTests {
         // The first decision starts her tack by hand: the track is taken from that moment.
         var track: [Vec2] = []
         var sailed: [Vec2] = []
+        var captured = 0
         for _ in 0..<(4 * Race.tickRate) where !race.isOver {
             let view = race.seatView(for: 0)
-            if track.isEmpty, (race.tick).isMultiple(of: BotDriver.decisionInterval) {
+            if track.isEmpty, (race.tick + pilot.seat).isMultiple(of: BotDriver.decisionInterval) {
                 track = pilot.brain.tapTrack(view.own, view, seconds: BotBrain.tapLookahead)
+                captured = race.tick
             }
             _ = pilot.drive(race)
             race.step()
-            if !track.isEmpty, (race.tick).isMultiple(of: Race.tickRate / 10) { sailed.append(race.boats[0].position) }
+            // The track's i-th point is (i + 1) tenths of a second on from the tick it was taken at.
+            if !track.isEmpty, (race.tick - captured).isMultiple(of: Race.tickRate / 10) {
+                sailed.append(race.boats[0].position)
+            }
         }
         #expect(race.boats[0].tack == .port, "she tacked")
+        #expect(sailed.count >= track.count)
         let worst = zip(track, sailed).map { ($0 - $1).length }.max() ?? .infinity
-        #expect(worst < water.length, "the track is \(worst) m off her hand's tack")
+        // Measured worst 3.12 m, 0.64 L (#531 fix round 2), the track's first second sharper than her hand's.
+        #expect(worst < water.length * 0.75, "the track is \(worst) m off her hand's tack")
     }
 
     /// #531 acceptance (owner amendment, 2026-10-15): "the tack wins on a thin margin". Of the crossings a port bot meets

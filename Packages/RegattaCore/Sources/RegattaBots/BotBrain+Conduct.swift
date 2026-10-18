@@ -322,7 +322,7 @@ extension BotBrain {
             // Not a gybe: refused near a mark of a run, the closest course to it (`refusedTurnAim`) turned her at a
             // boat that tacked a tick later (`rightOfWayBotNeverRuddersTowardAKeepClearBoat`, skill 0.7, seed 20).
             if caution == nil {
-                guard usesKeepClearScorer(b), Self.tracksTheTap, abs(sailingAngle(b)) < .pi / 2 else { return true }
+                guard usesKeepClearScorer(b), abs(sailingAngle(b)) < .pi / 2 else { return true }
                 let sailed = track ?? tapTrack(b, view, seconds: Self.tapOntoPortLookahead * tapLookaheadScale)
                 track = sailed
                 let steps = min(sailed.count, Int((lookahead / Self.keepClearPredictionStep).rounded()))
@@ -364,10 +364,4 @@ extension BotBrain {
 extension RacingRule {
     /// Rule 21: a boat returning to start or taking a penalty keeps clear (`Race.rightsOfWay(of:)`, #337).
     var isRule21: Bool { self == .returningToStart || self == .takingAPenalty }
-}
-
-extension BotBrain {
-    /// Whether a live bot racing tests the tack she will sail (`tapTrack`) against the scorer's roll-out in `tapIsClear`
-    /// (#531 C). WIP: on; a seam to attribute moves while the round is open.
-    static let tracksTheTap = true
 }

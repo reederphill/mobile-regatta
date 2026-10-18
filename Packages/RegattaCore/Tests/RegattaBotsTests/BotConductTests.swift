@@ -2407,8 +2407,16 @@ extension BotConductTests {
         let away = try #require(alone.pilot.brain.avoidingContact(alone.view.own, alone.view, .neutral,
                                                                   desired: alone.view.own.heading))
         #expect(away.rudderValue < 0, "alone, she turns away to port: \(away)")
-        let input = pilot.brain.avoidingContact(view.own, view, .neutral, desired: view.own.heading)
-        #expect((input?.rudderValue ?? 0) >= 0, "ruddered to port, into the third boat: \(String(describing: input))")
+        // #531 review: nil (no turn she may make passes her better than holding on) only because the third boat
+        // blocks the way away, so a nil from an avoidance that never ran fails here too.
+        if let input = pilot.brain.avoidingContact(view.own, view, .neutral, desired: view.own.heading) {
+            #expect(input.rudderValue >= 0, "ruddered to port, into the third boat: \(input)")
+        } else {
+            #expect(pilot.brain.turnsTowards(view.own, view, heading: view.own.heading - BotBrain.clearingStep, except: 1),
+                    "held on (nil), though no boat blocks her turn away")
+            #expect(!alone.pilot.brain.turnsTowards(alone.view.own, alone.view,
+                                                    heading: alone.view.own.heading - BotBrain.clearingStep, except: 1))
+        }
     }
 
     /// #537 Q1 (placeholder): racing, the suite's hunter hunts as #355 has her; the avoidance is not hers there.

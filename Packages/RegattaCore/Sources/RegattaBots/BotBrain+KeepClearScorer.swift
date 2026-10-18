@@ -271,19 +271,33 @@ extension BotBrain {
         // Her measured turn, rolled on for `measuredTurnSeconds` at most: a turn seen is one she is finishing, not a
         // circle she sails on (a boat whose autohelm follows a shift turns for a second or two).
         func yaw(_ t: Double) -> Double { t < Self.measuredTurnSeconds ? motion.turnRate * dt : 0 }
+        // Her measured acceleration over the whole horizon, never below rest and never speeding past the polar's speed
+        // at her heading (or her own, already faster). Not cut off after `measuredTurnSeconds` like the yaw: her speed
+        // held from there (fix round 2) cost National seeds 5-8 1226 -> 1201 finishers, the loss in 16-boat fleets'
+        // last-leg DNFs, irons and mark contacts (#531 fix round 3).
+        let polar = view.boatClass.polar
+        let floor = BoatDynamics.noGoAngle(polar) + deg2rad(5)
+        let tws = view.own.polarWindSpeed, wind = view.own.windDirection
+        func accelerated(_ t: Double, _ acceleration: Double) -> Double {
+            let next = max(0, speed + acceleration * dt)
+            guard acceleration > 0 else { return next }
+            let ceiling = polar.speed(twa: max(abs(wrapAngle(wind - heading)), floor), tws: tws)
+            return min(next, max(speed, ceiling))
+        }
         for step in 0..<steps {
             let t = Double(step) * dt
             switch reaction {
             case .measured, .cannot(stopped: false):
                 heading += yaw(t)
-                speed = max(0, speed + motion.acceleration * dt)
+                speed = accelerated(t, motion.acceleration)
             case .cannot(stopped: true):
                 heading += yaw(t)
+                // Slowing to rest whatever she was seen doing, at her measured loss if faster.
                 speed = max(0, speed + min(motion.acceleration, -Self.stoppedDeceleration) * dt)
             case let .givesWay(turn, limit):
                 if t < Self.giveWayDelay {
                     heading += yaw(t)
-                    speed = max(0, speed + motion.acceleration * dt)
+                    speed = accelerated(t, motion.acceleration)
                 } else if turned < limit {
                     let d = min(Self.keepClearTurnRate * dt, limit - turned)
                     heading += turn * d
@@ -396,6 +410,9 @@ extension BotBrain {
         // The boat of a lane she holds, until clear ahead of it; else the first boat ahead she is closing on.
         var passing = !overtakes ? nil : keepClearLatch?.lane.flatMap { seat in view.others.first { $0.seat == seat } }
             .flatMap { isPassing($0, b, view) ? $0 : nil }
+        // The boats ahead she is closing on, in seat order: rolled out with the rest though beyond `keepClearRange`,
+        // the flag's own range (`overtakeRangeLengths`) reaching further (a stopped boat at ~7.3 L).
+        var flagged: [Int] = passing.map { [$0.seat] } ?? []
         for other in view.others where !other.isGhost {
             if passing?.seat == other.seat {
                 horizon = max(horizon, overtakeFlag(other, b, view, desired: desired) ?? 0)
@@ -410,6 +427,7 @@ extension BotBrain {
                 if threat == nil { threat = other }
             } else if overtakes, let t = overtakeFlag(other, b, view, desired: desired) {
                 horizon = max(horizon, t)
+                flagged.append(other.seat)
                 if threat == nil { threat = other }
                 if passing == nil { passing = other }
             }
@@ -437,7 +455,9 @@ extension BotBrain {
         let axis = upwind ? Vec2.heading(b.windDirection) : Vec2.heading(desired)
         // Every boat near her, rolled on what it is doing and what it owes her, and how far off a course must pass it.
         let boats: [(track: [Vec2], tackTrack: [Vec2], out: Double, owed: Bool)] = view.others.compactMap { other in
-            guard !other.isGhost, (other.position - b.position).length < Self.keepClearRange else { return nil }
+            guard !other.isGhost,
+                  (other.position - b.position).length < Self.keepClearRange || flagged.contains(other.seat)
+            else { return nil }
             let rule = keepClearRule(b, view, other)
             // A misjudged encounter leaves her give-way out (`judgeEncounters`), but never the boat ahead she is passing:
             // noticing a slower boat ahead is avoidance, whatever her skill (owner, #531 Q4: "never whether she looks").

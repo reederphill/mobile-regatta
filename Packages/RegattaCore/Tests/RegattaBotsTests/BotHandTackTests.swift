@@ -22,11 +22,13 @@ import Testing
     /// with the circle off both kept their digests; and on #537, whose right-of-way bot turns away from a boat clearly not
     /// keeping clear of her: with `avoidsContact` off both kept their digests; and on its first and second fix rounds,
     /// every change behind `avoidsContact` too; and on #531, whose live bots keep clear racing on the shared scorer: with
-    /// `scoresKeepClear` off both kept their digests).
+    /// `scoresKeepClear` off both kept their digests; both again on its second fix round, the flagged boats rolled out,
+    /// the measured acceleration capped and the latch cleared, every change behind `scoresKeepClear`; both again on its
+    /// third, the acceleration rolled on over the whole horizon again, under the polar's speed).
     @Test(.onFiveRules) func skiffSevenBotsAreBitIdentical() throws {
         let seven = try Self.digest(seed: 459, boatClass: BoatClassFile.bundled(id: "skiff", version: 7))
         let six = try Self.digest(seed: 459, boatClass: BoatClassFile.bundled(id: "skiff", version: 6))
-        #expect(hex64(seven) == "0x791f3d5708e71429")
+        #expect(hex64(seven) == "0xa289e83099d84f92")
         #expect(hex64(six) == "0x5ec2a2c31f6556c4")
     }
 
@@ -58,12 +60,14 @@ import Testing
     ///   plan's): every change is behind `avoidsContact`. Both again on its second (the contact the hull's, a boat
     ///   responding never tripping it, the tap's look along her bow's swing): behind `avoidsContact` too.
     /// - #531 (racing keep-clear on the shared scorer, the overtake lane, the tack's track): both; with
-    ///   `scoresKeepClear` off both kept their digests.
+    ///   `scoresKeepClear` off both kept their digests. Both again on its second fix round (the flagged boats rolled
+    ///   out, the measured acceleration capped, the latch cleared): behind `scoresKeepClear` too. Both again on its
+    ///   third (the acceleration rolled on over the whole horizon again, under the polar's speed).
     @Test(.onSixRules) func skiffEightBotsAreBitIdentical() throws {
         let short = try Self.digest(seed: 459, boatClass: Self.skiffEight)
         let long = try Self.digest(seed: 462, boatClass: Self.skiffEight, seconds: 700)
         #expect(hex64(short) == "0xdc020da5b831f6b2")
-        #expect(hex64(long) == "0x512ab13ee8e222d8")
+        #expect(hex64(long) == "0x2890dd02dc013708")
     }
 
     // MARK: - skiff@8: tacks and gybes by hand
