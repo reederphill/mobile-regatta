@@ -99,7 +99,7 @@ struct BotHelm: Sendable, Equatable {
     /// The rudder she sends for `rudder`, her helm's law's (`Autohelm.rudder`), sailing `boatClass` at `speed` (#545).
     /// Above the dead band, as it is. Inside it, centred, unless her error (the law's rudder over its gain) is at least
     /// half the yaw of one `pulse` held for a decision at her speed: then that pulse, towards her aim. A pulse takes
-    /// her a pulse's yaw towards it, so she sails within half a pulse's yaw of her aim, and she never pulses past it.
+    /// her a pulse's yaw towards it, so she sails within half a pulse's yaw of her aim, and a pulse never takes her more than that past it.
     static func pulsed(_ rudder: Double, _ boatClass: BoatClass, speed: Double) -> Int8 {
         let sent = BoatInput(rudder: rudder).rudder
         guard abs(BoatInput(rudder: sent).rudderValue) <= Autohelm.deadBand else { return sent }
