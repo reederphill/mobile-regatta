@@ -48,6 +48,28 @@ public struct BotDriver: Sendable {
     /// Decisions she avoided a boat clearly not keeping clear of her on (#537, `BotBrain.avoidingContact`): the suite's
     /// trace; nothing reads it in play.
     public private(set) var avoidContactDecisions = 0
+    /// Before the gun (#541, `BotBrain.avoidance`), the suite's trace; nothing reads them in play. Her decisions
+    /// avoiding a boat not keeping clear by a luff, by a bear-away, and by holding her heading with the rudder centred;
+    /// of the turns, those to the heading that passes furthest (none clearing); her centred holds given up as early;
+    /// of those, the ones she turned away and the ones she held centred all the same (`Avoidance.heldEarly`), the
+    /// rest left to her plan; the seconds to the gun of her last held-early hold (negative), nil with none; her
+    /// luffs taken early for a boat that can't keep clear, no other heading clearing (`Avoidance.earlyLuff`);
+    /// the largest turn up, radians, and the turns up over 10° (every turn towards the wind, the furthest pass's
+    /// included); the luff preference's own picks (a clearing luff over a bear-away that also cleared) and their sizes,
+    /// radians; and the seconds to the gun of her last avoidance (negative), nil with none.
+    public private(set) var preGunAvoidLuffs = 0
+    public private(set) var preGunAvoidBearAways = 0
+    public private(set) var preGunAvoidHolds = 0
+    public private(set) var preGunAvoidFurthest = 0
+    public private(set) var preGunHoldsRefusedEarly = 0
+    public private(set) var preGunRefusedHoldsTurned = 0
+    public private(set) var preGunHeldEarly = 0
+    public private(set) var preGunLastHeldEarlyTime: Double?
+    public private(set) var preGunEarlyLuffs = 0
+    public private(set) var preGunAvoidLargestTurnUp = 0.0
+    public private(set) var preGunAvoidTurnsUpOver10 = 0
+    public private(set) var preGunPreferredLuffs: [Double] = []
+    public private(set) var preGunLastAvoidTime: Double?
 
     private(set) var brain: BotBrain
     /// Her own hand on the helm for a class whose autohelm doesn't hold a centred rudder (#434); idle otherwise.
@@ -154,9 +176,36 @@ public struct BotDriver: Sendable {
         }
         if decision.startLuff { startLuffDecisions += 1 }
         if decision.avoidsContact { avoidContactDecisions += 1 }
+        if let avoidance = decision.avoidance, view.own.status == .prestart, view.time < 0 { notePreGun(avoidance, view) }
         let next = race.tick + 1
         race.apply(decision.input, seat: seat, atTick: next)
         if let tap = decision.tap { race.tap(tap, seat: seat, atTick: next) }
         return decision
+    }
+
+    /// Counts an avoidance before the gun (#541's report-only rows).
+    private mutating func notePreGun(_ avoidance: BotBrain.Avoidance, _ view: SeatView) {
+        if avoidance.refusedEarlyHold {
+            preGunHoldsRefusedEarly += 1
+            if avoidance.heldEarly {
+                preGunHeldEarly += 1
+                preGunLastHeldEarlyTime = view.time
+            } else if avoidance.turn != nil {
+                preGunRefusedHoldsTurned += 1
+            }
+        }
+        if avoidance.earlyLuff { preGunEarlyLuffs += 1 }
+        guard let turn = avoidance.turn else { return }
+        preGunLastAvoidTime = view.time
+        switch turn {
+        case .luff:
+            preGunAvoidLuffs += 1
+            preGunAvoidLargestTurnUp = max(preGunAvoidLargestTurnUp, avoidance.turnSize)
+            if avoidance.turnSize > deg2rad(10) + 1e-9 { preGunAvoidTurnsUpOver10 += 1 }
+            if avoidance.preferredLuff { preGunPreferredLuffs.append(avoidance.turnSize) }
+        case .bearAway: preGunAvoidBearAways += 1
+        case .hold: preGunAvoidHolds += 1
+        }
+        if avoidance.furthest { preGunAvoidFurthest += 1 }
     }
 }

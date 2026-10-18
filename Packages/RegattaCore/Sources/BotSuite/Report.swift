@@ -101,6 +101,26 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
     public var tackOnWindTaps: Int? = nil
     public var coverTaps: Int? = nil
     public var startLuffDecisions: Int? = nil
+    /// Before the gun, her avoidance of a boat not keeping clear (#541, `BotDriver.preGunAvoidLuffs` …): decisions
+    /// luffing, bearing away and holding centred; of the turns, those to the furthest pass; centred holds given up as
+    /// early, and of those the ones turned away and the ones held centred all the same (`Avoidance.heldEarly`, the rest
+    /// left to her plan), with the seconds to the gun of her last held-early hold (negative); her luffs taken early for
+    /// a boat that can't keep clear, no other heading clearing (`Avoidance.earlyLuff`); her largest turn up, degrees, and turns up over 10° (every turn towards the wind, the furthest pass's
+    /// included); the luff preference's own picks' sizes, degrees (a clearing luff over a bear-away that also
+    /// cleared); and the seconds to the gun of her last avoidance (negative). Report-only (`DiagnoseSummary.preGunAvoidance`); nil for a seat no bot sailed, and the last with none.
+    public var preGunAvoidLuffs: Int? = nil
+    public var preGunAvoidBearAways: Int? = nil
+    public var preGunAvoidHolds: Int? = nil
+    public var preGunAvoidFurthest: Int? = nil
+    public var preGunHoldsRefusedEarly: Int? = nil
+    public var preGunRefusedHoldsTurned: Int? = nil
+    public var preGunHeldEarly: Int? = nil
+    public var preGunLastHeldEarlySeconds: Double? = nil
+    public var preGunEarlyLuffs: Int? = nil
+    public var preGunAvoidLargestTurnUpDegrees: Double? = nil
+    public var preGunAvoidTurnsUpOver10: Int? = nil
+    public var preGunPreferredLuffDegrees: [Double]? = nil
+    public var preGunLastAvoidSeconds: Double? = nil
 
     public static let metricKeys = [
         "finished", "place", "ironsSeconds", "markContacts", "boatContacts", "contactsEndingInFouls",
@@ -122,6 +142,9 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         case callsByRule, callsBeforeFirstRounding, racingTacks
         case preStartCallsByRule, cascadeCallsByRule, metresToFinish, onLastLeg, cautious, runs
         case engagement, leeBowTaps, tackOnWindTaps, coverTaps, startLuffDecisions
+        case preGunAvoidLuffs, preGunAvoidBearAways, preGunAvoidHolds, preGunAvoidFurthest, preGunHoldsRefusedEarly
+        case preGunAvoidLargestTurnUpDegrees, preGunAvoidTurnsUpOver10, preGunPreferredLuffDegrees, preGunLastAvoidSeconds
+        case preGunRefusedHoldsTurned, preGunHeldEarly, preGunLastHeldEarlySeconds, preGunEarlyLuffs
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -176,6 +199,19 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         try c.encodeIfPresent(tackOnWindTaps, forKey: .tackOnWindTaps)
         try c.encodeIfPresent(coverTaps, forKey: .coverTaps)
         try c.encodeIfPresent(startLuffDecisions, forKey: .startLuffDecisions)
+        try c.encodeIfPresent(preGunAvoidLuffs, forKey: .preGunAvoidLuffs)
+        try c.encodeIfPresent(preGunAvoidBearAways, forKey: .preGunAvoidBearAways)
+        try c.encodeIfPresent(preGunAvoidHolds, forKey: .preGunAvoidHolds)
+        try c.encodeIfPresent(preGunAvoidFurthest, forKey: .preGunAvoidFurthest)
+        try c.encodeIfPresent(preGunHoldsRefusedEarly, forKey: .preGunHoldsRefusedEarly)
+        try c.encodeIfPresent(preGunAvoidLargestTurnUpDegrees, forKey: .preGunAvoidLargestTurnUpDegrees)
+        try c.encodeIfPresent(preGunAvoidTurnsUpOver10, forKey: .preGunAvoidTurnsUpOver10)
+        try c.encodeIfPresent(preGunPreferredLuffDegrees, forKey: .preGunPreferredLuffDegrees)
+        try c.encodeIfPresent(preGunLastAvoidSeconds, forKey: .preGunLastAvoidSeconds)
+        try c.encodeIfPresent(preGunRefusedHoldsTurned, forKey: .preGunRefusedHoldsTurned)
+        try c.encodeIfPresent(preGunHeldEarly, forKey: .preGunHeldEarly)
+        try c.encodeIfPresent(preGunLastHeldEarlySeconds, forKey: .preGunLastHeldEarlySeconds)
+        try c.encodeIfPresent(preGunEarlyLuffs, forKey: .preGunEarlyLuffs)
     }
 
     static func name(_ status: BoatStatus) -> String {

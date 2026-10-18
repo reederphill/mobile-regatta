@@ -77,6 +77,10 @@ public struct BotDecision: Hashable, Sendable {
     var startLuff = false
     /// Whether `input` avoids a boat clearly not keeping clear of her (#537, `avoidingContact`).
     var avoidsContact = false
+    /// What her avoidance made of her decision (#541, `BotBrain.avoidance`): its turn, or a centred hold, and a hold
+    /// before the gun she gave up as early; nil when it had nothing to say, or her look replaced its helm. Report-only:
+    /// the suite counts it before the gun (`BotDriver`).
+    var avoidance: BotBrain.Avoidance? = nil
     /// Whether she lets the rudder go, truly centred, stalled in irons (#459, `BotBrain.centresStalled`): her helm sends
     /// it as it is and holds no angle by hand (`BotHelm.input`), so the class's irons recovery can fall her off.
     var centred = false
@@ -290,7 +294,10 @@ struct BotBrain: Sendable {
             if decision.tap == nil, !decision.centred, handTurn?.isTurning != true,
                let input = guarded(view, decision.input) {
                 // Her look replacing the avoidance's helm, it is no longer an avoidance (#538 review).
-                if input != decision.input { decision.avoidsContact = false }
+                if input != decision.input {
+                    decision.avoidsContact = false
+                    decision.avoidance = nil
+                }
                 decision.input = input
             }
             see(view)
@@ -457,27 +464,33 @@ struct BotBrain: Sendable {
         guard tactics.hunts else {
             // Avoiding a boat clearly not keeping clear of her comes first (#537): a boat responding to her, one she
             // luffs that drops astern or luffs too, never trips it (`notKeepingClear`), so her luff runs as before.
-            if let avoided = avoidingContact(b, view, input, desired: desired) {
+            let avoiding = avoidance(b, view, input, desired: desired)
+            if let avoided = avoiding.input {
                 var decision = BotDecision(input: clearingQuarter(b, view, avoided))
                 // Decided (#538 review, #531): a boat that trips the trigger only on her plan's heading has her hold her
                 // own, the rudder centred, which overrides the plan's helm; only a turn away counts as an avoidance.
                 decision.avoidsContact = avoided.rudderValue != 0
+                decision.avoidance = avoiding
                 return decision
             }
             // #337: a combative live bot luffs a windward boat before her start (`startLuffing`).
             let luffed = startLuffing(b, view, input, desired: desired)
             var decision = BotDecision(input: clearingQuarter(b, view, luffed ?? holdingCourse(b, view, input)))
             decision.startLuff = luffed != nil && decision.input == luffed
+            if avoiding.refusedEarlyHold { decision.avoidance = avoiding }
             return decision
         }
         // The hunter avoids contact only before her start (#537 Q1, placeholder): racing, she hunts as #355 has her.
-        if b.status != .racing, let avoided = avoidingContact(b, view, input, desired: desired) {
+        let avoiding = b.status != .racing ? avoidance(b, view, input, desired: desired) : Avoidance()
+        if let avoided = avoiding.input {
             var decision = BotDecision(input: clearingQuarter(b, view, avoided))
             decision.avoidsContact = avoided.rudderValue != 0
+            decision.avoidance = avoiding
             return decision
         }
         let (held, step) = hunting(b, view, input, desired: desired)
         var decision = BotDecision(input: clearingQuarter(b, view, held))
+        if avoiding.refusedEarlyHold { decision.avoidance = avoiding }
         // What hunting did, unless clearing her quarter steered her otherwise.
         decision.hunt = decision.input == held ? step : nil
         return decision
