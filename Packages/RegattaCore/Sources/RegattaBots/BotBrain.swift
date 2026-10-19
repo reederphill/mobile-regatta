@@ -255,6 +255,11 @@ struct BotBrain: Sendable {
     /// Whether her pre-gun avoidance's centred hold is held at her own angle (#542, `holding`), not left to the
     /// helm's snap to the groove. A test seam: always true in play; only tests that sail her without it set it false.
     var holdsPreGunAvoidanceAngle = true
+    /// Whether her penalty turn's way out is weighed on the shared scorer's prediction (`scoredEscape`, #542 PR 2):
+    /// turning to each heading against boats rolled on what they are doing, with holding, a hard bear-away and (the
+    /// dodge only) easing among the candidates. A test seam: always true in play; only tests that sail her on #528's
+    /// straight-line pick (`straightEscapeHeading`), to show what it changes, set it false.
+    var scoresPenaltyEscape = true
     /// Whether she holds her aim within her proper course while told she is restricted under rule 17
     /// (`properCourseLimited`, #346). A test seam: always true in play; only tests that compare her steering with the
     /// limit left out set it false.
@@ -787,8 +792,9 @@ struct BotBrain: Sendable {
     /// a boat crossing what is left of its sweep inside her keep-clear lookahead (`turnSweep`), or about to hit her once
     /// she is taking the penalty (rule 21.2, `keepClear`) as the turn sweeps her towards it: she turns the other way if
     /// its sweep is clear (and the turn may go that way, with time for it), a crossing back only changing the turn's way;
-    /// otherwise she picks a way out (`penaltyEscapeHeading`, against every boat, from where it puts her; in open water a
-    /// pack's tie goes to room, at a mark she holds) and holds it (`PenaltyEscape`), sheeted for speed (`steer`), until
+    /// otherwise she picks a way out (`penaltyEscapeCourse`, against every boat, from where it puts her; in open water a
+    /// pack's tie goes to room, at a mark she holds; #542 PR 2: on the shared scorer's prediction, easing to slow among
+    /// the candidates when easing clears) and holds it (`PenaltyEscape`), sheeted for speed (`steer`) or eased, until
     /// what is left of her turn is clear past her lookahead by `penaltyEscapeRelease` and no boat is about to hit her,
     /// then turns on. What she commits to is the direction (`EscapeSide`, once she steers off her heading): whenever the
     /// heading she holds stops keeping her room (`penaltyEscapeHolds`), every decision in close company, she picks it
@@ -810,7 +816,7 @@ struct BotBrain: Sendable {
         // moved its missed-penalty DSQs from 13 to 17, the all-National cell's from 5 to 6.
         let turnsOnInOpenWater = openWater && b.status == .racing
         func release() { releaseEscape() }
-        func escape(_ heading: Double) -> PenaltyDodge {
+        func escape(_ heading: Double, ease: Bool) -> PenaltyDodge {
             // A way out into the race area's edge or a mark (a fallback, or a held heading the boats have closed on
             // with none left on her side): she turns on, a turn keeps her where she is (#528 fix 2).
             guard avoidEdges(b, view, desired: heading) == nil, avoidMarks(b, view, desired: heading) == nil else {
@@ -818,7 +824,7 @@ struct BotBrain: Sendable {
                 return .onward
             }
             guard !crossesEarly(b, view, heading: heading) else { return .plan }
-            return .input(steer(b, toHeading: heading, view))
+            return .input(steer(b, toHeading: heading, view).eased(ease))
         }
         if latest <= -Self.penaltyLateDodgeSeconds { release() }
         if var held = penaltyEscape {
@@ -829,13 +835,14 @@ struct BotBrain: Sendable {
             }
             // Once the heading stops keeping her room she picks it again, on the side she committed to, round the way
             // out she first chose (#528 fix 3), not the heading she has come to.
-            if !penaltyEscapeHolds(b, view, heading: held.heading, horizon: escapeHorizon(latest)) {
-                if let heading = penaltyEscapeHeading(b, view, ways: [way],
-                                                      angle: { self.penaltyTurnLeft(b, owed, view, direction: $0) },
-                                                      horizon: escapeHorizon(latest), side: held.side,
-                                                      around: held.toward, openWater: openWater) {
-                    held.side = EscapeSide.latch(held.side, current: b.heading, heading: heading)
-                    held.heading = heading
+            if !penaltyEscapeHolds(b, view, heading: held.heading, horizon: escapeHorizon(latest), ease: held.ease) {
+                if let course = penaltyEscapeCourse(b, view, ways: [way],
+                                                    angle: { self.penaltyTurnLeft(b, owed, view, direction: $0) },
+                                                    horizon: escapeHorizon(latest), side: held.side,
+                                                    around: held.toward, openWater: openWater, eases: true) {
+                    held.side = EscapeSide.latch(held.side, current: b.heading, heading: course.heading)
+                    held.heading = course.heading
+                    held.ease = course.ease
                     penaltyEscape = held
                 } else if turnsOnInOpenWater, towards == nil {
                     // None left on her side, racing in open water: holding a heading that no longer keeps her room only burns
@@ -844,7 +851,7 @@ struct BotBrain: Sendable {
                     return .onward
                 }
             }
-            return escape(held.heading)
+            return escape(held.heading, ease: held.ease)
         }
         let soon = conflict.flatMap { $0.seconds < lookahead ? $0 : nil }
         guard soon != nil || towards != nil, latest > -Self.penaltyLateDodgeSeconds else { return .onward }
@@ -859,13 +866,15 @@ struct BotBrain: Sendable {
         }
         // No heading she may sail and no boat about to hit her: racing in open water she turns on (holding her course
         // there only burns her margin, the owner's rule); at a mark, or before the gun, she waits, holding her heading.
-        guard let heading = penaltyEscapeHeading(b, view, ways: [way],
-                                                 angle: { self.penaltyTurnLeft(b, owed, view, direction: $0) },
-                                                 horizon: escapeHorizon(latest), openWater: openWater)
-                ?? towards?.heading ?? (turnsOnInOpenWater ? nil : b.heading) else { return .onward }
+        guard let course = penaltyEscapeCourse(b, view, ways: [way],
+                                               angle: { self.penaltyTurnLeft(b, owed, view, direction: $0) },
+                                               horizon: escapeHorizon(latest), openWater: openWater, eases: true)
+                ?? (towards?.heading ?? (turnsOnInOpenWater ? nil : b.heading)).map({ EscapeCourse(heading: $0) })
+        else { return .onward }
+        let heading = course.heading
         penaltyEscape = PenaltyEscape(heading: heading, side: EscapeSide.latch(nil, current: b.heading, heading: heading),
-                                      toward: heading)
-        return escape(heading)
+                                      toward: heading, ease: course.ease)
+        return escape(heading, ease: course.ease)
     }
 
     /// Letting a way out go (`penaltyEscape`).

@@ -1701,6 +1701,177 @@ import RegattaCore
         #expect(checked > 0, "no seed puts her in a pack short of room")
     }
 
+    // MARK: - The way out on the shared scorer (#542 PR 2)
+
+    /// Racing on the beat (#542 PR 2): seat 0 close-hauled on starboard at close-hauled speed, owing a turn she hasn't
+    /// started (its way hers to choose), called 2 s ago; seat 1 running down at her, six lengths ahead and half a length
+    /// to windward; seat 2 `third.ahead` lengths ahead and `third.across` to leeward, heading `third.off` radians off
+    /// her heading, bearing away from it, at close-hauled speed, or turning a penalty at 0.6 of it (`circling`: owing
+    /// one turn, her tack its first crossing, rule 21.2 binding her).
+    static func escapeScene(seed: UInt64, third: (ahead: Double, across: Double, off: Double),
+                            circling: Bool) throws -> Race {
+        let water = Water(seed: seed, seats: 3)
+        let heading = water.beat(.starboard)
+        let windward: Double = wrapAngle(water.wind - heading) > 0 ? 1 : -1
+        let forward = Vec2.heading(heading)
+        let side = forward.rightPerp * windward
+        return try place(water, [
+            Placement(position: water.centre, heading: heading, speed: water.up.speed),
+            Placement(position: water.centre + forward * water.length * 6 + side * water.length * 0.5,
+                      heading: heading + .pi, speed: water.up.speed),
+            Placement(position: water.centre + forward * water.length * third.ahead - side * water.length * third.across,
+                      heading: heading - windward * third.off, speed: water.up.speed * (circling ? 0.6 : 1)),
+        ]) { snapshot in
+            for seat in snapshot.seats.indices {
+                snapshot.seats[seat].boat.penaltyTurnsOwed = 0
+                snapshot.seats[seat].boat.penaltyClockTick = nil
+                snapshot.seats[seat].boat.penaltyDirection = 0
+                snapshot.seats[seat].boat.penaltyFirstCrossing = nil
+                snapshot.seats[seat].boat.penaltyDirectionLocked = false
+                snapshot.seats[seat].boat.penaltyCrossingHeld = false
+            }
+            snapshot.seats[0].boat.penaltyTurnsOwed = 1
+            snapshot.seats[0].boat.penaltyProgress = 0
+            snapshot.seats[0].boat.penaltyClockTick = snapshot.tick - RulesConfig.ticks(2)
+            guard circling else { return }
+            snapshot.seats[2].boat.penaltyTurnsOwed = 1
+            snapshot.seats[2].boat.penaltyProgress = 0
+            snapshot.seats[2].boat.penaltyClockTick = snapshot.tick - RulesConfig.ticks(5)
+            snapshot.seats[2].boat.penaltyFirstCrossing = .tack
+            snapshot.seats[2].boat.penaltyDirection = Int(-windward)
+        }
+    }
+
+    /// Seat 0's way out in `race` as it stands (`penaltyEscapeCourse`, as her dodge asks: both ways, easing weighed),
+    /// on the shared scorer (`scored`) and with the seam off (#528's straight-line pick, `straight`); each one's room
+    /// on the scorer's prediction (`escapeRoom` over `escapeBoats`, all boats and seat 2 alone) and on straight lines
+    /// (`penaltyEscapeRoom`), and the room she needs (`roomLengths`), metres.
+    struct EscapePicks {
+        struct Pick {
+            var course: BotBrain.EscapeCourse
+            var change: Double
+            var predicted: Double
+            var predictedThird: Double
+            var straightLine: Double
+        }
+        var scored: Pick
+        var straight: Pick
+        var room: Double
+    }
+
+    static func escapePicks(_ race: Race) throws -> EscapePicks {
+        let view = race.seatView(for: 0)
+        let b = view.own
+        let owed = try #require(view.own.penalty)
+        var brain = Pilot(seat: 0, plannedTack: nil, race: race, skill: 1, weaknesses: BotWeaknesses(skill: 1)).brain
+        let horizon = BotBrain.penaltyEscapeHorizon
+        let steps = Int((horizon / BotBrain.keepClearPredictionStep).rounded(.up))
+        let boats = brain.escapeBoats(b, view, steps: steps)
+        func pick() throws -> EscapePicks.Pick {
+            let course = try #require(brain.penaltyEscapeCourse(
+                b, view, ways: [-1, 1], angle: { brain.penaltyTurnLeft(b, owed, view, direction: $0) }, horizon: horizon,
+                openWater: true, eases: true))
+            let track = brain.herTrack(b, view, heading: course.heading, steps: steps, axis: b.forward,
+                                       ease: course.ease).track
+            return .init(course: course, change: abs(wrapAngle(course.heading - b.heading)),
+                         predicted: BotBrain.escapeRoom(track, from: b.position, boats),
+                         predictedThird: BotBrain.escapeRoom(track, from: b.position, boats.filter { $0.other.seat == 2 }),
+                         straightLine: brain.penaltyEscapeRoom(b, view, heading: course.heading, horizon: horizon))
+        }
+        let scored = try pick()
+        brain.scoresPenaltyEscape = false
+        let straight = try pick()
+        return EscapePicks(scored: scored, straight: straight, room: view.boatClass.hull.length * brain.roomLengths)
+    }
+
+    /// What seat 0 did sailing `race` for `seconds` with her bot at the helm (the others hold what their autohelms
+    /// hold, seat 2 at her own bot's if `circling`), on the shared scorer's way out or not (`scores`): the closest each
+    /// other boat came to her before her turn was served, metres between centres, the race's events, the decisions
+    /// she sailed a way out on (`penaltyClearing.isCourse` or `penaltyEscape`), and the first one's heading.
+    static func sailEscape(_ race: Race, seconds: Double, scores: Bool, circling: Bool = false)
+        -> (closest: [Int: Double], kinds: [RaceEvent.Kind], escaping: Int, first: Double?) {
+        var pilot = Pilot(seat: 0, plannedTack: nil, race: race, skill: 1, weaknesses: BotWeaknesses(skill: 1))
+        pilot.brain.scoresPenaltyEscape = scores
+        // The boat turning a penalty turns it, at her own bot's helm.
+        var turning = circling ? Pilot(seat: 2, plannedTack: nil, race: race, skill: 1, weaknesses: BotWeaknesses(skill: 1)) : nil
+        var closest: [Int: Double] = [:]
+        var kinds: [RaceEvent.Kind] = []
+        var served = false
+        var escaping = 0
+        var first: Double?
+        for _ in 0..<Int(seconds * Double(Race.tickRate)) where !race.isOver {
+            _ = turning?.drive(race)
+            if pilot.drive(race) != nil, pilot.brain.penaltyClearing.isCourse || pilot.brain.penaltyEscape != nil {
+                escaping += 1
+                if first == nil { first = pilot.brain.penaltyEscape?.heading ?? pilot.brain.penaltyClearing.heading }
+            }
+            race.step()
+            for seat in race.boats.indices.dropFirst() where !served {
+                closest[seat] = min(closest[seat] ?? .infinity, (race.boats[seat].position - race.boats[0].position).length)
+            }
+            let drained = race.drainEvents().map(\.kind)
+            served = served || drained.contains(.penaltyServed(seat: 0))
+            kinds += drained
+        }
+        return (closest, kinds, escaping, first)
+    }
+
+    /// #542 PR 2 acceptance ("a boat owing a turn clears every boat round her even at a loss of ground"; "a candidate
+    /// that clears loses only to one that also clears"): racing, owing a turn, a boat running down at her six lengths
+    /// ahead and half a length to windward, another running past three lengths to leeward. #528's straight-line pick
+    /// bears her away 30°, a heading that clears both on straight lines (her on it at once, at her speed) but not once
+    /// her turn to it is sailed against the boats as they come: the one running down closes on her while she turns. On
+    /// the shared scorer she takes the further heading that does clear every boat, though it changes her heading more.
+    /// Sailed out (her way out is steered, then she turns), she serves the turn without a contact or a call, no boat
+    /// within half her room.
+    @Test func penaltyDodgeClearsEveryBoatBeforeCost() throws {
+        for seed: UInt64 in [1, 2] {
+            let scene = { try Self.escapeScene(seed: seed, third: (2, 3, deg2rad(150)), circling: false) }
+            let picks = try Self.escapePicks(scene())
+            #expect(picks.straight.straightLine >= picks.room, "seed \(seed): #528's pick doesn't clear on straight lines")
+            #expect(picks.straight.predicted < picks.room,
+                    "seed \(seed): #528's pick clears on the prediction (\(picks.straight.predicted) of \(picks.room) m)")
+            #expect(picks.scored.predicted >= picks.room,
+                    "seed \(seed): the scorer's pick doesn't clear (\(picks.scored.predicted) of \(picks.room) m)")
+            #expect(picks.scored.change > picks.straight.change,
+                    "seed \(seed): the clearing way out costs no more heading (\(rad2deg(picks.scored.change))°)")
+            let on = Self.sailEscape(try scene(), seconds: 45, scores: true)
+            #expect(on.kinds.contains(.penaltyServed(seat: 0)), "seed \(seed): not served")
+            #expect(!on.kinds.contains { if case .contact = $0 { true } else { false } }, "seed \(seed): contact")
+            #expect(Self.calls(on.kinds).filter { $0.hasSuffix("on 0") }.isEmpty, "seed \(seed): \(Self.calls(on.kinds))")
+            #expect(on.escaping > 0, "seed \(seed): she never sailed a way out")
+            #expect(on.closest.values.allSatisfy { $0 > picks.room / 2 }, "seed \(seed): came within \(on.closest) m")
+        }
+    }
+
+    /// #542 PR 2 (#528's "12 of 60 dodges pointed at a third boat"): racing, owing a turn, a boat running down at her
+    /// six lengths ahead and half a length to windward, and a third six lengths ahead and two to leeward turning a
+    /// penalty (rule 21.2, her circle `penaltyCircleRadius`). #528's straight-line pick sails that boat on at her
+    /// velocity, out of the way, and bears away 30° straight at the water she is circling in: inside her circle on the
+    /// scorer's prediction. The shared scorer rolls the circling boat on her circle (`Reaction.circle`) and takes a way
+    /// out clear of every boat, the third included (the hard bear-away, `keepClearDeepest`, outside #528's ±60°).
+    /// Sailed out, the circling boat at her own bot's helm, she serves the turn, touching nothing, called for nothing.
+    @Test func penaltyEscapeDoesNotPointAtAThirdBoat() throws {
+        for seed: UInt64 in [1, 2] {
+            let scene = { try Self.escapeScene(seed: seed, third: (6, 2, 0), circling: true) }
+            let race = try scene()
+            let view = race.seatView(for: 0)
+            let third = try #require(view.others.first { $0.seat == 2 })
+            #expect(third.rightOfWay == RightOfWay(keepClear: 2, rule: .takingAPenalty), "seed \(seed): seat 2 not turning")
+            let picks = try Self.escapePicks(race)
+            #expect(picks.straight.predictedThird < picks.room,
+                    "seed \(seed): #528's pick clears the third boat's circle (\(picks.straight.predictedThird) m)")
+            #expect(picks.scored.predicted >= picks.room,
+                    "seed \(seed): the scorer's pick doesn't clear every boat (\(picks.scored.predicted) of \(picks.room) m)")
+            let on = Self.sailEscape(try scene(), seconds: 45, scores: true, circling: true)
+            #expect(on.kinds.contains(.penaltyServed(seat: 0)), "seed \(seed): not served")
+            #expect(!on.kinds.contains { if case .contact = $0 { true } else { false } }, "seed \(seed): contact")
+            #expect(Self.calls(on.kinds).filter { $0.hasSuffix("on 0") }.isEmpty, "seed \(seed): \(Self.calls(on.kinds))")
+            #expect(on.escaping > 0, "seed \(seed): she never sailed a way out")
+            #expect(on.closest.values.allSatisfy { $0 > picks.room / 2 }, "seed \(seed): came within \(on.closest) m")
+        }
+    }
+
     /// #488 acceptance (fleet-rules@6): beating at close-hauled speed in open water, her own way bearing away, she luffs
     /// first, the shorter turn (about 225°: the tack, then the gybe half a circle on, against 315° bearing away first),
     /// and serves it at the gybe. Off the wind the shorter turn is the other way: on a broad reach (125°), her own way
