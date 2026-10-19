@@ -242,6 +242,19 @@ struct BotBrain: Sendable {
     /// Whether she keeps clear racing on the shared scorer (`scoreRacingKeepClear`, #531). A test seam: always true in
     /// play; only tests that sail her without it, to show what it changes, set it false.
     var scoresKeepClear = true
+    /// The boat she turned away from before the gun, and which way (#542 Q8, `avoidance`): her plan's heading is refused
+    /// while it turns her back onto that boat. Written in `sail`, cleared at any decision her avoidance doesn't make.
+    var avoidCommitment: AvoidCommitment?
+    /// Whether her pre-gun avoidance commits to the way she turned (`committedAvoidance`, #542 Q8). A test seam: always
+    /// true in play; only tests that sail her without it, to show what it changes, set it false.
+    var commitsAvoidance = true
+    /// Whether her pre-gun avoidance costs a course over the line early rather than ending the way at it (#542 Q4,
+    /// `avoidanceSearch`). A test seam: always true in play; only tests that sail her without it (#541's veto and its
+    /// least clearing luff), to show what it changes, set it false.
+    var costsEarlyAvoidance = true
+    /// Whether her pre-gun avoidance's centred hold is held at her own angle (#542, `holding`), not left to the
+    /// helm's snap to the groove. A test seam: always true in play; only tests that sail her without it set it false.
+    var holdsPreGunAvoidanceAngle = true
     /// Whether she holds her aim within her proper course while told she is restricted under rule 17
     /// (`properCourseLimited`, #346). A test seam: always true in play; only tests that compare her steering with the
     /// limit left out set it false.
@@ -331,6 +344,9 @@ struct BotBrain: Sendable {
         if keepClearLatchTack != boat.tack { keepClearLatch = nil }
         var scorerDecided = false
         defer { if !scorerDecided { keepClearLatch = nil } }
+        // Her pre-gun avoidance's commitment holds only through decisions her avoidance makes (#542 Q8).
+        var avoidanceDecided = false
+        defer { if !avoidanceDecided { avoidCommitment = nil } }
         let byHand = Self.turnsByHand(view)
         guard boat.isOnCourse else {
             handTurn = nil
@@ -449,11 +465,13 @@ struct BotBrain: Sendable {
                 if byHand, !running, let reach = startReachAim(boat, view, groove: groove) { own = reach }
             }
             var decision = holding(boat, view, helm(boat, to: own, view), desired: own.heading(wind: boat.windDirection))
-            decision.holdsHerAngle = holdsHerAngle(own, boat, view)
+            decision.holdsHerAngle = decision.holdsHerAngle || holdsHerAngle(own, boat, view)
+            avoidanceDecided = commitAvoidance(decision, boat, view)
             return decision
         }
         var decision = holding(boat, view, helm(boat, to: aim, view).eased(aim.ease), desired: desired)
-        decision.holdsHerAngle = holdsHerAngle(aim, boat, view)
+        decision.holdsHerAngle = decision.holdsHerAngle || holdsHerAngle(aim, boat, view)
+        avoidanceDecided = commitAvoidance(decision, boat, view)
         return decision
     }
 
@@ -471,6 +489,10 @@ struct BotBrain: Sendable {
                 // own, the rudder centred, which overrides the plan's helm; only a turn away counts as an avoidance.
                 decision.avoidsContact = avoided.rudderValue != 0
                 decision.avoidance = avoiding
+                // Before the gun her centred hold is held at her own angle (#542, s10: the helm's snap to the groove
+                // turned a centred rudder towards the boat she held for).
+                decision.holdsHerAngle = holdsPreGunAvoidanceAngle && avoiding.turn == .hold && b.status == .prestart
+                    && view.time < 0
                 return decision
             }
             // #337: a combative live bot luffs a windward boat before her start (`startLuffing`).
@@ -486,6 +508,8 @@ struct BotBrain: Sendable {
             var decision = BotDecision(input: clearingQuarter(b, view, avoided))
             decision.avoidsContact = avoided.rudderValue != 0
             decision.avoidance = avoiding
+            decision.holdsHerAngle = holdsPreGunAvoidanceAngle && avoiding.turn == .hold && b.status == .prestart
+                && view.time < 0
             return decision
         }
         let (held, step) = hunting(b, view, input, desired: desired)

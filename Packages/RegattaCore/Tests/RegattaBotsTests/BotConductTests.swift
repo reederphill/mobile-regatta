@@ -59,8 +59,9 @@ import RegattaCore
 
         /// Before the gun (#280): two bots on seed `seed`'s race, `toGun` seconds before it, nothing placed yet, the
         /// water `below` hull lengths below the middle of the start line.
-        init(seed: UInt64, toGun: Int, below: Double) {
-            race = botRace(seats: [.bot, .bot], prestartSeconds: toGun + 10, seed: seed, boatClass: BotConductTests.waterClass)
+        init(seed: UInt64, toGun: Int, below: Double, seats: Int = 2) {
+            race = botRace(seats: Array(repeating: .bot, count: seats), prestartSeconds: toGun + 10, seed: seed,
+                           boatClass: BotConductTests.waterClass)
             for _ in 0..<(10 * Race.tickRate) { race.step() }
             let c = race.course
             length = race.boatClass.hull.length
@@ -2690,6 +2691,60 @@ extension BotConductTests {
         }
         #expect(contact || gap < control.boatClass.hull.beam * BotBrain.clearMarginBeams,
                 "the plan's heading passes her clear: gap \(gap) m")
+    }
+
+    /// #542 Q8 (#541's hand-off, s10 Club astern 6 x±1): before the gun, turned away from a port boat stalled just to
+    /// leeward of her course (#541's early luff), she never bears back onto her while her plan's heading would bring her
+    /// inside `collisionLengths`: her plan's heading is refused and she holds, held at her own angle, or turns further
+    /// away (`committedAvoidance`). Sailed from the early-luff scene to the gun: from her first luff, while the stalled
+    /// boat is still ahead of her and within two lengths hull to hull, her wind angle never opens more than 5° from the
+    /// closest it came, and she makes no contact on her bow (the stalled boat ahead of her). Control: without the
+    /// commitment her plan bears her back down into her.
+    @Test func preGunAvoidanceDoesNotBearBackOntoAStalledBoat() throws {
+        func sailed(commits: Bool) throws -> (contact: Bool, back: Double, gap: Double, committed: Int) {
+            let water = Water(seed: 3, toGun: 6, below: 2)
+            let speed = water.up.speed
+            let heading = water.heading(.starboard, deg2rad(70))
+            let forward = Vec2.heading(heading)
+            let meet = water.centre + forward * speed * 2 - forward.rightPerp * water.length * 0.2
+            let race = try Self.place(water, [
+                Placement(position: water.centre, heading: heading, speed: speed, status: .prestart),
+                Placement(position: meet, heading: water.wind + deg2rad(10), speed: 0.1, status: .prestart),
+            ]) { $0.seats[1].boat.autohelm = nil }
+            var pilot = Pilot(seat: 0, plannedTack: nil, race: race)
+            pilot.brain.commitsAvoidance = commits
+            var luffed = false, contact = false, committed = 0
+            var closest = Double.infinity, back = 0.0, gap = Double.infinity
+            while race.time < 0 && !race.isOver {
+                if let decision = pilot.drive(race) {
+                    if decision.avoidance?.turn == .luff { luffed = true }
+                    if decision.avoidance?.committed == true { committed += 1 }
+                }
+                race.step()
+                let (own, stalled) = (race.boats[0], race.boats[1])
+                // Contact on her bow: the stalled boat still ahead of her (once abaft her beam, sailing again, it is the
+                // port boat's to keep clear).
+                let ahead = (stalled.position - own.position).dot(Vec2.heading(own.heading)) > 0
+                if race.drainEvents().contains(where: { if case .contact = $0.kind { true } else { false } }), ahead {
+                    contact = true
+                }
+                guard luffed else { continue }
+                let hull = BotBrain.hullGap(offset: stalled.position - own.position, heading: own.heading,
+                                            otherHeading: stalled.heading, hull: race.boatClass.hull)
+                gap = min(gap, hull)
+                guard ahead, hull < race.boatClass.hull.length * 2 else { continue }
+                let angle = abs(wrapAngle(own.heading - water.wind))
+                closest = min(closest, angle)
+                back = max(back, angle - closest)
+            }
+            return (contact, back, gap, committed)
+        }
+        let kept = try sailed(commits: true)
+        #expect(!kept.contact, "\(kept)")
+        #expect(kept.committed > 0, "her commitment held her: \(kept)")
+        #expect(kept.back < deg2rad(5), "bore back \(rad2deg(kept.back))° towards her: \(kept)")
+        let control = try sailed(commits: false)
+        #expect(control.contact || control.back > kept.back + deg2rad(5), "control \(control), kept \(kept)")
     }
 
     /// #541 fix round 4 (owner: "Relax the veto"): before the gun, a port boat stalled just to leeward of her course,

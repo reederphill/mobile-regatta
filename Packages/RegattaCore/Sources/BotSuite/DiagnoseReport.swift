@@ -61,6 +61,10 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
         public var refusedHoldsNil: Int
         public var ocsWithin6sOfHeldEarly: Int
         public var earlyLuffs: Int
+        /// The avoidance's commitment decisions (#542 Q8: her plan refused, she held or turned further away) and its
+        /// early headings taken for a boat that can't keep clear (#542 Q4).
+        public var avoidCommitted: Int
+        public var avoidEarly: Int
         /// Turns up: the largest turn towards the wind, degrees (nil with none), and those decisions over 10°. Every
         /// luff decision counts, the furthest pass's (none clearing) included, not only the luff preference's.
         public var largestTurnUpDegrees: Double?
@@ -430,6 +434,7 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
                 refusedHoldsNil: total(\.preGunHoldsRefusedEarly) - total(\.preGunRefusedHoldsTurned) - total(\.preGunHeldEarly),
                 ocsWithin6sOfHeldEarly: seats.filter { $0.ocsCount > 0 && ($0.preGunLastHeldEarlySeconds ?? -.infinity) > -6 }.count,
                 earlyLuffs: total(\.preGunEarlyLuffs),
+                avoidCommitted: total(\.preGunAvoidCommitted), avoidEarly: total(\.preGunAvoidEarly),
                 largestTurnUpDegrees: turnsUp.max(), turnsUpOver10: total(\.preGunAvoidTurnsUpOver10),
                 preferredLuffs: preferred.count, preferredLuffDegrees: Spread(preferred),
                 preferredLuffMaxDegrees: preferred.max(),
@@ -532,19 +537,21 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
         if let avoidance = preGunAvoidance {
             lines.append("pre-gun avoidance (#541): bot seat-races with any (luff, bear-away or centred hold); decisions a "
                 + "seat-race; turns to the furthest pass and holds refused as early (turned / held early / nil), with OCS "
-                + "within 6 s of a held-early hold, and early luffs for a stopped boat (no other heading clearing); turns up (every turn towards the "
+                + "within 6 s of a held-early hold, and early luffs for a stopped boat (no other heading clearing); the "
+                + "commitment's decisions (#542) and early headings for a boat that can't keep clear; turns up (every turn towards the "
                 + "wind, the furthest pass's included): the largest and those over 10°; the luff preference's own picks (a "
                 + "clearing luff over a bear-away that also cleared): count, median / max°; "
                 + "on time, mean start s and OCS of the avoiding seats / the rest; the latest avoiding start, never "
                 + "started, and OCS within 6 s of an avoidance")
             lines += table([["tier", "seats", "avoiding", "luff", "bear", "hold", "furthest", "refused", "turned / held / nil",
-                             "ocs < 6 s held", "early luff", "max up°", "up > 10°",
+                             "ocs < 6 s held", "early luff", "committed", "avoid early", "max up°", "up > 10°",
                              "preferred", "pref med / max°",
                              "on time", "mean start", "ocs", "latest", "never", "ocs < 6 s"]]
                 + printed(avoidance, \.tier).map {
                     [$0.tier, "\($0.seats)", "\($0.avoidingSeats) (\(fixed($0.avoidingShare, 3)))", fixed($0.luffsPerSeat, 3),
                      fixed($0.bearAwaysPerSeat, 3), fixed($0.holdsPerSeat, 3), "\($0.furthest)", "\($0.holdsRefusedEarly)",
                      "\($0.refusedHoldsTurned) / \($0.heldEarly) / \($0.refusedHoldsNil)", "\($0.ocsWithin6sOfHeldEarly)", "\($0.earlyLuffs)",
+                     "\($0.avoidCommitted)", "\($0.avoidEarly)",
                      text($0.largestTurnUpDegrees, 1), "\($0.turnsUpOver10)", "\($0.preferredLuffs)",
                      "\(text($0.preferredLuffDegrees?.median, 1)) / \(text($0.preferredLuffMaxDegrees, 1))",
                      "\(fixed($0.avoidingOnTimeShare, 3)) / \(fixed($0.restOnTimeShare, 3))",

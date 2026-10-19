@@ -201,7 +201,91 @@ extension BotBrain {
         /// Whether, before the gun, the luff preference chose it (#541 Q3, Q4): a clearing luff taken over a bear-away
         /// that also cleared.
         var preferredLuff = false
+        /// Whether, before the gun, the heading carries her over the line early at her own sheeting (#542 Q4): taken
+        /// only when no clearing heading isn't, for a boat that can't keep clear.
+        var early = false
+        /// Before the gun, the commitment this decision holds her to (#542 Q8): turned away from a boat that can't keep
+        /// clear, her plan's heading is refused while it turns her back onto that boat (`committedAvoidance`).
+        var commitment: AvoidCommitment? = nil
+        /// Whether the commitment made this decision: her plan's heading refused, she held or turned further away.
+        var committed = false
     }
+
+    /// The boat she turned away from before the gun, the way she turned (+1 to starboard), and her tack then (#542 Q8).
+    struct AvoidCommitment: Hashable, Sendable {
+        var seat: Int
+        var way: Double
+        var tack: Tack
+    }
+
+    /// Keeps her avoidance's commitment (#542 Q8) for the next decision when this one's avoidance made or held it;
+    /// whether it did (`sail` clears it otherwise).
+    mutating func commitAvoidance(_ decision: BotDecision, _ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+        guard let commitment = decision.avoidance?.commitment else { return false }
+        avoidCommitment = commitment
+        return true
+    }
+
+    /// Before the gun, her avoidance's commitment (#542 Q8): having turned away from a boat that can't keep clear, her
+    /// plan's `desired` is refused while it is a turn back towards that boat's side (against the way she turned) and
+    /// her track on it (`herTrack`) comes inside `collisionLengths` of the boat rolled as it can't keep clear
+    /// (`predictedTrack`, `.cannot`) within `keepClearLookahead`. Then, on the way she turned only, she holds her heading
+    /// if it clears the boat so (the rudder centred, held at her own angle: `holding`), or takes the least further turn
+    /// that does, every `clearingStep` to `committedTurnLimit`: a course that isn't early first, then an early one
+    /// (Q4's order), failing both the one passing furthest. Nil when there is no commitment or her plan is let go.
+    func committedAvoidance(_ b: SeatView.OwnBoat, _ view: SeatView, _ input: BoatInput, desired: Double) -> Avoidance? {
+        guard commitsAvoidance, b.status == .prestart, view.time < 0, let commitment = avoidCommitment,
+              commitment.tack == b.tack,
+              let other = view.others.first(where: { $0.seat == commitment.seat && !$0.isGhost }),
+              wrapAngle(desired - b.heading) * commitment.way < -deg2rad(1)
+        else { return nil }
+        let dt = Self.keepClearPredictionStep
+        let steps = Int((keepClearLookahead / dt).rounded(.up))
+        let theirs = predictedTrack(of: other, .cannot(stopped: isStopped(other, b, view)), view, steps: steps)
+        let floor = Self.startLuffFloor(view)
+        func closest(_ heading: Double) -> Double {
+            let mine = herTrack(b, view, heading: heading, steps: steps, axis: b.forward, closest: floor).track
+            return zip(mine, theirs).map { ($0 - $1).length }.min() ?? .infinity
+        }
+        let collision = view.boatClass.hull.length * Self.collisionLengths
+        guard closest(desired) < collision else { return nil }
+        let side: Double = b.tack == .port ? 1 : -1
+        func early(_ heading: Double) -> Bool {
+            crossesEarly(b, view, heading: heading, within: Self.luffLineSeconds, ease: input.ease)
+        }
+        // Her heading held, then each further step away while sailable and allowed (no boat brought closer, marks, edges).
+        struct Candidate { let heading: Double, distance: Double, early: Bool }
+        var candidates: [Candidate] = []
+        candidates.append(Candidate(heading: b.heading, distance: closest(b.heading), early: early(b.heading)))
+        var angle = Self.clearingStep
+        while angle <= Self.committedTurnLimit + 1e-9 {
+            let heading = b.heading + commitment.way * angle
+            let wind = wrapAngle(heading - b.windDirection) * side
+            guard wind >= floor, wind <= .pi else { break }
+            if !turnsTowards(b, view, heading: heading, except: other.seat),
+               avoidMarks(b, view, desired: heading) == nil, avoidEdges(b, view, desired: heading) == nil {
+                candidates.append(Candidate(heading: heading, distance: closest(heading), early: early(heading)))
+            }
+            angle += Self.clearingStep
+        }
+        let chosen = candidates.first { $0.distance >= collision && !$0.early }
+            ?? candidates.first { $0.distance >= collision }
+            ?? candidates.filter { !$0.early }.max { $0.distance < $1.distance }
+            ?? candidates.max { $0.distance < $1.distance }
+        guard let chosen else { return nil }
+        let turned = wrapAngle(chosen.heading - b.heading)
+        let bearAway: Double = side
+        let holds = abs(turned) < 1e-9
+        let steered = holds ? BoatInput(rudder: 0 as Int8, ease: input.ease)
+            : BoatInput(rudder: steer(b, toHeading: chosen.heading, view, closest: floor).rudder, ease: input.ease)
+        return Avoidance(input: steered, turn: holds ? .hold : turned * bearAway < 0 ? .luff : .bearAway,
+                         heading: chosen.heading, turnSize: abs(turned), furthest: chosen.distance < collision,
+                         early: chosen.early, commitment: commitment, committed: true)
+    }
+
+    /// The furthest her commitment turns her on from her heading in one decision (`committedAvoidance`, #542 Q8).
+    /// Placeholder: #541's 30° early luff.
+    static let committedTurnLimit = deg2rad(30)
 
     /// Her input avoiding a boat clearly not keeping clear of her (#537), or nil when there is none, or no turn she may
     /// make passes her better than holding on (`avoidance`).
@@ -233,7 +317,18 @@ extension BotBrain {
     /// can't keep clear (`.cannot`), with no heading that clears and isn't early, she takes the least luff that clears
     /// even though early (`earlyLuff`, fix round 4).
     /// Racing, as #537 has it.
+    /// Before the gun, whenever that leaves her nothing to do, her commitment (#542 Q8, `committedAvoidance`) may still
+    /// refuse her plan's heading.
     func avoidance(_ b: SeatView.OwnBoat, _ view: SeatView, _ input: BoatInput, desired: Double) -> Avoidance {
+        let searched = avoidanceSearch(b, view, input, desired: desired)
+        guard searched.input == nil, b.penalty == nil, avoidsContact,
+              var committed = committedAvoidance(b, view, input, desired: desired) else { return searched }
+        committed.refusedEarlyHold = searched.refusedEarlyHold
+        return committed
+    }
+
+    /// `avoidance`'s search (#537, #541).
+    private func avoidanceSearch(_ b: SeatView.OwnBoat, _ view: SeatView, _ input: BoatInput, desired: Double) -> Avoidance {
         // Owing a turn, her clearing for it and her wait are the penalty's (#471, #486), which weigh every boat near.
         guard avoidsContact, b.status == .racing || b.status == .prestart, b.penalty == nil else { return Avoidance() }
         let preGun = b.status == .prestart && view.time < 0
@@ -262,7 +357,11 @@ extension BotBrain {
             guard let onPlan = view.others.filter({ notKeepingClear($0, b, view, heading: desired) == .cannot })
                 .min(by: nearer)
             else { return Avoidance() }
-            guard early(b.heading) else { return Avoidance(input: centred, turn: .hold, heading: b.heading) }
+            guard early(b.heading) else {
+                // Holding for the boat her commitment is to, the commitment holds (#542 Q8).
+                return Avoidance(input: centred, turn: .hold, heading: b.heading,
+                                 commitment: avoidCommitment?.seat == onPlan.seat ? avoidCommitment : nil)
+            }
             // Before the gun, not a hold that carries her over early (#541 Q5), nor the helm left to her plan, whose
             // turn onto `desired` is towards the stopped boat (#541 fix round 2: guard over note): she looks for a
             // turn away from that boat as below, nil only if none clears.
@@ -288,7 +387,10 @@ extension BotBrain {
         // Clear holding on, she holds; before the gun, not on a heading that carries her over early (#541 Q5): then
         // only a turn that clears her and isn't early.
         let refusedEarlyHold = onPlanRefused || held.gap >= clear && early(b.heading)
-        if held.gap >= clear && !refusedEarlyHold { return Avoidance(input: centred, turn: .hold, heading: b.heading) }
+        if held.gap >= clear && !refusedEarlyHold {
+            return Avoidance(input: centred, turn: .hold, heading: b.heading,
+                             commitment: preGun && avoidCommitment?.seat == other.seat ? avoidCommitment : nil)
+        }
         // Away from the side she passes on, where she is at their closest (for a stalled boat, the side she is on);
         // dead on, the side she is on now, and failing that, bearing away.
         let offset = other.position - b.position
@@ -319,51 +421,55 @@ extension BotBrain {
                 && avoidMarks(b, view, desired: heading) == nil && avoidEdges(b, view, desired: heading) == nil
                 && !(early && crossesEarly(b, view, heading: heading, within: Self.luffLineSeconds))
         }
+        // Before the gun, tripping on her heading a boat that can't keep clear (`.cannot`): an early heading is costed,
+        // not a veto (#542 Q4, generalising #541's `earlyLuff`): a clearing one that isn't early first, then the least
+        // clearing early one either way (the luff for a port boat), then the furthest pass that isn't early.
+        let cannot = preGun && !onPlanRefused && notKeepingClear(other, b, view) == .cannot
+        let costsEarly = cannot && costsEarlyAvoidance
+        typealias Turn = (heading: Double, turn: Int)
+        // The least clearing turn each way, not early and early, and the furthest pass that isn't early.
+        var best: Turn?, bestLuff: Turn?, bestEarly: Turn?, bestEarlyLuff: Turn?
         var furthest: (heading: Double, distance: Double)?
-        var best: (heading: Double, turn: Int)?
-        var bestLuff: (heading: Double, turn: Int)?
         // Weighed every degree, so every bit of the turn opens the pass: past where it closes again she would be turning
-        // towards her. Turns are taken in `clearingStep`s.
+        // towards her. Turns are taken in `clearingStep`s. `costing`: an early heading is costed, else it ends the way.
         let fine = deg2rad(1)
         let every = Int((Self.clearingStep / fine).rounded())
-        for way in [away, -away] {
-            var last = held
-            for degree in 1...180 {
-                let heading = b.heading + way * Double(degree) * fine
-                guard isSailable(heading, way) else { break }
-                let pass = passes(heading)
-                guard pass.straight > last.straight, pass.turning >= last.turning else { break }
-                last = pass
-                let distance = pass.gap
-                guard degree % every == 0 else { continue }
-                let step = degree / every
-                // Before the gun, a heading that carries her over early at her own sheeting ends the way: she would
-                // swing through it (#541 build 2).
-                if early(heading) { break }
-                guard isAllowed(heading) else { continue }
-                if distance >= clear {
-                    if step < best?.turn ?? .max { best = (heading, step) }
-                    if way == luff { bestLuff = (heading, step) }
-                    break
+        func search(_ ways: [Double], costing: Bool) {
+            for way in ways {
+                var last = held
+                // Past an early heading the way stays early: she would swing through it.
+                var wayEarly = false
+                for degree in 1...180 {
+                    let heading = b.heading + way * Double(degree) * fine
+                    guard isSailable(heading, way) else { break }
+                    let pass = passes(heading)
+                    guard pass.straight > last.straight, pass.turning >= last.turning else { break }
+                    last = pass
+                    let distance = pass.gap
+                    guard degree % every == 0 else { continue }
+                    let step = degree / every
+                    // Before the gun, a heading that carries her over early at her own sheeting ends the way: she would
+                    // swing through it (#541 build 2). For a boat that can't keep clear, it is costed (#542 Q4).
+                    if early(heading) {
+                        guard costing else { break }
+                        wayEarly = true
+                    }
+                    guard isAllowed(heading, early: !costing) else { continue }
+                    if distance >= clear {
+                        if wayEarly {
+                            if step < bestEarly?.turn ?? .max { bestEarly = (heading, step) }
+                            if way == luff { bestEarlyLuff = (heading, step) }
+                        } else {
+                            if step < best?.turn ?? .max { best = (heading, step) }
+                            if way == luff { bestLuff = (heading, step) }
+                        }
+                        break
+                    }
+                    if !wayEarly, distance > furthest?.distance ?? held.gap { furthest = (heading, distance) }
                 }
-                if distance > furthest?.distance ?? held.gap { furthest = (heading, distance) }
             }
         }
-        // The least luff that clears her, the early veto lifted (#541 fix round 4): the luff way's search above
-        // without `early`.
-        func clearingLuff() -> Double? {
-            var last = held
-            for degree in 1...180 {
-                let heading = b.heading + luff * Double(degree) * fine
-                guard isSailable(heading, luff) else { break }
-                let pass = passes(heading)
-                guard pass.straight > last.straight, pass.turning >= last.turning else { break }
-                last = pass
-                guard degree % every == 0, isAllowed(heading, early: false) else { continue }
-                if pass.gap >= clear { return heading }
-            }
-            return nil
-        }
+        search([away, -away], costing: costsEarly)
         // Before the gun, against a port boat, any luff that clears her (#541 Q3, Q4): rules 12 and 13 keep the least
         // turn (a luff away from a boat astern can make her the windward boat).
         let prefersLuff = preGun && other.rightOfWay?.rule == .portStarboard
@@ -374,12 +480,30 @@ extension BotBrain {
         // and isn't early: the least luff that clears her, early or not, over the furthest pass (#541 fix round 4, owner:
         // "Relax the veto": a contact ranks worse than an early cross she may still correct). Every degree of it still
         // opens both passes, sailable, and allowed (no boat brought closer, marks and edges).
-        if preGun, chosen == nil, !onPlanRefused, notKeepingClear(other, b, view) == .cannot,
-           let luffed = clearingLuff() {
-            let steered = steer(b, toHeading: luffed, view, closest: Self.startLuffFloor(view))
-            return Avoidance(input: BoatInput(rudder: steered.rudder, ease: input.ease), turn: .luff, heading: luffed,
-                             turnSize: abs(wrapAngle(luffed - b.heading)), refusedEarlyHold: refusedEarlyHold,
-                             earlyLuff: true)
+        // #542 Q4 generalises it: the least clearing early turn either way, the luff for a port boat (#541 Q3).
+        // Turned away from a boat that can't keep clear, she commits to the way (#542 Q8).
+        let commits = { (turned: Double) -> AvoidCommitment? in
+            guard preGun, notKeepingClear(other, b, view, heading: onPlanRefused ? desired : nil) == .cannot,
+                  abs(turned) > 1e-9 else { return nil }
+            return AvoidCommitment(seat: other.seat, way: turned > 0 ? 1 : -1, tack: b.tack)
+        }
+        // With the cost seamed off (`costsEarlyAvoidance`), #541's least clearing luff, early allowed: the luff way
+        // searched again with every early heading kept, its furthest pass left as the first search had it.
+        if chosen == nil, cannot, !costsEarly {
+            let searched = furthest
+            (bestLuff, bestEarlyLuff) = (nil, nil)
+            search([luff], costing: true)
+            furthest = searched
+            bestEarlyLuff = bestLuff ?? bestEarlyLuff
+        }
+        let earlyTurn = costsEarly ? (prefersLuff ? bestEarlyLuff : nil) ?? bestEarly : bestEarlyLuff
+        if chosen == nil, cannot, let early = earlyTurn {
+            let steered = steer(b, toHeading: early.heading, view, closest: Self.startLuffFloor(view))
+            let turned = wrapAngle(early.heading - b.heading)
+            let luffs = turned * bearAway < 0
+            return Avoidance(input: BoatInput(rudder: steered.rudder, ease: input.ease), turn: luffs ? .luff : .bearAway,
+                             heading: early.heading, turnSize: abs(turned), refusedEarlyHold: refusedEarlyHold,
+                             earlyLuff: luffs, early: costsEarly, commitment: commits(turned))
         }
         guard let heading = chosen?.heading ?? furthest?.heading else {
             // Before the gun, holding for a boat only on her plan's heading, no turn away: she holds centred, early,
@@ -389,7 +513,8 @@ extension BotBrain {
             // Not a hold that passes her clear (fix round 4: case (b)'s water, where the plan's helm keeps her clear and
             // behind the line, and a held-early hold carried her over): only one that doesn't, s10's.
             if onPlanRefused && held.gap < clear {
-                return Avoidance(input: centred, turn: .hold, heading: b.heading, refusedEarlyHold: true, heldEarly: true)
+                return Avoidance(input: centred, turn: .hold, heading: b.heading, refusedEarlyHold: true, heldEarly: true,
+                                 commitment: avoidCommitment?.seat == other.seat ? avoidCommitment : nil)
             }
             return Avoidance(refusedEarlyHold: refusedEarlyHold)
         }
@@ -398,7 +523,8 @@ extension BotBrain {
         let turned = wrapAngle(heading - b.heading)
         return Avoidance(input: BoatInput(rudder: steered.rudder, ease: input.ease),
                          turn: turned * bearAway < 0 ? .luff : .bearAway, heading: heading, turnSize: abs(turned),
-                         refusedEarlyHold: refusedEarlyHold, furthest: chosen == nil, preferredLuff: preferredLuff)
+                         refusedEarlyHold: refusedEarlyHold, furthest: chosen == nil, preferredLuff: preferredLuff,
+                         commitment: commits(turned))
     }
 
     /// Whether a tack or gybe begun now would be a turn with a boat clearly not keeping clear of her inside the horizon
