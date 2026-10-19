@@ -63,9 +63,14 @@ final class GameSession {
     /// A race from the practice setup (#235): your finish goes into the practice history. A launch argument's or an
     /// online race doesn't.
     @ObservationIgnored var recordsPracticeHistory = false
-    /// Ease is on (#99, #112, #453): the gesture's (both halves held, or the tiller pulled down) or VoiceOver's.
-    /// The scene sends it with the rudder every frame.
-    var isEasing: Bool { isGestureEasing || isVoiceOverEasing }
+    /// Ease is on (#99, #112, #453): the gesture's (both halves held, or the tiller pulled down), VoiceOver's, or the
+    /// opening's seated ease. The scene sends it with the rudder every frame.
+    var isEasing: Bool { isSeatedEasing || isGestureEasing || isVoiceOverEasing }
+    /// The opening's ease (#477): a rules file with an opening seats every boat eased (`Race.heldInputs`), and the
+    /// scene's every-frame input would sheet her in on its first frame. So she stays eased from seating until her first
+    /// touch on the water or VoiceOver's Ease; a pause or Help keeps it, as they touch nothing. Off from the first frame
+    /// where the race seats her sheeted in (fleet-rules@7 and older), and in a render fixture.
+    private(set) var isSeatedEasing = false
     /// The steering gesture eases (#453): the scene sets it from its `SteeringInterpreter`.
     private(set) var isGestureEasing = false
     /// VoiceOver's Ease (`race-ease`, or the water's Ease action) is on.
@@ -224,6 +229,7 @@ final class GameSession {
         self.sound = RaceSound(output: sound)
         self.controls = controls
         let me = driver.myBoatIndex
+        isSeatedEasing = Self.seatsHerEased(driver)
         presenter = RaceEventPresenter(me: me, seen: rulesSeen, penaltyTurn: driver.currentFrame.penalty?.turn ?? .fullCircle) {
             rosterSource.current().label(of: $0, playerSeat: me)
         }
@@ -268,7 +274,38 @@ final class GameSession {
     /// VoiceOver's Ease (#112): an accessibility action can't hold, so the first activation holds Ease and the
     /// second lets it go.
     func toggleEase() {
+        // While seated eased, Ease shows on: the first activation lets it go.
+        if isSeatedEasing {
+            endSeatedEase()
+            return
+        }
         setEase(!isVoiceOverEasing)
+    }
+
+    /// Her first touch sheets her in from the opening's seated ease (#477): from here Ease is the gesture's or
+    /// VoiceOver's alone. The start-sequence hint, if it is up or waiting, takes its scheme's words in place.
+    func endSeatedEase() {
+        guard isSeatedEasing else { return }
+        updateEase { isSeatedEasing = false }
+        if let shown = hints?.scheduler.tracked, shown.id == .startSequence {
+            noticeSlot.retext(shown.noticeID, to: HintCatalogue.hint(.startSequence).text.text(for: controls.steering))
+            let current = noticeSlot.current(at: now())
+            if current != notice { notice = current }
+        }
+    }
+
+    /// Whether the race seats her in the opening's seated ease (#477): the race holds her seat eased, before the gun,
+    /// and she sails it herself. Not in a render fixture, with a bot on her boat (`-demo`), or online when she joins a
+    /// race under way: its first frame is the setup's, predicted before the resync, not where she is.
+    static func seatsHerEased(_ driver: any RaceDriver) -> Bool {
+        let frame = driver.currentFrame
+        let me = driver.myBoatIndex
+        guard !driver.isFrozen, frame.time < 0, frame.heldInputs.indices.contains(me), frame.heldInputs[me].ease else {
+            return false
+        }
+        if let practice = driver as? PracticeDriver, !practice.youSailYourBoat { return false }
+        if let online = driver as? OnlineDriver, online.joinedUnderway { return false }
+        return true
     }
 
     /// The steering gesture's ease (#453), from the scene as it changes: a light haptic tick on and off for the
@@ -406,7 +443,7 @@ final class GameSession {
         }
         guard let next else { return }
         let id = noticeSlot.nextID
-        post(.hint, next.hint.text.text(for: controls.steering), leader: next.leader, held: next.held)
+        post(.hint, next.hint.text.text(for: controls.steering, seatedEasing: isSeatedEasing), leader: next.leader, held: next.held)
         hints.posted(next.hint.id, noticeID: id, held: next.held)
     }
 
@@ -453,6 +490,7 @@ final class GameSession {
     private func finishForPlayer(showsAt: Date?) {
         if !playerDone {
             playerDone = true
+            isSeatedEasing = false
             isVoiceOverEasing = false
             isGestureEasing = false
             finishedAt = showsAt

@@ -314,12 +314,27 @@ enum TuningCatalog {
                 ]),
             TuningGroup(
                 id: "raceFormat", title: "Race format",
-                note: "The race area's width (a fraction of the beat) and how widely the fleet starts (line lengths, #223).",
+                note: "The race area's width (a fraction of the beat) and how widely the fleet starts (line lengths, #223). From fleet-rules@8 the opening (#477) seats it in two rows below the line, starboard's the shallower, reaching at the angle below, eased at the trim until the gun, each slot jittered within the cap and kept the spacing apart; the start row is \"not in this file\" there, and the opening is before it.",
                 applies: .nextRace,
                 sliders: [
                     TuningSlider(.rulesConfiguration, "/raceFormat/raceArea/acrossAxisBeatFraction", "Race-area width",
                                  0.3...1.5, step: 0.05),
                     TuningSlider(.rulesConfiguration, "/raceFormat/startRow/spreadLineLengths", "Start-row spread", 0.5...3, step: 0.1),
+                    // #477, from fleet-rules@8: "Not in this file" before.
+                    TuningSlider(.rulesConfiguration, "/raceFormat/opening/rowDepthsHullLengths/0", "Starboard row depth",
+                                 unit: " L", 1...15, step: 0.5),
+                    TuningSlider(.rulesConfiguration, "/raceFormat/opening/rowDepthsHullLengths/1", "Port row depth",
+                                 unit: " L", 1...15, step: 0.5),
+                    TuningSlider(.rulesConfiguration, "/raceFormat/opening/spreadLineLengths", "Opening spread", 0.5...3,
+                                 step: 0.1),
+                    TuningSlider(.rulesConfiguration, "/raceFormat/opening/trueWindAngleDegrees", "Opening reach", unit: "°",
+                                 50...120, step: 5),
+                    TuningSlider(.rulesConfiguration, "/raceFormat/opening/easeSpeedFraction", "Eased trim before the gun",
+                                 0.1...1, step: 0.05),
+                    TuningSlider(.rulesConfiguration, "/raceFormat/opening/minimumSpacingHullLengths", "Opening spacing",
+                                 unit: " L", 1...6, step: 0.25),
+                    TuningSlider(.rulesConfiguration, "/raceFormat/opening/jitterHullLengths", "Opening jitter cap",
+                                 unit: " L", 0...2, step: 0.05),
                 ]),
             TuningGroup(
                 id: "water", title: "Water",

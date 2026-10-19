@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 import Testing
 import RegattaCore
 @testable import Regatta
@@ -60,5 +61,121 @@ import RegattaCore
         let boat = session.driver.currentFrame.boats[session.driver.myBoatIndex]
         #expect(session.easeReleases.count == 1)
         #expect(session.easeReleases.knots == knots(metresPerSecond: boat.speed))
+    }
+
+    // MARK: The opening's seated ease (#477)
+
+    /// A practice race on fleet-rules@8, whose opening seats every boat eased: 60 s to the gun, as practice sails.
+    private static var openingConfig: RaceConfig {
+        var config = RaceConfig(opponents: 3, prestartSeconds: 60, seed: 1, windSeed: RaceConfig.windSeed(pinnedTo: 1))
+        config.files.rulesConfiguration = try! RulesConfigFile.bundled(id: "fleet-rules", version: 8).ref
+        return config
+    }
+
+    /// Runs the scene's frames, a tick each, until the race clock reaches `time`: each frame submits the input as the
+    /// scene's `update` does, and `check` reads her held input after its tick.
+    private static func sail(_ session: GameSession, to time: Double, check: (BoatInput) -> Void = { _ in }) {
+        while session.driver.currentFrame.time < time {
+            session.scene.submitInput(after: Race.dt)
+            session.driver.tick(Race.dt)
+            check(session.driver.currentFrame.heldInputs[session.driver.myBoatIndex])
+        }
+    }
+
+    /// Hands off, she stays eased from seating through T-30: the scene's every-frame input keeps the opening's ease.
+    @Test func handsOffStaysEasedThroughTheOpening() {
+        let session = GameSession(config: Self.openingConfig)
+        let me = session.driver.myBoatIndex
+        #expect(session.driver.currentFrame.time == -60)
+        #expect(session.driver.currentFrame.heldInputs[me].ease, "the opening seats her eased")
+        #expect(session.isSeatedEasing && session.isEasing)
+        var frames = 0
+        Self.sail(session, to: -30) { held in
+            frames += 1
+            #expect(held.ease, "eased at \(session.driver.currentFrame.time) s")
+        }
+        #expect(frames == 30 * Race.tickRate)
+        #expect(session.isSeatedEasing && session.easeReleases.count == 0)
+        // A pause or Help touches nothing: she is still eased after it.
+        session.releaseControls()
+        #expect(session.isSeatedEasing)
+    }
+
+    /// Her first touch on the water sheets her in, on the next tick, and Ease is the gesture's from then on.
+    @Test func firstTouchSheetsHerIn() {
+        let session = GameSession(config: Self.openingConfig)
+        let me = session.driver.myBoatIndex
+        Self.sail(session, to: -50)
+        #expect(session.driver.currentFrame.heldInputs[me].ease)
+        session.scene.touchBegan(1, at: CGPoint(x: 350, y: 400), midX: 200)
+        #expect(!session.isSeatedEasing && !session.isEasing)
+        #expect(session.easeReleases.count == 1, "the seated ease let go")
+        Self.sail(session, to: -49) { held in #expect(!held.ease) }
+        session.scene.steering.touchEnded(1)
+        // Two still fingers ease again, as in any race.
+        session.scene.touchBegan(2, at: CGPoint(x: 50, y: 400), midX: 200)
+        session.scene.touchBegan(3, at: CGPoint(x: 350, y: 400), midX: 200)
+        Self.sail(session, to: -48)
+        #expect(session.driver.currentFrame.heldInputs[me].ease && session.isGestureEasing)
+    }
+
+    /// VoiceOver shows the seated ease on: its first activation lets it go, the next holds Ease as before.
+    @Test func voiceOverLetsGoOfTheSeatedEase() {
+        let session = GameSession(config: Self.openingConfig)
+        session.toggleEase()
+        #expect(!session.isSeatedEasing && !session.isEasing)
+        session.toggleEase()
+        #expect(session.isVoiceOverEasing)
+    }
+
+    /// Her finish lets go of the seated ease, as of any Ease.
+    @Test func finishingEndsTheSeatedEase() {
+        let session = GameSession(config: Self.openingConfig)
+        #expect(session.isSeatedEasing)
+        session.consume([RaceEvent(tick: 1, kind: .finished(seat: session.driver.myBoatIndex, place: 1))])
+        #expect(!session.isSeatedEasing && !session.isEasing)
+    }
+
+    /// With a bot on her boat (`-demo`) there is no seated ease: the bot sails it, and the hint says nothing of it.
+    @Test func noSeatedEaseWhenABotSailsHerBoat() {
+        var config = Self.openingConfig
+        config.botSailsYourBoat = true
+        let session = GameSession(config: config)
+        #expect(!session.isSeatedEasing && !session.isEasing)
+    }
+
+    /// The start-sequence hint posted while the seated ease holds her reads "Eased. Steer to sail."; her first touch
+    /// gives it the scheme's words in place, while it is still up.
+    @Test func firstTouchRetextsTheStartSequenceHint() throws {
+        // A later race: the steering hint has shown and is learned, so the start-sequence hint is the first due.
+        let progress = HintProgressStore()
+        progress.markShown(.raceStart)
+        progress.markLearned(.raceStart)
+        let session = GameSession(config: Self.openingConfig, hints: HintEngine(progress: progress))
+        let text = HintCatalogue.hint(.startSequence).text
+        var time = Date.now
+        session.now = { time }
+        session.sceneStarted()
+        while session.notice?.text != text.seatedEasing, session.driver.currentFrame.time < -50 {
+            time += Race.dt
+            Self.sail(session, to: session.driver.currentFrame.time + Race.dt)
+            session.refreshHUD()
+        }
+        let posted = try #require(session.notice)
+        #expect(posted.kind == .hint && posted.text == "Eased. Steer to sail.")
+        session.scene.touchBegan(1, at: CGPoint(x: 350, y: 400), midX: 200)
+        #expect(session.notice?.id == posted.id, "the same notice, still up")
+        #expect(session.notice?.text == text.text(for: session.controls.steering))
+        session.refreshHUD()
+        #expect(session.notice?.text == text.text(for: session.controls.steering))
+    }
+
+    /// A race that seats her sheeted in (fleet-rules@7 and older, the default) has no seated ease: the first frame
+    /// sends no ease, as before #477.
+    @Test func noSeatedEaseWithoutAnOpening() {
+        let session = GameSession(config: Self.config)
+        #expect(!session.driver.currentFrame.heldInputs[session.driver.myBoatIndex].ease)
+        #expect(!session.isSeatedEasing && !session.isEasing)
+        Self.sail(session, to: session.driver.currentFrame.time + 1) { held in #expect(!held.ease) }
     }
 }

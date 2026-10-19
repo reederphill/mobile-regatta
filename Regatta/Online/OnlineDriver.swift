@@ -47,6 +47,9 @@ final class OnlineDriver: RaceDriver {
     /// Each seat's livery (#119). The wire carries none yet: every other seat wears a seeded free starter.
     let liveries: FleetLiveries
     let client: RaceClient
+    /// The race had begun when this client joined it (`joiningUnderway`): her first frame is the setup's, predicted
+    /// before the server's `Resync`, not where she is.
+    let joinedUnderway: Bool
 
     private(set) var previousFrame: TickFrame
     private(set) var currentFrame: TickFrame
@@ -83,6 +86,7 @@ final class OnlineDriver: RaceDriver {
     init(start: RaceStart, transport: RaceTransport, token: [UInt8], clientBuild: String,
          now: @escaping () -> UInt64, connect: @escaping () -> RaceTransport, joiningUnderway: Bool = false) {
         client = RaceClient(start: start, transport: transport, joiningUnderway: joiningUnderway)
+        joinedUnderway = joiningUnderway
         self.now = now
         self.connect = connect
         self.token = token

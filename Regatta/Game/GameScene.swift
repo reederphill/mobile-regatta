@@ -288,10 +288,7 @@ final class GameScene: SKScene {
         }
 
         syncScheme()
-        let rudder = steering.advance(by: frameTime)
-        publishEase()
-        // The driver latches it for the next tick. With `-demo` a bot sails your seat and ignores it.
-        driver.submit(BoatInput(rudder: rudder, ease: session.isEasing))
+        submitInput(after: frameTime)
         let clock = ContinuousClock()
         let tickStart = clock.now
         let ticks = driver.tick(frameTime, within: Self.tickBudget).count
@@ -599,11 +596,25 @@ final class GameScene: SKScene {
         session?.setGestureEase(publishedEase, ticks: steering.scheme == .tiller)
     }
 
+    /// Sends this frame's input: the rudder moved on by `frameTime` seconds, and Ease. The driver latches it for the
+    /// next tick. With `-demo` a bot sails your seat and ignores it.
+    func submitInput(after frameTime: Double) {
+        let rudder = steering.advance(by: frameTime)
+        publishEase()
+        driver.submit(BoatInput(rudder: rudder, ease: session?.isEasing ?? false))
+    }
+
+    /// A finger lands on the water at `point`, in view points: the first one ends the opening's seated ease (#477).
+    func touchBegan(_ id: AnyHashable, at point: CGPoint, midX: CGFloat) {
+        session?.endSeatedEase()
+        steering.touchBegan(id, at: point, midX: midX)
+    }
+
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let view else { return }
         syncScheme()
         for touch in touches {
-            steering.touchBegan(ObjectIdentifier(touch), at: touch.location(in: view), midX: view.bounds.midX)
+            touchBegan(ObjectIdentifier(touch), at: touch.location(in: view), midX: view.bounds.midX)
         }
         publishTillerKnob()
     }

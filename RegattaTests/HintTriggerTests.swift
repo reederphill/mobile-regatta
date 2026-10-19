@@ -37,9 +37,11 @@ import Testing
         for hint in HintCatalogue.engine {
             #expect(hint.isPlaceholderCopy, "\(hint.id) TODO-COPY (#171)")
             for steering in DeviceSettings.Steering.allCases {
-                let text = hint.text.text(for: steering)
-                #expect(!text.isEmpty && text.count <= 56, "\(hint.id): \(text)")
-                #expect(text.rangeOfCharacter(from: .decimalDigits) == nil, "\(hint.id): \(text)")
+                for seated in [false, true] {
+                    let text = hint.text.text(for: steering, seatedEasing: seated)
+                    #expect(!text.isEmpty && text.count <= 56, "\(hint.id): \(text)")
+                    #expect(text.rangeOfCharacter(from: .decimalDigits) == nil, "\(hint.id): \(text)")
+                }
             }
         }
         // The first hint is the scheme's own and mentions the other one in Settings.
@@ -70,6 +72,20 @@ import Testing
         pre.raceTime = -5
         #expect(fires(.startSequence, pre) == nil)
         #expect(fires(.startSequence, racing()) == nil)
+    }
+
+    /// #477: while the opening's seated ease holds her, the start-sequence hint says she is eased and steering sails,
+    /// in either scheme; otherwise it teaches the ease gesture, as before. No other hint changes.
+    @Test func startSequenceHintSaysEasedWhileSeatedEased() {
+        let text = HintCatalogue.hint(.startSequence).text
+        for steering in DeviceSettings.Steering.allCases {
+            #expect(text.text(for: steering, seatedEasing: true) == "Eased. Steer to sail.")
+        }
+        #expect(text.text(for: .halves) == "Hold both sides to ease.")
+        #expect(text.text(for: .tiller) == "Pull down to ease.")
+        for hint in HintCatalogue.all where hint.id != .startSequence {
+            #expect(hint.text.seatedEasing == nil, "\(hint.id)")
+        }
     }
 
     @Test func noGoWaitsItsDwellAndNotWhileTacking() {

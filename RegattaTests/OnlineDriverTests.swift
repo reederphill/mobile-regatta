@@ -47,13 +47,14 @@ import RegattaProtocol
     /// `joiningAfter`: the server has sailed that long, of a sequence of `startSequenceTicks`, before the client
     /// joins, as a race link coming up late does (#141).
     init(seed: UInt64 = 3, seats: Int = 10, startSequenceTicks: Int = 300, joiningAfter: UInt64 = 0,
-         collisionCourse: Bool = false, markRoomAt: Int? = nil, uplink: LinkFaults = .none,
+         collisionCourse: Bool = false, markRoomAt: Int? = nil,
+         rulesConfiguration: FileRef = RaceFiles.defaults.rulesConfiguration.ref, uplink: LinkFaults = .none,
          downlink: LinkFaults = .none) throws {
         let clock = VirtualClock(now: 1_000_000)
         let link = FaultInjectingLink(clock: clock, uplink: uplink, downlink: downlink, seed: 1)
         let server = try FakeRaceServer(seats: seats, seed: seed, startSequenceTicks: startSequenceTicks,
                                         collisionCourse: collisionCourse, markRoomAt: markRoomAt,
-                                        transport: link.server, clock: clock)
+                                        rulesConfiguration: rulesConfiguration, transport: link.server, clock: clock)
         let network = Network(link: link, server: server)
         if joiningAfter > 0 {
             clock.advance(by: joiningAfter)
@@ -337,6 +338,19 @@ import RegattaProtocol
         let tick = try #require(rig.driver.serverTick)
         #expect(abs(tick - (-38 * Race.tickRate)) <= Race.tickRate, "the race clock reads \(tick) ticks")
         #expect(abs(rig.driver.currentFrame.tick - tick) <= Race.tickRate, "the race isn't sailed to the server's tick")
+    }
+
+    /// #477: on fleet-rules@8 a client joining before the sequence starts is seated eased, and holds it; one joining a
+    /// race under way isn't, as its first frame is the setup's, predicted before the resync, not where she is.
+    @Test func onlySeatedEasedWhenJoiningBeforeTheSequence() throws {
+        let opening = try RulesConfigFile.bundled(id: "fleet-rules", version: 8).ref
+        let seated = try OnlineRig(seats: 4, rulesConfiguration: opening)
+        #expect(seated.driver.currentFrame.heldInputs[seated.driver.myBoatIndex].ease)
+        #expect(!seated.driver.joinedUnderway && seated.session.isSeatedEasing)
+        let rejoin = try OnlineRig(seats: 4, startSequenceTicks: 75 * Race.tickRate, joiningAfter: 35_000_000,
+                                   rulesConfiguration: opening)
+        #expect(rejoin.driver.joinedUnderway)
+        #expect(!rejoin.session.isSeatedEasing && !rejoin.session.isEasing)
     }
 
     @Test func isNotPausable() throws {

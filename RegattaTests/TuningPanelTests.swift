@@ -96,7 +96,8 @@ import RegattaCore
         let sliders = model.groups.flatMap(\.sliders)
         // The pressure field's sliders name numbers only in schema-3 to -5 conditions (`pressureFieldIsTunable`).
         // The roll tack's sliders name numbers only in a class with a roll tack (`rollTackIsTunableOnAnOlderClass`).
-        for slider in sliders where !Self.isPressureField(slider) && !Self.isRollTack(slider) {
+        // The opening's name numbers only in fleet-rules@8 and later (`openingIsTunableOnFleetRulesEight`).
+        for slider in sliders where !Self.isPressureField(slider) && !Self.isRollTack(slider) && !Self.isOpening(slider) {
             let file = model.fileValue(slider)
             #expect(file != nil, "\(slider.id) names nothing in its file")
             if let file { #expect(slider.range.contains(file), "\(slider.id)'s file value \(file) is off its slider") }
@@ -125,6 +126,45 @@ import RegattaCore
     }
 
     private static func isRollTack(_ slider: TuningSlider) -> Bool { slider.id.hasPrefix("boatClass:/rollTack/") }
+
+    /// #477: the opening's keys have sliders in the Race format group, after the start row's. They are "not in this
+    /// file" on the default rules (fleet-rules@7, the start row); on fleet-rules@8, bundled and pickable, each names its
+    /// number and the start row's is "not in this file". Set there, the next practice race's rules sail the value.
+    @Test func openingIsTunableOnFleetRulesEight() throws {
+        let (model, root) = model()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let format = try #require(model.groups.first { $0.id == "raceFormat" }).sliders
+        let opening = format.filter(Self.isOpening)
+        #expect(opening.map(\.id) == [
+            "rowDepthsHullLengths/0", "rowDepthsHullLengths/1", "spreadLineLengths", "trueWindAngleDegrees",
+            "easeSpeedFraction", "minimumSpacingHullLengths", "jitterHullLengths",
+        ].map { "rulesConfiguration:/raceFormat/opening/\($0)" })
+        let startRow = try slider("rulesConfiguration:/raceFormat/startRow/spreadLineLengths", in: model)
+        #expect(opening.allSatisfy { model.fileValue($0) == nil }, "the default rules have no opening")
+        #expect(model.fileValue(startRow) != nil)
+
+        let key = DataFileKey(id: "fleet-rules", version: 8)
+        #expect(model.options(.rulesConfiguration).contains(key))
+        model.setBase(.rulesConfiguration, key)
+        #expect(model.fileValue(startRow) == nil, "fleet-rules@8 has no start row")
+        for slider in opening {
+            let file = try #require(model.fileValue(slider), "\(slider.id) names nothing in \(key)")
+            #expect(slider.range.contains(file), "\(slider.id)'s file value \(file) is off its slider")
+        }
+        let trim = try slider("rulesConfiguration:/raceFormat/opening/easeSpeedFraction", in: model)
+        #expect(model.fileValue(trim) == 0.5)
+        model.set(trim, to: 0.6)
+        #expect(model.isChanged(trim) && model.problems.isEmpty, "\(model.problems)")
+        var config = Self.config
+        config.files = model.practiceFiles()
+        #expect(config.files.rulesConfiguration.key == key && config.files.rulesConfiguration.tune != nil)
+        let files = try RaceFiles(resolving: config.setup, from: config.files.catalog)
+        #expect(files.rulesConfiguration.content.raceFormat.opening?.easeSpeedFraction == 0.6)
+    }
+
+    private static func isOpening(_ slider: TuningSlider) -> Bool {
+        slider.id.hasPrefix("rulesConfiguration:/raceFormat/opening/")
+    }
 
     /// #462: the planing rule's stay-on speed share and apparent wind have sliders: on the default class, skiff@9,
     /// each names its number; on skiff@8, still bundled and pickable, they are "not in this file", and the three older
