@@ -245,6 +245,10 @@ struct BotBrain: Sendable {
     /// The boat she turned away from before the gun, and which way (#542 Q8, `avoidance`): her plan's heading is refused
     /// while it turns her back onto that boat. Written in `sail`, cleared at any decision her avoidance doesn't make.
     var avoidCommitment: AvoidCommitment?
+    /// Before the gun, on port, whether her plan's last aim was starboard (#477's report-only row): the suite counts the
+    /// decisions she was held off that tack (`BotDriver.preGunHeldOffTackSeconds`). Written in `sail`; nothing reads it in
+    /// play.
+    var planWantsStarboardOnPort = false
     /// Whether her pre-gun avoidance commits to the way she turned (`committedAvoidance`, #542 Q8). A test seam: always
     /// true in play; only tests that sail her without it, to show what it changes, set it false.
     var commitsAvoidance = true
@@ -340,6 +344,7 @@ struct BotBrain: Sendable {
     /// What she sails now: her held input, and her tack or gybe tap.
     private mutating func sail(_ view: SeatView) -> BotDecision {
         let boat = view.own
+        planWantsStarboardOnPort = false
         observe(boat, view)
         if takingOver {
             takingOver = false
@@ -371,6 +376,7 @@ struct BotBrain: Sendable {
             return BotDecision(input: input)
         }
         var aim = plan(boat, view)
+        planWantsStarboardOnPort = boat.status == .prestart && view.time < 0 && boat.tack == .port && aim.tack == .starboard
         // Tacked before her start, she bears away to close-hauled before she holds any closer to the wind: until
         // she's there, rule 13 has her keep clear of every boat (#99).
         let closeHauled = Self.closeHauled(boat.polarWindSpeed, view) + deg2rad(2)

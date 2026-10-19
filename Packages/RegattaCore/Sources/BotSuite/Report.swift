@@ -125,6 +125,10 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
     /// `BotDriver.preGunAvoidCommitted`). Report-only; nil for a seat no bot sailed.
     public var preGunAvoidCommitted: Int? = nil
     public var preGunAvoidEarly: Int? = nil
+    /// Before the gun (#477), seconds she sailed on port with her plan wanting starboard and no turn started, and the
+    /// rule 10 calls on her while so held off her tack (`BotDriver.heldOffTack`). Report-only; nil for a seat no bot sailed.
+    public var preGunHeldOffTackSeconds: Double? = nil
+    public var preGunHeldOffTackCalls: Int? = nil
 
     public static let metricKeys = [
         "finished", "place", "ironsSeconds", "markContacts", "boatContacts", "contactsEndingInFouls",
@@ -149,7 +153,7 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         case preGunAvoidLuffs, preGunAvoidBearAways, preGunAvoidHolds, preGunAvoidFurthest, preGunHoldsRefusedEarly
         case preGunAvoidLargestTurnUpDegrees, preGunAvoidTurnsUpOver10, preGunPreferredLuffDegrees, preGunLastAvoidSeconds
         case preGunRefusedHoldsTurned, preGunHeldEarly, preGunLastHeldEarlySeconds, preGunEarlyLuffs
-        case preGunAvoidCommitted, preGunAvoidEarly
+        case preGunAvoidCommitted, preGunAvoidEarly, preGunHeldOffTackSeconds, preGunHeldOffTackCalls
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -219,6 +223,8 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         try c.encodeIfPresent(preGunEarlyLuffs, forKey: .preGunEarlyLuffs)
         try c.encodeIfPresent(preGunAvoidCommitted, forKey: .preGunAvoidCommitted)
         try c.encodeIfPresent(preGunAvoidEarly, forKey: .preGunAvoidEarly)
+        try c.encodeIfPresent(preGunHeldOffTackSeconds, forKey: .preGunHeldOffTackSeconds)
+        try c.encodeIfPresent(preGunHeldOffTackCalls, forKey: .preGunHeldOffTackCalls)
     }
 
     static func name(_ status: BoatStatus) -> String {

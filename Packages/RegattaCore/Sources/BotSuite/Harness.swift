@@ -128,6 +128,8 @@ public enum BotRaceHarness {
         // #105: in a race with the tactician and the baseline, each pair's lead at their first cross after the gun.
         var crosses = StartCrossTally(race: race, tacticians: profiles.indices.filter { profiles[$0] == .tactician },
                                       baselines: profiles.indices.filter { profiles[$0] == .baseline })
+        // #477: rule 10 calls before the gun on a bot held off her tack onto starboard at the call (report-only).
+        var heldOffTackCalls = Array(repeating: 0, count: tiers.count)
         let lastTick = cell.capSecondsAfterGun * Race.tickRate
         var tickMs: [Double] = []
         tickMs.reserveCapacity(setup.startSequenceTicks + lastTick)
@@ -143,6 +145,11 @@ public enum BotRaceHarness {
             tally.record(race, events: drained)
             hunts?.record(race, events: drained, controllers: controllers)
             crosses?.record(race)
+            for event in drained {
+                guard case .ruleCall(let call) = event.kind, call.turnsOwed > 0, call.rule == .portStarboard, race.tick < 0,
+                      controllers[call.offender].driver?.heldOffTack == true else { continue }
+                heldOffTackCalls[call.offender] += 1
+            }
         }
         let seats = tiers.indices.map { seat in
             var metrics = tally.metrics(seat: seat, of: race, tier: tiers[seat], profile: profiles[seat],
@@ -169,6 +176,10 @@ public enum BotRaceHarness {
                 metrics.preGunLastAvoidSeconds = driver.preGunLastAvoidTime
                 metrics.preGunAvoidCommitted = driver.preGunAvoidCommitted
                 metrics.preGunAvoidEarly = driver.preGunAvoidEarly
+                // #477: held off her tack onto starboard before the gun (report-only).
+                metrics.preGunHeldOffTackSeconds = Double(driver.preGunHeldOffTackDecisions * BotDriver.decisionInterval)
+                    / Double(Race.tickRate)
+                metrics.preGunHeldOffTackCalls = heldOffTackCalls[seat]
                 if profiles[seat] == nil, !cautiousSeats.contains(seat) { metrics.engagement = driver.style.engagement }
                 metrics.handling = driver.handling
             }

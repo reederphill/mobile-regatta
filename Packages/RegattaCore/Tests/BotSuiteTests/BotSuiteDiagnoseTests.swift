@@ -362,11 +362,12 @@ import Testing
         #expect(untimed(diagnosed.lines) == untimed(plain.lines) + summary.lines)
         #expect(summary.lines.first?.hasPrefix("diagnose: 4 races") == true)
 
-        // The JSON's shape: the eleven keys (#541's pre-gun avoidance the last), each table's rows in their fixed order.
+        // The JSON's shape: the twelve keys (#541's pre-gun avoidance and #477's start plan the last), each table's rows in
+        // their fixed order.
         let json = try #require(JSONSerialization.jsonObject(with: diagnosed.jsonData()) as? [String: Any])
         let diagnose = try #require(json["diagnose"] as? [String: Any])
         #expect(Set(diagnose.keys) == ["races", "starts", "lateStarters", "penaltyEpisodes", "penaltiesOwed", "preStartCalls",
-                                       "nonFinishers", "planing", "legs", "roundings", "preGunAvoidance"])
+                                       "nonFinishers", "planing", "legs", "roundings", "preGunAvoidance", "startPlan"])
         let boats = diagnosed.races.flatMap(\.seats)
         let tiers = [DiagnoseSummary.all] + BotTier.allCases.filter { tier in boats.contains { $0.tier == tier } }.map(\.rawValue)
         #expect(tiers.count >= 2)

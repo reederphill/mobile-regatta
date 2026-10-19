@@ -384,6 +384,33 @@ public struct LegObservation: Hashable, Sendable {
 }
 
 /// What `--diagnose` saw of one boat in one race.
+/// Where she waited before the gun and how she turned (#477, report-only), each whole second she was on the water.
+public struct StartPlanObservation: Hashable, Sendable {
+    /// Seconds of the last 30 s before the gun; of those, 2–5 hull lengths below the line (the band), the band's on
+    /// starboard, and on starboard anywhere.
+    public var lastThirtySeconds = 0
+    public var bandSeconds = 0
+    public var bandStarboardSeconds = 0
+    public var starboardSeconds = 0
+    /// In the band on starboard: hull lengths below the line, metres per second, and the share of her target speed
+    /// (`RaceObserver.targetSpeed`), a sample a second.
+    public var bandStarboardDepths: [Double] = []
+    public var bandStarboardSpeeds: [Double] = []
+    public var bandStarboardPolarShares: [Double] = []
+    /// Seconds of the last 40 s before the gun on starboard 2–8 hull lengths below the line, and of those with her sheets
+    /// eased (her held input's `ease`).
+    public var deepStarboardSeconds = 0
+    public var deepStarboardEasedSeconds = 0
+    /// Her tacks from port onto starboard in the last 60 s before the gun, penalty turns aside: hull lengths below the line
+    /// at each, and those with a starboard boat within 3 hull lengths ahead or abeam to windward.
+    public var portTackDepths: [Double] = []
+    public var portTacksCrowded = 0
+    /// Her turns from starboard onto port before the gun, penalty turns aside: the turn at the pin end of a lap.
+    public var pinEndTurns = 0
+
+    public init() {}
+}
+
 public struct BoatDiagnosis: Hashable, Sendable {
     public var tier: BotTier
     /// A live bot's tactics skill and handling skill, as tiers (`AxesSummary.init(live:)`'s buckets); nil for any other
@@ -393,6 +420,8 @@ public struct BoatDiagnosis: Hashable, Sendable {
     /// The legs she began, in order.
     public var legs: [LegObservation] = []
     public var start: StartObservation
+    /// Where she waited before the gun (#477).
+    public var plan = StartPlanObservation()
     public var planing = PlaningObservation()
     /// The mark roundings she sailed to their leg's end, in order (#511).
     public var roundings: [RoundingObservation] = []
@@ -456,6 +485,7 @@ public struct RaceObserver {
     private var crossedNow: Set<Int> = []
 
     private var starts: [StartObservation]
+    private var plans: [StartPlanObservation]
     private var startTicks: [Int?]
     private var episodes: [[PenaltyEpisode]]
     private var turnsOwed: [Int]
@@ -522,6 +552,7 @@ public struct RaceObserver {
         tackAndGybe = race.rules.raceFormat.penalty.turn == .tackAndGybe
         servedTick = Array(repeating: nil, count: count)
         starts = Array(repeating: StartObservation(), count: count)
+        plans = Array(repeating: StartPlanObservation(), count: count)
         startTicks = Array(repeating: nil, count: count)
         episodes = Array(repeating: [], count: count)
         turnsOwed = Array(repeating: 0, count: count)
@@ -594,6 +625,7 @@ public struct RaceObserver {
             guard !boat.isGhost else { continue }
             lastOnWaterTick[seat] = tick
             if startTicks[seat] == nil { recordStart(seat, boat, race) }
+            if tick < 0, tick.isMultiple(of: rate) { recordPlan(seat, boat, race) }
             if var turn = open[seat], turn.clockTick == nil, let clock = boat.penaltyClockTick {
                 turn.clockTick = clock // a pending clock started, clear of the mark (#487)
                 open[seat] = turn
@@ -621,6 +653,7 @@ public struct RaceObserver {
 
     private mutating func record(_ event: RaceEvent, _ race: Race) {
         let tick = race.tick
+        recordPlanTurn(event, race)
         switch event.kind {
         case .ocsNotice(let seat): starts[seat].ocs = true
         case .started(let seat):
@@ -740,6 +773,66 @@ public struct RaceObserver {
         }
     }
 
+    /// One second before the gun of where she waits (#477, `StartPlanObservation`).
+    private mutating func recordPlan(_ seat: Int, _ boat: Boat, _ race: Race) {
+        let tick = race.tick
+        let depth = -line.side(boat.position) / hullLength
+        let starboard = boat.tack == .starboard
+        if tick >= -Self.planBandWindowSeconds * rate {
+            plans[seat].lastThirtySeconds += 1
+            if starboard { plans[seat].starboardSeconds += 1 }
+            if depth >= 2, depth <= 5 {
+                plans[seat].bandSeconds += 1
+                if starboard {
+                    plans[seat].bandStarboardSeconds += 1
+                    plans[seat].bandStarboardDepths.append(depth)
+                    plans[seat].bandStarboardSpeeds.append(boat.speed)
+                    let target = Self.targetSpeed(of: boat, in: race.boatClass)
+                    if target > 0 { plans[seat].bandStarboardPolarShares.append(boat.speed / target) }
+                }
+            }
+        }
+        if tick >= -Self.planEasedWindowSeconds * rate, starboard, boat.status == .prestart, depth >= 2, depth <= 8 {
+            plans[seat].deepStarboardSeconds += 1
+            if race.heldInputs[seat].ease { plans[seat].deepStarboardEasedSeconds += 1 }
+        }
+    }
+
+    /// A tack or gybe before the gun (#477): from port onto starboard in the last 60 s, where she tacked and who was
+    /// there; from starboard onto port, the turn at the pin end.
+    private mutating func recordPlanTurn(_ event: RaceEvent, _ race: Race) {
+        let seat: Int, tacked: Bool
+        switch event.kind {
+        case .tacked(let s): (seat, tacked) = (s, true)
+        case .gybed(let s): (seat, tacked) = (s, false)
+        default: return
+        }
+        let boat = race.boats[seat]
+        guard race.tick < 0, boat.status == .prestart, !boat.isTakingPenalty, !(tackAndGybe && servedTick[seat] == race.tick)
+        else { return }
+        guard boat.tack == .starboard else {
+            plans[seat].pinEndTurns += 1
+            return
+        }
+        guard tacked, race.tick >= -Self.planTackWindowSeconds * rate else { return }
+        plans[seat].portTackDepths.append(-line.side(boat.position) / hullLength)
+        let forward = Vec2.heading(boat.heading), upwind = Vec2.heading(boat.windDirection)
+        let crowded = race.boats.indices.contains { other in
+            let them = race.boats[other]
+            guard other != seat, !them.isGhost, them.tack == .starboard else { return false }
+            let offset = them.position - boat.position
+            guard offset.length <= hullLength * Self.keepClearLengths else { return false }
+            let ahead = offset.dot(forward)
+            return ahead > hullLength / 2 || (ahead > -hullLength / 2 && offset.dot(upwind) > 0)
+        }
+        if crowded { plans[seat].portTacksCrowded += 1 }
+    }
+
+    /// The start plan's windows (#477), seconds before the gun.
+    static let planBandWindowSeconds = 30
+    static let planEasedWindowSeconds = 40
+    static let planTackWindowSeconds = 60
+
     /// Whether rules 10–13 name `seat` to keep clear of a boat within `keepClearLengths` of her.
     private func keepsClearOfABoatCloseBy(_ seat: Int, _ race: Race) -> Bool {
         let boats = race.boats
@@ -835,6 +928,7 @@ public struct RaceObserver {
             finish.touchedLate = lastTouchTick[seat].map { lastOnWaterTick[seat] - $0 < Self.touchWindowSeconds * rate } ?? false
             var diagnosis = BoatDiagnosis(tier: tiers[seat], start: start, finish: finish)
             diagnosis.episodes = episodes[seat]
+            diagnosis.plan = plans[seat]
             diagnosis.planing = planing[seat]
             diagnosis.roundings = roundings[seat].observations()
             if let fell = fallTick[seat], seconds(race.tick - fell) >= Self.backOnSeconds { diagnosis.planing.fallsWatched += 1 }

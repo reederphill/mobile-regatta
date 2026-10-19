@@ -74,6 +74,11 @@ public struct BotDriver: Sendable {
     /// early headings taken for a boat that can't keep clear (#542 Q4). Report-only.
     public private(set) var preGunAvoidCommitted = 0
     public private(set) var preGunAvoidEarly = 0
+    /// Before the gun (#477, report-only): her decisions on port with her plan wanting starboard and no turn started
+    /// (held off her tack: too slow to tack, or boats in the way), and whether her last decision was one
+    /// (`heldOffTack`, which the suite joins with the rule 10 calls on her).
+    public private(set) var preGunHeldOffTackDecisions = 0
+    public private(set) var heldOffTack = false
 
     private(set) var brain: BotBrain
     /// Her own hand on the helm for a class whose autohelm doesn't hold a centred rudder (#434); idle otherwise.
@@ -181,6 +186,8 @@ public struct BotDriver: Sendable {
         if decision.startLuff { startLuffDecisions += 1 }
         if decision.avoidsContact { avoidContactDecisions += 1 }
         if let avoidance = decision.avoidance, view.own.status == .prestart, view.time < 0 { notePreGun(avoidance, view) }
+        heldOffTack = brain.planWantsStarboardOnPort && decision.tap == nil && brain.handTurn == nil
+        if heldOffTack { preGunHeldOffTackDecisions += 1 }
         let next = race.tick + 1
         race.apply(decision.input, seat: seat, atTick: next)
         if let tap = decision.tap { race.tap(tap, seat: seat, atTick: next) }
