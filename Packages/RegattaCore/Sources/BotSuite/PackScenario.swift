@@ -66,22 +66,27 @@ public struct PackCell: Hashable, Sendable {
     public var above: Double
     public var autohelmOff: Bool?
     public var boatClass: String?
+    /// The bundled rules it sails, `id@version` (#477, `--rules`); nil for the default rules.
+    public var rules: String?
 
     public init(seed: UInt64, layout: PackLayout, tierMix: TierMix, above: Double = PackScenario.defaultAbove,
-                autohelmOff: Bool? = nil, boatClass: String? = nil) {
+                autohelmOff: Bool? = nil, boatClass: String? = nil,
+                rules: String? = nil) {
         self.seed = seed
         self.layout = layout
         self.tierMix = tierMix
         self.above = above
         self.autohelmOff = autohelmOff
         self.boatClass = boatClass
+        self.rules = rules
     }
 
     /// The race the cell sails: its fleet is the pack, two laps so the gate is the third leg.
     var raceCell: BotRaceCell {
         BotRaceCell(seed: seed, venue: layout.venue, conditions: PackScenario.conditions, tideStateDegrees: 0,
                     fleetSize: layout.size, tierMix: tierMix, profileMix: .live, laps: PackScenario.laps,
-                    capSecondsAfterGun: BotMatrix.defaultCapSecondsAfterGun, autohelmOff: autohelmOff, boatClass: boatClass)
+                    capSecondsAfterGun: BotMatrix.defaultCapSecondsAfterGun, autohelmOff: autohelmOff, boatClass: boatClass,
+                    rules: rules)
     }
 }
 
@@ -192,6 +197,7 @@ public enum PackScenario {
         }
         let seeds = (1...(options.seedCount ?? defaultSeeds)).map(UInt64.init)
         if let boatClass = options.boatClass { _ = try BotRaceHarness.bundledClass(boatClass) }
+        if let rules = options.rules { _ = try BotRaceHarness.bundledRules(rules) }
         let layouts = currents.flatMap { current in
             sizes.flatMap { size in
                 offsets.flatMap { offset in
@@ -203,7 +209,8 @@ public enum PackScenario {
             tiers.flatMap { tier in
                 layouts.map {
                     PackCell(seed: seed, layout: $0, tierMix: tier, above: options.packAbove ?? defaultAbove,
-                             autohelmOff: options.autohelmOff == true ? true : nil, boatClass: options.boatClass)
+                             autohelmOff: options.autohelmOff == true ? true : nil, boatClass: options.boatClass,
+                                 rules: options.rules)
                 }
             }
         }

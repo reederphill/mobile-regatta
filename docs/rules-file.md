@@ -1,4 +1,4 @@
-# Rules configuration file, schema versions 1 to 7
+# Rules configuration file, schema versions 1 to 8
 
 The rules configuration is an immutable, versioned data file (ADR 0004, #32, #73), loaded by
 `DataFile<RulesConfig>` (`RulesConfigFile`) through the same loader as boat classes and venues. It holds
@@ -34,6 +34,10 @@ changes; a change ships as `<id>@<version + 1>.json`.
 - `fleet-rules@7` (bundled, schema 7): version 6 plus `escape.penaltyLookBackSeconds`, 8 (#517): a boat that turns
   into a boat taking a penalty takes the call (rule 16.1) when the course she held before the turn would have stayed
   clear. The default (`RaceFiles.defaults`, `Race.defaultRulesConfiguration`) since #517.
+- `fleet-rules@8` (bundled, schema 8): version 7 with the opening in place of the start row (#477): two rows below
+  the line, starboard tack at 5.5 L and port at 8.5 L, reaching at 80° eased at 0.5 of the target before the gun, no
+  two boats closer than 3 L; the race area reaches at least 15 L below the line. Not the default yet: the bot suite
+  sails it with `--rules fleet-rules@8`.
 
 Schema 2 is schema 1 plus `raceFormat.startRow.minimumSpacingHullLengths`, the start row's spacing floor:
 required in schema 2, refused in schema 1. A schema-1 file has no floor (`RulesConfig.StartRow.minimumSpacing`
@@ -53,11 +57,17 @@ every file before schema 6, requires both, and means what it meant: 360° one wa
 Schema 7 is schema 6 plus `incidents.escape.penaltyLookBackSeconds`: required in schema 7, refused before it. A
 schema-1 to -6 file has none (`RulesConfig.Escape.penaltyLookBack` is nil): the 16.1 test of a rule 21.2 incident
 looks `horizonSeconds` back like any other, and the umpire records the ticks it did, which is what they did.
+Schema 8 is schema 7 with `raceFormat.opening` in place of `raceFormat.startRow`, plus
+`raceFormat.raceArea.belowLineMinimumHullLengths`: both required in schema 8, refused before it, and `startRow`
+refused in schema 8. A schema-1 to -7 file has no opening (`RulesConfig.RaceFormat.opening` is nil) and no least
+depth: its boats start in the row, an ease sails the class's fraction all race, and the race area reaches
+`belowLineLineLengths` below the line, which is what they did.
 The tables' `v1` column gives version 1's values; version 2's are the same, plus that floor, version
 3's the same again, plus `sequential` stacking and its looser penalty deadlines (marked v3), and version 4's
 the same again, plus the "changes course" rate (marked v4), and version 5's the same again, plus rule 17's
 limits (marked v5); version 6's the same again, with the `tackAndGybe` penalty turn (marked v6); version 7's the
-same again, plus rule 21.2's look-back (marked v7).
+same again, plus rule 21.2's look-back (marked v7); version 8's the same again, with the opening for the start
+row and the race area's least depth below the line (marked v8).
 
 ## Units
 
@@ -87,7 +97,7 @@ the ranges below.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `schemaVersion`, `id`, `version` | header | As for every data file. `schemaVersion` is 1 to 5. |
+| `schemaVersion`, `id`, `version` | header | As for every data file. `schemaVersion` is 1 to 8. |
 | `placeholders` | [JSON Pointer] | Optional. Values awaiting tuning; each must resolve. |
 | `builderValues` | [JSON Pointer] | Values the builder chose; each must resolve. |
 | `notes` | [string] | Optional free text; ignored by the loader. |
@@ -251,12 +261,19 @@ opposite tacks when both are on a beat (18.1(a)).
 | `offsetMark.toPortHullLengths` | L | 12 | The offset mark is this far to port of the windward mark, square to the axis. |
 | `raceArea.acrossAxisBeatFraction` | × beat | 0.75 | The race area reaches this far either side of the axis … |
 | `raceArea.belowLineLineLengths` | × line | 1 | … this far below the line … |
+| `raceArea.belowLineMinimumHullLengths` | L > 0; schema 8 | — (v8: 15) | From schema 8 the race area reaches below the line the greater of `belowLineLineLengths` line lengths and this (#477, Q7): 15 L is more than a line length for 11 boats and fewer, so it moves the puffs and the pressure (`WindField`). Absent before schema 8: line lengths only. |
 | `raceArea.aboveWindwardBeatFraction` | × beat | 0.25 | … and this far above the windward mark. |
-| `startRow.depthLineLengths` | × line | 0.5 | *Placeholder.* The start row is this far below the line (#35) … |
+| `startRow.depthLineLengths` | × line; schemas 1–7 | 0.5 | *Placeholder.* The start row is this far below the line (#35) … |
 | `startRow.spreadLineLengths` | × line | 1.5 | *Placeholder.* … spread over this width, centred on the line … |
 | `startRow.trueWindAngleDegrees` | degrees | 90 | … on starboard, reaching at this true wind angle … |
 | `startRow.polarSpeedFraction` | (0, 1] | 1 | *Placeholder.* … at this fraction of polar speed. |
 | `startRow.minimumSpacingHullLengths` | L > 0; schema 2 | — (v2: 1.25) | *Placeholder.* A row squeezed off land (#82) never brings neighbours closer than this, centre to centre: clear ahead and clear astern (#35) with a quarter of a hull between them (#85). Absent in schema 1: no floor. |
+| `opening.rowDepthsHullLengths` | [L, L], starboard's shallower; schema 8 | — (v8: [5.5, 8.5]) | *Placeholder.* The opening (#477), in place of the start row: starboard tack's row this far below the line, port's this far … |
+| `opening.spreadLineLengths` | × line > 0; schema 8 | — (v8: 1.5) | *Placeholder.* … spread over this width, centred on the line. Slots alternate the tacks along it in the seeded order (`CourseLayout.startRowOrder`; the odd boat on starboard), port's staggered half a slot towards the committee end … |
+| `opening.minimumSpacingHullLengths` | L > 0; schema 8 | — (v8: 3) | … no two closer than this, centre to centre, the jittered grid and #82's squeeze off land included (the floor wins) … |
+| `opening.jitterHullLengths` | L ≥ 0; schema 8 | — (v8: 0.5) | *Placeholder.* … each slot jittered on its own stream within the lesser of this and half what the grid's closest centres leave over the floor (0.27 L at 16 boats), so the floor holds by construction. |
+| `opening.trueWindAngleDegrees` | degrees, (0, 180]; schema 8 | — (v8: 80) | *Placeholder.* Starboard reaches towards the pin and port towards the committee end, this far off the axis. 80° is #477 Step 0's pass: hands-off, no boat over the line by 30 s from seating (skiff@9; skiff@6 but in gusty-offshore, where its autohelm, holding the wind angle, follows the shifts). |
+| `opening.easeSpeedFraction` | (0, 1]; schema 8 | — (v8: 0.5) | *Placeholder.* Every seat starts with the ease held, at this fraction of her off-the-plane target (`BoatDynamics.polarTarget`) in the base strength; before the gun an ease sails this fraction, the human's too, and from the gun the class's (`ease.speedFraction`). `RulesConfig.easeSpeedFraction(boatClass:beforeGun:)` is its one reader. Luffing head to wind still stops her. |
 | `edgeSpeedRetention` | [0, 1] | 0.3 | *Placeholder.* Fraction of her speed along the edge a boat keeps on meeting land or the boundary (#82). |
 | `beatSizing.leaderSeconds` | s > 0 | 480 | The beat is sized for a leader's race of about this long (#8) … |
 | `beatSizing.maxMetres` | m | 360 | … and at most this (#14) … |
@@ -298,3 +315,7 @@ sails it from #81; until then it sails `Course.standard`. From #85 the race plac
 row is squeezed towards the line only where it would put a boat within a hull length of the race area's
 boundary or its land, its neighbours never closer than `startRow.minimumSpacingHullLengths` (none with a
 schema-1 file).
+From #477, under a schema-8 file the race seats its boats with `opening` (`CourseLayout.openingSlots`): two rows,
+a seeded order, per-seat heading, tack and boom, every seat's ease held at the trim. Nothing in the core sheets a
+boat in by itself (`Autohelm` reads no ease): a seat that sends nothing keeps the trim until the gun, and from the
+gun an ease she still holds sails the class's fraction.

@@ -108,6 +108,30 @@ import Testing
         #expect(course.edgeSpeedRetention == Self.rules.raceFormat.edgeSpeedRetention)
     }
 
+    /// fleet-rules@8 (#477, Q7): the race area reaches below the line the greater of one line length and 15 L, so 15 L
+    /// for 11 boats and fewer and the line beyond; everything else as on @7, which still reaches one line length below
+    /// it at every fleet size. The opening replaces the start row.
+    @Test func raceAreaReachesFifteenHullLengthsBelowTheLineOnFleetRules8() throws {
+        let eight = try RulesConfigFile.bundled(id: "fleet-rules", version: 8).content
+        for fleet in RaceSetup.fleetSizes {
+            let seven = try Self.layout(fleetSize: fleet)
+            let course = try Self.layout(fleetSize: fleet, rules: eight)
+            let line = course.startLine.length
+            #expect(line == seven.startLine.length && course.beat == seven.beat && course.legs == seven.legs)
+            func below(_ course: CourseLayout) -> Double {
+                let area = course.raceArea
+                return area.halfLength - (area.centre - course.startLine.centre).dot(course.upwind)
+            }
+            #expect(abs(below(seven) - line) < 1e-9, "fleet \(fleet)")
+            #expect(abs(below(course) - max(line, 15 * Self.hull)) < 1e-9, "fleet \(fleet)")
+            #expect(below(course) > line || fleet >= 12, "fleet \(fleet): 15 L is more than the line at 11 boats and fewer")
+            let top = { (c: CourseLayout) in c.raceArea.halfLength + (c.raceArea.centre - c.startLine.centre).dot(c.upwind) }
+            #expect(abs(top(course) - top(seven)) < 1e-9 && course.raceArea.halfWidth == seven.raceArea.halfWidth)
+            #expect(course.opening == eight.raceFormat.opening && course.startRow == nil)
+            #expect(seven.opening == nil && seven.placement == Self.rules.raceFormat.startRow)
+        }
+    }
+
     // MARK: Determinism and beat sizing
 
     @Test func sameInputsGiveAnIdenticalCourse() throws {

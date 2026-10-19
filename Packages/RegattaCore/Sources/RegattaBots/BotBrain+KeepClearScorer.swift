@@ -318,7 +318,8 @@ extension BotBrain {
     /// heading over `keepClearSpeedSettle`; and the progress it makes along `axis`, metres. Her polar speeds are read
     /// no closer to the wind than `closest` (racing's 5° outside the no-go zone unless given: before the gun
     /// `startLuffFloor`, #542 Q8's `committedAvoidance`). With `ease` (#542 PR 2, the penalty way out's ease, dodge
-    /// only) she settles to the class's `ease.speedFraction` of that speed over its `ease.timeConstant`.
+    /// only) she settles to the ease's fraction of that speed (`SeatView.easeSpeedFraction`: the class's, or before the gun
+    /// the opening's trim, #477) over its `ease.timeConstant`.
     func herTrack(_ b: SeatView.OwnBoat, _ view: SeatView, heading target: Double, steps: Int,
                   axis: Vec2, closest: Double? = nil, ease: Bool = false) -> (track: [Vec2], progress: Double) {
         let dt = Self.keepClearPredictionStep
@@ -329,7 +330,7 @@ extension BotBrain {
         var settled = b.speed * (now > 1e-6 ? (then / now).clamped(to: 0.5...1.5) : 1)
         var settle = Self.keepClearSpeedSettle
         if ease {
-            settled *= view.boatClass.ease.speedFraction
+            settled *= view.easeSpeedFraction
             settle = view.boatClass.ease.timeConstant
         }
         var position = b.position, heading = b.heading, speed = b.speed

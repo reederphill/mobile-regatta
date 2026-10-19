@@ -72,6 +72,10 @@ public struct SeatView: Sendable, Equatable {
     /// The race's penalty turn (the rules file's `raceFormat.penalty.turn`, #487): a full circle, or one tack and one
     /// gybe. Public, as the rules are: the bots sail each its own way (#488).
     public let penaltyKind: RulesConfig.PenaltyTurn
+    /// The fraction of her target an ease sails on the step her input next sails (`RulesConfig.easeSpeedFraction`): the
+    /// opening's trim before the gun under a rules file with one (#477), the class's `ease.speedFraction` otherwise.
+    /// Public, as the rules are.
+    public let easeSpeedFraction: Double
 
     /// The tide forecast (ADR 0003, #78) over race ticks `window` for `points` and every wet node: what the
     /// briefing shows, worked out from the public `current`.
@@ -118,6 +122,7 @@ public struct SeatView: Sendable, Equatable {
                             polar: boatClass.polar, wind: race.heldGroundWind(at:))
         self.boatClass = boatClass
         penaltyKind = race.rules.raceFormat.penalty.turn
+        easeSpeedFraction = race.easeSpeedFraction(sailingTick: race.tick + 1)
     }
 
     /// This view with her own autohelm's reading as `reading`: for a class whose autohelm doesn't hold a centred rudder

@@ -27,7 +27,7 @@ public enum BotRaceHarness {
         WindSeed(seed &* 0x9E37_79B9_7F4A_7C15 &+ 1)
     }
 
-    /// `cell`'s setup: every seat a bot sailing the default class (`RaceFiles.defaults`: the skiff since #248,
+    /// `cell`'s setup, on the rules it names (`BotRaceCell.rules`, #477) or the default's: every seat a bot sailing the default class (`RaceFiles.defaults`: the skiff since #248,
     /// which the suite sails since #231; skiff@2 since #89, skiff@3 since #263, skiff@4 since #298, skiff@5 since its follow-up,
     /// skiff@6 since #377, skiff@7, the autohelm off, since #437, skiff@8, tacking by hand, since #461, skiff@9, falling off the plane, since #462), the venue and conditions named by their bundled files.
     /// With `cell.autohelmOff`, the class is the default's copy with the autohelm off a centred rudder (`handSteered`,
@@ -43,7 +43,8 @@ public enum BotRaceHarness {
             laps: cell.laps,
             boatClass: boatClass,
             venue: VenueFile.bundled(id: venue.id, version: venue.version).ref,
-            conditions: ConditionsFile.bundled(id: conditions.id, version: conditions.version).ref
+            conditions: ConditionsFile.bundled(id: conditions.id, version: conditions.version).ref,
+            rulesConfiguration: rulesFile(for: cell).ref
         )
     }
 
@@ -59,6 +60,21 @@ public enum BotRaceHarness {
     /// The class `cell` sails as bundled: the one it names (`BotRaceCell.boatClass`, #462), else the default.
     static func classFile(for cell: BotRaceCell) throws -> BoatClassFile {
         try cell.boatClass.map(bundledClass) ?? RaceFiles.defaults.boatClass
+    }
+
+    /// The rules `cell` sails as bundled: the ones it names (`BotRaceCell.rules`, #477), else the default.
+    static func rulesFile(for cell: BotRaceCell) throws -> RulesConfigFile {
+        try cell.rules.map(bundledRules) ?? RaceFiles.defaults.rulesConfiguration
+    }
+
+    /// The bundled rules named `id@version`.
+    static func bundledRules(_ name: String) throws -> RulesConfigFile {
+        let key = try dataFileKey(name)
+        do {
+            return try RulesConfigFile.bundled(id: key.id, version: key.version)
+        } catch {
+            throw BotSuiteError.matrix("no bundled rules \(name): \(error)")
+        }
     }
 
     /// The bundled class named `id@version`.
