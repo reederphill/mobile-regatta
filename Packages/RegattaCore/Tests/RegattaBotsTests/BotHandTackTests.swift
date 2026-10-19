@@ -27,11 +27,14 @@ import Testing
     /// third, the acceleration rolled on over the whole horizon again, under the polar's speed; and skiff@7 alone on
     /// #545, whose hand helm nudges through the dead band: skiff@6's autohelm holds her and passes every input; and
     /// skiff@7 alone on #541, whose avoidance before the gun luffs to hold against a port boat and never holds or turns
-    /// onto an early course: with that pre-gun change off it kept its digest).
+    /// onto an early course: with that pre-gun change off it kept its digest; and skiff@7 alone on #542, whose avoidance
+    /// before the gun costs an early course, commits to the way she turned and holds her own angle: skiff@6 kept its
+    /// digest; with `commitsAvoidance`, `costsEarlyAvoidance` and `holdsPreGunAvoidanceAngle` off skiff@7 kept its
+    /// digest too).
     @Test(.onFiveRules) func skiffSevenBotsAreBitIdentical() throws {
         let seven = try Self.digest(seed: 459, boatClass: BoatClassFile.bundled(id: "skiff", version: 7))
         let six = try Self.digest(seed: 459, boatClass: BoatClassFile.bundled(id: "skiff", version: 6))
-        #expect(hex64(seven) == "0x2a781e5e8cce474a")
+        #expect(hex64(seven) == "0xf5f9d3e1d8a4444e")
         #expect(hex64(six) == "0x5ec2a2c31f6556c4")
     }
 
@@ -71,11 +74,14 @@ import Testing
     /// - #541 (before the gun the avoidance luffs to hold against a port boat, as close as the start luff, and never
     ///   holds or turns onto a course over the line early at her own sheeting): both; with the pre-gun change off both
     ///   kept their digests. Racing is unchanged: the tracks part before the gun.
+    /// - #542 (the pre-gun avoidance's early course a cost, its commitment to the way she turned, its hold at her own
+    ///   angle): both; with `commitsAvoidance`, `costsEarlyAvoidance` and `holdsPreGunAvoidanceAngle` off both kept
+    ///   their digests. Racing is unchanged: the tracks part before the gun.
     @Test(.onSixRules) func skiffEightBotsAreBitIdentical() throws {
         let short = try Self.digest(seed: 459, boatClass: Self.skiffEight)
         let long = try Self.digest(seed: 462, boatClass: Self.skiffEight, seconds: 700)
-        #expect(hex64(short) == "0xbc47ca867c7f21bd")
-        #expect(hex64(long) == "0x672a0bb126b2f162")
+        #expect(hex64(short) == "0x4f00590d705debff")
+        #expect(hex64(long) == "0x664e87d796070e5d")
     }
 
     // MARK: - skiff@8: tacks and gybes by hand

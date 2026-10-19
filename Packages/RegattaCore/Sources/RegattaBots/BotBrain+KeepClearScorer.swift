@@ -315,12 +315,14 @@ extension BotBrain {
 
     /// Her own track steering for `heading` (#529's `reachable`): turning to it at `keepClearTurnRate`, losing
     /// `keepClearTurnSpeedLoss` of her speed each second she turns, and settling to the polar's speed for the new
-    /// heading over `keepClearSpeedSettle`; and the progress it makes along `axis`, metres.
+    /// heading over `keepClearSpeedSettle`; and the progress it makes along `axis`, metres. Her polar speeds are read
+    /// no closer to the wind than `closest` (racing's 5° outside the no-go zone unless given: before the gun
+    /// `startLuffFloor`, #542 Q8's `committedAvoidance`).
     func herTrack(_ b: SeatView.OwnBoat, _ view: SeatView, heading target: Double, steps: Int,
-                  axis: Vec2) -> (track: [Vec2], progress: Double) {
+                  axis: Vec2, closest: Double? = nil) -> (track: [Vec2], progress: Double) {
         let dt = Self.keepClearPredictionStep
         let polar = view.boatClass.polar
-        let floor = BoatDynamics.noGoAngle(polar) + deg2rad(5)
+        let floor = closest ?? BoatDynamics.noGoAngle(polar) + deg2rad(5)
         let now = polar.speed(twa: max(b.twa, floor), tws: b.polarWindSpeed)
         let then = polar.speed(twa: max(abs(wrapAngle(target - b.windDirection)), floor), tws: b.polarWindSpeed)
         let settled = b.speed * (now > 1e-6 ? (then / now).clamped(to: 0.5...1.5) : 1)

@@ -70,6 +70,10 @@ public struct BotDriver: Sendable {
     public private(set) var preGunAvoidTurnsUpOver10 = 0
     public private(set) var preGunPreferredLuffs: [Double] = []
     public private(set) var preGunLastAvoidTime: Double?
+    /// Before the gun, her avoidance's commitment (#542 Q8: her plan refused, she held or turned further away) and its
+    /// early headings taken for a boat that can't keep clear (#542 Q4). Report-only.
+    public private(set) var preGunAvoidCommitted = 0
+    public private(set) var preGunAvoidEarly = 0
 
     private(set) var brain: BotBrain
     /// Her own hand on the helm for a class whose autohelm doesn't hold a centred rudder (#434); idle otherwise.
@@ -195,6 +199,8 @@ public struct BotDriver: Sendable {
             }
         }
         if avoidance.earlyLuff { preGunEarlyLuffs += 1 }
+        if avoidance.committed { preGunAvoidCommitted += 1 }
+        if avoidance.early { preGunAvoidEarly += 1 }
         guard let turn = avoidance.turn else { return }
         preGunLastAvoidTime = view.time
         switch turn {
