@@ -69,20 +69,25 @@ public struct OvertakeCell: Hashable, Sendable {
     public var tierMix: TierMix
     public var autohelmOff: Bool?
     public var boatClass: String?
+    /// The bundled rules it sails, `id@version` (#477, `--rules`); nil for the default rules.
+    public var rules: String?
 
-    public init(seed: UInt64, layout: OvertakeLayout, tierMix: TierMix, autohelmOff: Bool? = nil, boatClass: String? = nil) {
+    public init(seed: UInt64, layout: OvertakeLayout, tierMix: TierMix, autohelmOff: Bool? = nil, boatClass: String? = nil,
+                rules: String? = nil) {
         self.seed = seed
         self.layout = layout
         self.tierMix = tierMix
         self.autohelmOff = autohelmOff
         self.boatClass = boatClass
+        self.rules = rules
     }
 
     /// The race the cell sails: one lap, the beat its first leg.
     var raceCell: BotRaceCell {
         BotRaceCell(seed: seed, venue: layout.venue, conditions: PackScenario.conditions, tideStateDegrees: 0,
                     fleetSize: layout.fleetSize, tierMix: tierMix, profileMix: .live, laps: 1,
-                    capSecondsAfterGun: BotMatrix.defaultCapSecondsAfterGun, autohelmOff: autohelmOff, boatClass: boatClass)
+                    capSecondsAfterGun: BotMatrix.defaultCapSecondsAfterGun, autohelmOff: autohelmOff, boatClass: boatClass,
+                    rules: rules)
     }
 }
 
@@ -252,12 +257,14 @@ public enum OvertakeScenario {
         let tiers = options.tierMixes.isEmpty ? [TierMix.national] : options.tierMixes
         let seeds = (1...(options.seedCount ?? defaultSeeds)).map(UInt64.init)
         if let boatClass = options.boatClass { _ = try BotRaceHarness.bundledClass(boatClass) }
+        if let rules = options.rules { _ = try BotRaceHarness.bundledRules(rules) }
         let layouts = layouts(options)
         return seeds.flatMap { seed in
             tiers.flatMap { tier in
                 layouts.map {
                     OvertakeCell(seed: seed, layout: $0, tierMix: tier, autohelmOff: options.autohelmOff == true ? true : nil,
-                                 boatClass: options.boatClass)
+                                 boatClass: options.boatClass,
+                                 rules: options.rules)
                 }
             }
         }

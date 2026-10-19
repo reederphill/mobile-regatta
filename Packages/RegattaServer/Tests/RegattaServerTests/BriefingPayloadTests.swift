@@ -37,6 +37,12 @@ import Testing
             #expect(briefing.yourSeat == index && briefing.isMe(index))
             #expect(briefing.briefingSeconds == 15)
             #expect(briefing.gunInSeconds == 75)
+            // #477 Step 0: the race's first tick is fleet lock. The race launched at lock opens at -(15 + 60) s, in the
+            // briefing, and the gun is 75 s on: what the opening's "safe through 15 s hands-off" reads from seating.
+            #expect(fleet.setup.startSequenceTicks == (15 + 60) * Race.tickRate)
+            #expect(Race(setup: fleet.setup, windSeed: WindSeed(1)).tick == -(15 + 60) * Race.tickRate)
+            #expect(RacePhase.at(tick: -fleet.setup.startSequenceTicks, firstTick: -fleet.setup.startSequenceTicks,
+                                 briefingTicks: QueueSettings().briefingTicks) == .briefing)
             // The fleet by seat: the humans by name rated 1500 (#151 later), the bots labelled and unrated, everyone in a
             // livery, sail numbers unique.
             #expect(briefing.fleet.count == 10)

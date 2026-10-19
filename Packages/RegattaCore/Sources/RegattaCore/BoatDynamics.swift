@@ -41,11 +41,15 @@ public enum BoatDynamics {
         public var ease: Bool
         /// False once the boat has left the course (finished, retired): the sail stops drawing.
         public var sailing: Bool
+        /// The fraction of her target an ease sails (`RulesConfig.easeSpeedFraction(boatClass:beforeGun:)`): nil for the
+        /// class's `ease.speedFraction`.
+        public var easeSpeedFraction: Double?
 
-        public init(rudder: Double, ease: Bool = false, sailing: Bool = true) {
+        public init(rudder: Double, ease: Bool = false, sailing: Bool = true, easeSpeedFraction: Double? = nil) {
             self.rudder = rudder
             self.ease = ease
             self.sailing = sailing
+            self.easeSpeedFraction = easeSpeedFraction
         }
     }
 
@@ -87,7 +91,7 @@ public enum BoatDynamics {
     /// - Speed approaches the polar target with the class's time constants: `speedingUp` when below it,
     ///   `slowingDown` above it, `noGo` inside the no-go zone (below the polar's first sailing row, where
     ///   the sail can't draw and the target is 0), and `ease.timeConstant` towards the eased target
-    ///   (`ease.speedFraction` of the polar's).
+    ///   (`ease.speedFraction` of the polar's, or `control.easeSpeedFraction`: the opening's trim before the gun, #477).
     /// - A class whose wind shadow is a speed loss (#220, #263) multiplies the target by `env.shadow`, and while
     ///   shadowed slows down to it at the shadow's own `WindShadow.slowingDown`.
     /// - Rudder drag takes `rudderDrag` of the speed per second at full rudder, and `|rudder|^rudderDragExponent` of
@@ -145,7 +149,7 @@ public enum BoatDynamics {
         if shadowSlowingDown != nil { target *= env.shadow }
         let timeConstant: Double
         if control.ease && control.sailing {
-            target *= boatClass.ease.speedFraction
+            target *= control.easeSpeedFraction ?? boatClass.ease.speedFraction
             timeConstant = target > s.speed ? boatClass.momentum.speedingUp : boatClass.ease.timeConstant
         } else if target > s.speed {
             timeConstant = boatClass.momentum.speedingUp

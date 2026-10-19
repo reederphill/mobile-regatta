@@ -217,19 +217,41 @@ public final class Race {
         // autohelm engages on the first step at the wind angle she has then, and holds the reach until
         // she steers (#219, ADR 0007); for a class whose autohelm doesn't hold a centred rudder (#434), she
         // holds her heading instead.
+        //
+        // Under a rules file with an opening (schema 8, #477) every boat is seated in her slot of its two rows instead:
+        // starboard reaching towards the pin, port towards the committee end (boom to starboard), at the opening's angle,
+        // and every seat's held input is an ease, so she sails the opening's trim of her target before the gun until she
+        // sends one of her own. Her speed is that trim of her off-the-plane target there (`BoatDynamics.polarTarget`,
+        // sheets in, kite down) in the base strength: what the dynamics then hold her to.
         let boatClass = files.boatClass.content
-        let row = course.startRow(fleetSize: setup.fleetSize, raceSeed: setup.raceSeed, hullLength: boatClass.hull.length)
-        let rowHeading = course.startRowHeading
-        let rowSpeed = course.placement.polarSpeedFraction
-            * boatClass.polar.speed(twa: course.placement.trueWindAngle, tws: windSetup.baseStrength)
-        let fleet = setup.seats.indices.map { seat in
-            Boat(id: seat, isPlayer: setup.seats[seat] == .human, colorIndex: seat, position: row[seat],
-                 heading: rowHeading, speed: rowSpeed, boomSide: .port)
+        let fleet: [Boat]
+        if let opening = course.opening {
+            let slots = course.opening(fleetSize: setup.fleetSize, raceSeed: setup.raceSeed, hullLength: boatClass.hull.length)
+            fleet = setup.seats.indices.map { seat in
+                let slot = slots[seat]
+                let boomSide: BoomSide = slot.tack == .starboard ? .port : .starboard
+                let relativeWind = slot.tack == .starboard ? opening.trueWindAngle : -opening.trueWindAngle
+                let speed = opening.easeSpeedFraction
+                    * BoatDynamics.polarTarget(relativeWind: relativeWind, boomSide: boomSide, tws: windSetup.baseStrength,
+                                               isPlaning: false, spinnaker: .down, boatClass: boatClass)
+                return Boat(id: seat, isPlayer: setup.seats[seat] == .human, colorIndex: seat, position: slot.position,
+                            heading: slot.heading, speed: speed, boomSide: boomSide)
+            }
+            heldInputs = Array(repeating: BoatInput(rudder: 0 as Int8, ease: true), count: fleet.count)
+        } else {
+            let row = course.startRow(fleetSize: setup.fleetSize, raceSeed: setup.raceSeed, hullLength: boatClass.hull.length)
+            let rowHeading = course.startRowHeading
+            let rowSpeed = course.placement.polarSpeedFraction
+                * boatClass.polar.speed(twa: course.placement.trueWindAngle, tws: windSetup.baseStrength)
+            fleet = setup.seats.indices.map { seat in
+                Boat(id: seat, isPlayer: setup.seats[seat] == .human, colorIndex: seat, position: row[seat],
+                     heading: rowHeading, speed: rowSpeed, boomSide: .port)
+            }
+            heldInputs = Array(repeating: .neutral, count: fleet.count)
         }
         boats = fleet
         overlaps = OverlapTracker(seats: fleet.count)
         wake = TurbulenceRibbons(shadow: boatClass.windShadow)
-        heldInputs = Array(repeating: .neutral, count: fleet.count)
         makeWindKeys()
         if windKeys != nil || (try? wind.requireKeys(atTick: tick)) != nil { refreshWind() }
     }
@@ -698,6 +720,13 @@ public final class Race {
         return zone
     }
 
+    /// The fraction of her target an ease sails on the step into `tick` (`RulesConfig.easeSpeedFraction`): the opening's
+    /// trim on a step before the gun under a rules file with one (#477), the class's otherwise. The gun fires at the start
+    /// of the step into tick 0, so that step sails the class's.
+    func easeSpeedFraction(sailingTick tick: Int) -> Double {
+        rules.easeSpeedFraction(boatClass: boatClass, beforeGun: tick < 0)
+    }
+
     private func integrate(_ i: Int, _ dt: Double) {
         var b = boats[i]
         // The polar reads the sailing wind (#14); shadow slows it and never turns it (#10), or, for a class whose
@@ -721,7 +750,8 @@ public final class Race {
         let moved = BoatDynamics.advance(
             BoatDynamics.State(position: b.position, heading: b.heading, speed: b.speed, rudder: b.rudder, boomSide: b.boomSide,
                                isPlaning: b.isPlaning, spinnaker: b.spinnaker),
-            control: BoatDynamics.Control(rudder: b.desiredRudder, ease: heldInputs[i].ease, sailing: !b.isGhost),
+            control: BoatDynamics.Control(rudder: b.desiredRudder, ease: heldInputs[i].ease, sailing: !b.isGhost,
+                                          easeSpeedFraction: easeSpeedFraction(sailingTick: tick)),
             env: BoatDynamics.Environment(windDirection: b.sailingWind.direction, windSpeed: tws, current: b.current,
                                           shadow: b.speedShadow(in: boatClass)),
             boatClass: boatClass, dt: dt)
@@ -960,7 +990,7 @@ public final class Race {
         let escape = rules.incidents.escape
         guard escape.changesCourse != nil else { return }
         umpire?.record(tick: tick, boats: boats, inputs: heldInputs, overlaps: overlaps.certainOverlaps,
-                        keeping: escape.recordedTicks)
+                        keeping: escape.recordedTicks, easeSpeedFraction: easeSpeedFraction(sailingTick: tick))
     }
 
     /// The escape simulation for seats `a` and `b` on the umpire's recorded track, with the pair's rule 17 record

@@ -246,6 +246,42 @@ import Testing
         }
     }
 
+    /// #477: `--rules id@version` sails every race on those bundled rules, as `--boat-class` does a class: the matrix and
+    /// its cells name them, a matrix file round-trips them, the setup and the scenarios' cells carry them, and without
+    /// the flag nothing names a rules file and the matrix encodes as before. Unbundled rules are refused.
+    @Test func rulesFlagSailsTheNamedRules() throws {
+        let options = try BotSuiteOptions(arguments: ["--rules", "fleet-rules@8", "--seeds", "1", "--fleet-size", "4"])
+        let matrix = try options.matrix()
+        #expect(matrix.rules == "fleet-rules@8" && matrix.cells.allSatisfy { $0.rules == "fleet-rules@8" })
+        let cell = try #require(matrix.cells.first)
+        #expect(try BotRaceHarness.raceSetup(for: cell).rulesConfiguration == RulesConfigFile.bundled(id: "fleet-rules", version: 8).ref)
+        let encoded = try JSONEncoder().encode(matrix)
+        #expect(String(decoding: encoded, as: UTF8.self).contains("\"rules\":\"fleet-rules@8\""))
+        #expect(try JSONDecoder().decode(BotMatrix.self, from: encoded) == matrix)
+
+        let plain = try BotSuiteOptions(arguments: ["--seeds", "1"]).matrix()
+        #expect(plain.rules == nil && plain.cells.allSatisfy { $0.rules == nil })
+        #expect(!String(decoding: try JSONEncoder().encode(plain), as: UTF8.self).contains("\"rules\""))
+        #expect(!String(decoding: try JSONEncoder().encode(try #require(plain.cells.first)), as: UTF8.self).contains("\"rules\""))
+        let plainCell = try #require(plain.cells.first)
+        #expect(try BotRaceHarness.raceSetup(for: plainCell).rulesConfiguration == RaceFiles.defaults.rulesConfiguration.ref)
+        // The default rules named explicitly sail the same setup as no flag.
+        var seven = plainCell
+        seven.rules = "fleet-rules@\(RaceFiles.defaults.rulesConfiguration.ref.version)"
+        #expect(try BotRaceHarness.raceSetup(for: seven) == BotRaceHarness.raceSetup(for: plainCell))
+
+        let overtake = try OvertakeScenario.cells(BotSuiteOptions(arguments: ["--scenario", "overtake", "--seeds", "1",
+                                                                             "--rules", "fleet-rules@8"]))
+        #expect(!overtake.isEmpty && overtake.allSatisfy { $0.rules == "fleet-rules@8" })
+        let pack = try PackScenario.cells(BotSuiteOptions(arguments: ["--scenario", "pack", "--seeds", "1", "--rules", "fleet-rules@8"]))
+        #expect(!pack.isEmpty && pack.allSatisfy { $0.rules == "fleet-rules@8" })
+
+        #expect(throws: BotSuiteError.self) { try BotSuiteOptions(arguments: ["--rules", "fleet-rules@99"]).matrix() }
+        #expect(throws: BotSuiteError.self) {
+            try OvertakeScenario.cells(BotSuiteOptions(arguments: ["--scenario", "overtake", "--rules", "fleet-rules@99"]))
+        }
+    }
+
     @Test func unknownArgumentIsAUsageError() throws {
         #expect(try botsuite(["--nope"]).status == 2)
     }

@@ -248,8 +248,8 @@ import Testing
         #expect(throws: needsSchema4) {
             try RulesConfigFile(data: Self.tampered(#""schemaVersion": 4"#, #""schemaVersion": 3"#, version: 4))
         }
-        #expect(throws: DataFileError.unsupportedSchemaVersion(kind: kind, found: 8, supported: [1, 2, 3, 4, 5, 6, 7])) {
-            try RulesConfigFile(data: Self.tampered(#""schemaVersion": 5"#, #""schemaVersion": 8"#))
+        #expect(throws: DataFileError.unsupportedSchemaVersion(kind: kind, found: 9, supported: [1, 2, 3, 4, 5, 6, 7, 8])) {
+            try RulesConfigFile(data: Self.tampered(#""schemaVersion": 5"#, #""schemaVersion": 9"#))
         }
     }
 
@@ -549,6 +549,101 @@ import Testing
         }
         #expect(throws: needsSchema7) {
             try RulesConfigFile(data: Self.tampered(#""schemaVersion": 7"#, #""schemaVersion": 6"#, version: 7))
+        }
+    }
+
+    /// fleet-rules@8 (schema 8, #477) is @7 with the opening in place of the start row and the race area's least depth
+    /// below the line, 15 L; every other value the same. Not the default. @1 to @7 still parse with no opening.
+    @Test func fleetRulesEightParsesTheOpening() throws {
+        let v7 = try RulesConfigFile.bundled(id: "fleet-rules", version: 7)
+        let v8 = try RulesConfigFile.bundled(id: "fleet-rules", version: 8)
+        #expect(v8.header.schemaVersion == 8)
+        #expect(v8.ref != RaceFiles.defaults.rulesConfiguration.ref)
+        let opening = try #require(v8.content.raceFormat.opening)
+        #expect(opening == .init(rowDepths: [HullLengths(5.5), HullLengths(8.5)], spreadLineLengths: 1.5,
+                                 trueWindAngle: deg2rad(80), easeSpeedFraction: 0.5, minimumSpacing: HullLengths(3),
+                                 jitter: HullLengths(0.5)))
+        #expect(v8.content.raceFormat.startRow == nil)
+        #expect(v8.content.raceFormat.raceArea.belowLineMinimum == HullLengths(15))
+        for version in 1...7 {
+            let format = try RulesConfigFile.bundled(id: "fleet-rules", version: version).content.raceFormat
+            #expect(format.opening == nil && format.startRow != nil && format.raceArea.belowLineMinimum == nil, "\(version)")
+        }
+        var format = v8.content.raceFormat
+        format.opening = nil
+        format.startRow = v7.content.raceFormat.startRow
+        format.raceArea.belowLineMinimum = nil
+        #expect(format == v7.content.raceFormat)
+        #expect(v8.content.incidents == v7.content.incidents && v8.content.zone == v7.content.zone)
+        #expect(v8.content.markRoomGiven == v7.content.markRoomGiven && v8.content.onABeat == v7.content.onABeat)
+        #expect(v8.content.builderValues == v7.content.builderValues)
+        // The race area's least depth: 1 line length or 15 L, the greater.
+        let area = v8.content.raceFormat.raceArea
+        #expect(area.belowLine(lineLength: 50, hullLength: 4.9) == 15 * 4.9)
+        #expect(area.belowLine(lineLength: 100, hullLength: 4.9) == 100)
+        #expect(v7.content.raceFormat.raceArea.belowLine(lineLength: 50, hullLength: 4.9) == 50)
+    }
+
+    /// The opening and the least depth are schema 8's: required there, where the start row is refused, and refused
+    /// before it, where the start row is required.
+    @Test func openingNeedsSchema8() throws {
+        let kind = RulesConfig.kind
+        let opening = #""opening": {"#
+        let minimum = #","# + "\n      " + #""belowLineMinimumHullLengths": 15"#
+        // Schema 8 without the least depth.
+        #expect(throws: DataFileError.malformed(kind: kind, reason: "schema 8 needs raceFormat.raceArea.belowLineMinimumHullLengths")) {
+            try RulesConfigFile(data: Self.tampered(minimum, "", version: 8))
+        }
+        // Schema 8 without the opening (and the placeholders pointing into it).
+        var text = try #require(String(data: try Self.bundledData(version: 8), encoding: .utf8))
+        let start = try #require(text.range(of: opening))
+        let end = try #require(text.range(of: "},\n", range: start.upperBound..<text.endIndex))
+        text.removeSubrange(start.lowerBound..<end.upperBound)
+        text = text.split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { !$0.contains("\"/raceFormat/opening/") }.joined(separator: "\n")
+        #expect(!text.contains("opening\""))
+        #expect(throws: DataFileError.malformed(kind: kind, reason: "schema 8 needs raceFormat.opening")) {
+            try RulesConfigFile(data: Data(text.utf8))
+        }
+        // Schema 8 with a start row too.
+        #expect(throws: DataFileError.invalidContent(
+            kind: kind, id: "fleet-rules", reason: "raceFormat.startRow is gone from schema 8: the opening replaces it")) {
+            try RulesConfigFile(data: Self.tampered(opening, #""startRow": { "depthLineLengths": 0.5, "spreadLineLengths": 1.5, "#
+                + #""trueWindAngleDegrees": 90, "polarSpeedFraction": 1, "minimumSpacingHullLengths": 1.25 },"# + "\n    " + opening,
+                version: 8))
+        }
+        // Bad values.
+        for (old, new, reason) in [
+            (#""easeSpeedFraction": 0.5"#, #""easeSpeedFraction": 0"#, "raceFormat.opening.easeSpeedFraction must be in (0, 1]"),
+            (#""easeSpeedFraction": 0.5"#, #""easeSpeedFraction": 1.1"#, "raceFormat.opening.easeSpeedFraction must be in (0, 1]"),
+            (#""rowDepthsHullLengths": [5.5, 8.5]"#, #""rowDepthsHullLengths": [8.5, 5.5]"#,
+             "raceFormat.opening.rowDepthsHullLengths must be two positive depths, starboard's shallower"),
+            (#""rowDepthsHullLengths": [5.5, 8.5]"#, #""rowDepthsHullLengths": [5.5]"#,
+             "raceFormat.opening.rowDepthsHullLengths must be two positive depths, starboard's shallower"),
+            (#""minimumSpacingHullLengths": 3"#, #""minimumSpacingHullLengths": 0"#,
+             "raceFormat.opening.minimumSpacingHullLengths must be positive"),
+            (#""jitterHullLengths": 0.5"#, #""jitterHullLengths": -0.5"#, "raceFormat.opening.jitterHullLengths must not be negative"),
+            (#""belowLineMinimumHullLengths": 15"#, #""belowLineMinimumHullLengths": 0"#,
+             "raceFormat.raceArea.belowLineMinimumHullLengths must be positive"),
+        ] {
+            #expect(throws: DataFileError.invalidContent(kind: kind, id: "fleet-rules", reason: reason)) {
+                try RulesConfigFile(data: Self.tampered(old, new, version: 8))
+            }
+        }
+        // Before schema 8: @8 claiming schema 7 (the start row is missing, the opening and the least depth refused), @7
+        // given either key.
+        #expect(throws: DataFileError.invalidContent(kind: kind, id: "fleet-rules", reason: "raceFormat.opening needs schema 8")) {
+            try RulesConfigFile(data: Self.tampered(#""schemaVersion": 8"#, #""schemaVersion": 7"#, version: 8))
+        }
+        #expect(throws: DataFileError.invalidContent(
+            kind: kind, id: "fleet-rules", reason: "raceFormat.raceArea.belowLineMinimumHullLengths needs schema 8")) {
+            try RulesConfigFile(data: Self.tampered(#""aboveWindwardBeatFraction": 0.25"#,
+                                                    #""aboveWindwardBeatFraction": 0.25, "belowLineMinimumHullLengths": 15"#, version: 7))
+        }
+        #expect(throws: DataFileError.invalidContent(kind: kind, id: "fleet-rules", reason: "raceFormat.opening needs schema 8")) {
+            try RulesConfigFile(data: Self.tampered(#""edgeSpeedRetention""#, #""opening": { "rowDepthsHullLengths": [5.5, 8.5], "#
+                + #""spreadLineLengths": 1.5, "trueWindAngleDegrees": 80, "easeSpeedFraction": 0.5, "#
+                + #""minimumSpacingHullLengths": 3, "jitterHullLengths": 0.5 }, "edgeSpeedRetention""#, version: 7))
         }
     }
 }

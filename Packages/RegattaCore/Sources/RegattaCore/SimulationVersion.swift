@@ -277,7 +277,16 @@ import Glibc
 ///    course she held before the turn would have stayed clear (rule 44.2's "well clear", Case 149), and the umpire
 ///    records 242 ticks of each boat for it in place of 62 (the track isn't hashed). Races sail fleet-rules@7 by
 ///    default (#517); a race naming fleet-rules@6 or older sails as on 40, bit for bit, and the golden digest is 40's.
-public let simulationRevision = 41
+/// 42: fleet-rules@8 (#477), on 41: rules schema 8 replaces `raceFormat.startRow` with `raceFormat.opening` and adds
+///    `raceFormat.raceArea.belowLineMinimumHullLengths` (absent: none). With an opening the fleet is seated in two rows
+///    below the line (`CourseLayout.openingSlots`: starboard tack shallower, port deeper, alternating in the seeded order,
+///    jittered on their own stream within the 3 L floor), reaching eased at the opening's angle, every seat's ease held;
+///    before the gun an ease sails the opening's `easeSpeedFraction` of her target (`RulesConfig.easeSpeedFraction`),
+///    the escape simulation's recorded track too, and from the gun the class's fraction. The race area reaches below the
+///    line the greater of its line lengths and that many hull lengths, which moves the puffs and the pressure. Races
+///    still sail fleet-rules@7 by default; a race naming fleet-rules@7 or older sails as on 41, bit for bit, and the
+///    golden digest is 41's.
+public let simulationRevision = 42
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are
