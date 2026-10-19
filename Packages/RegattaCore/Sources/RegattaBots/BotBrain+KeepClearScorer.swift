@@ -201,6 +201,16 @@ extension BotBrain {
         var latch: KeepClearLatch?
         /// The boat that tripped the trigger first, in seat order.
         var threat: Int?
+        /// Before her start (#542): how close to the wind `steer` may take her to `heading` (`startLuffFloor` before the
+        /// gun, Q6), and whether she eases to drop astern (#280's `dropsAstern`, where `startLuff` has her: G1). Racing,
+        /// nil and false.
+        var closest: Double? = nil
+        var dropsAstern = false
+        /// Report-only (#542's counters, `BotDriver`): the winner passes no boat clear (the furthest pass); it is early
+        /// (`earlyLineCost`); and her latched side chose it.
+        var furthest = false
+        var early = false
+        var latchHeld = false
     }
 
     /// Whether `seat` is a person's boat (`humanSeats`, set by `SeatControllers.drive`): a player could tell.
@@ -315,12 +325,14 @@ extension BotBrain {
 
     /// Her own track steering for `heading` (#529's `reachable`): turning to it at `keepClearTurnRate`, losing
     /// `keepClearTurnSpeedLoss` of her speed each second she turns, and settling to the polar's speed for the new
-    /// heading over `keepClearSpeedSettle`; and the progress it makes along `axis`, metres.
+    /// heading over `keepClearSpeedSettle`; and the progress it makes along `axis`, metres. Her polar speeds are read
+    /// no closer to the wind than `closest` (racing's 5° outside the no-go zone unless given: before the gun
+    /// `startLuffFloor`, #542 Q6).
     func herTrack(_ b: SeatView.OwnBoat, _ view: SeatView, heading target: Double, steps: Int,
-                  axis: Vec2) -> (track: [Vec2], progress: Double) {
+                  axis: Vec2, closest: Double? = nil) -> (track: [Vec2], progress: Double) {
         let dt = Self.keepClearPredictionStep
         let polar = view.boatClass.polar
-        let floor = BoatDynamics.noGoAngle(polar) + deg2rad(5)
+        let floor = closest ?? BoatDynamics.noGoAngle(polar) + deg2rad(5)
         let now = polar.speed(twa: max(b.twa, floor), tws: b.polarWindSpeed)
         let then = polar.speed(twa: max(abs(wrapAngle(target - b.windDirection)), floor), tws: b.polarWindSpeed)
         let settled = b.speed * (now > 1e-6 ? (then / now).clamped(to: 0.5...1.5) : 1)
@@ -344,10 +356,13 @@ extension BotBrain {
 
     /// The headings on her own tack she weighs keeping clear (#529's reachable headings): `desired`, her heading held,
     /// and where she can be pointing in `keepClearReachSeconds` either way at `keepClearTurnRate`, each kept to her
-    /// tack's sailable angles (out of the no-go zone, never by the lee) and none within a degree of another.
-    func keepClearHeadings(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double, extra: [Double] = []) -> [Double] {
+    /// tack's sailable angles (out of the no-go zone, never by the lee) and none within a degree of another. No closer
+    /// to the wind than `closest`: racing's 5° outside the no-go zone unless given (before the gun `startLuffFloor`, so
+    /// her hold, 3° outside it, is a candidate as it is: #542 Q6).
+    func keepClearHeadings(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double, extra: [Double] = [],
+                           closest: Double? = nil) -> [Double] {
         let side: Double = b.tack == .port ? 1 : -1
-        let closest = BoatDynamics.noGoAngle(view.boatClass.polar) + deg2rad(5)
+        let closest = closest ?? BoatDynamics.noGoAngle(view.boatClass.polar) + deg2rad(5)
         func onHerTack(_ heading: Double) -> Double {
             b.windDirection + side * (wrapAngle(heading - b.windDirection) * side).clamped(to: closest...Double.pi)
         }
@@ -397,13 +412,20 @@ extension BotBrain {
         var heading: Double?
         var cost: Double
         var margin: Double
+        /// Before the gun (#542 Q4): whether the course carries her over the line early (`crossesEarly`), costed
+        /// `earlyLineCost`.
+        var early = false
     }
 
     /// `scoreRacingKeepClear`, with every candidate's score (for tests).
+    /// `preStart` (#542): before her start, as `scorePreStartKeepClear` has her.
     func scoredRacingKeepClear(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double, lookahead: Double,
-                               tackable: Bool = false,
-                               overtakes: Bool = true) -> (decision: RacingKeepClear?, scores: [KeepClearScore]) {
-        let overtakes = overtakes && handTurn == nil && !isNearHerMark
+                               tackable: Bool = false, overtakes: Bool = true,
+                               preStart: Bool = false) -> (decision: RacingKeepClear?, scores: [KeepClearScore]) {
+        let overtakes = overtakes && !preStart && handTurn == nil && !isNearHerMark
+        // Before the gun (#542 Q4, Q6): her floor is her start luff's, and the line a cost.
+        let preGun = preStart && b.status == .prestart && view.time < 0
+        let floor = preGun ? Self.startLuffFloor(view) : nil
         let hull = view.boatClass.hull
         var threat: SeatView.OtherBoat?
         var horizon = lookahead
@@ -413,7 +435,24 @@ extension BotBrain {
         // The boats ahead she is closing on, in seat order: rolled out with the rest though beyond `keepClearRange`,
         // the flag's own range (`overtakeRangeLengths`) reaching further (a stopped boat at ~7.3 L).
         var flagged: [Int] = passing.map { [$0.seat] } ?? []
+        // Before her start, each site's trigger as today: on port or OCS `startKeepClear`'s, at no less than 1 m/s; on
+        // starboard `ruleKeepClear`'s (`isAboutToHit`), at her own speed: a slow starboard boat luffed or holding isn't
+        // given a keep-clear the old path never gave her (#542, seed 36 of `combativeBreaksOffHerLuffInTimeToStart`).
+        let triggerSpeed = b.tack == .port || b.status == .ocs ? max(b.speed, 1) : b.speed
         for other in view.others where !other.isGhost {
+            // Before her start: `startKeepClear`'s threats (#542 Q7), rule 13 finishing her tack first.
+            if preStart {
+                guard preStartOwes(other, b, view),
+                      Self.closestApproach(of: other, to: b, heading: desired, speed: triggerSpeed, lookahead: lookahead)
+                        < hull.length * keepClearLengths
+                else { continue }
+                if let right = other.rightOfWay, right.keepClear == view.seat, right.rule == .whileTacking,
+                   keepClearTack == nil {
+                    return (RacingKeepClear(heading: finishingTack(b, view)), [])
+                }
+                if threat == nil { threat = other }
+                continue
+            }
             if passing?.seat == other.seat {
                 horizon = max(horizon, overtakeFlag(other, b, view, desired: desired) ?? 0)
                 if threat == nil { threat = other }
@@ -452,20 +491,23 @@ extension BotBrain {
         horizon = min(max(horizon, dt), Self.scorerHorizon)
         let steps = Int((horizon / dt).rounded(.up))
         let upwind = abs(sailingAngle(b)) < .pi / 2
-        let axis = upwind ? Vec2.heading(b.windDirection) : Vec2.heading(desired)
+        // Before her start, progress along her plan's heading (#542 Q5): her aim already holds her timing.
+        let axis = upwind && !preStart ? Vec2.heading(b.windDirection) : Vec2.heading(desired)
         // Every boat near her, rolled on what it is doing and what it owes her, and how far off a course must pass it.
         let boats: [(track: [Vec2], tackTrack: [Vec2], out: Double, owed: Bool)] = view.others.compactMap { other in
             guard !other.isGhost,
                   (other.position - b.position).length < Self.keepClearRange || flagged.contains(other.seat)
             else { return nil }
-            let rule = keepClearRule(b, view, other)
+            let rule = preStart ? nil : keepClearRule(b, view, other)
             // A misjudged encounter leaves her give-way out (`judgeEncounters`), but never the boat ahead she is passing:
             // noticing a slower boat ahead is avoidance, whatever her skill (owner, #531 Q4: "never whether she looks").
             let isPassed = other.seat == passing?.seat
             if let rule, misjudges(other, rule), !isPassed { return nil }
+            if preStart, misjudgesBeforeStart(other, b, view) { return nil }
             let reaction = reaction(of: other, b, view)
             // The boat she is passing, she passes as she must keep clear of it, whatever their overlap gives her.
-            let owed = rule != nil || isPassed
+            // Before her start, the boats `startKeepClear` keeps clear of: every boat OCS (#542 Q7).
+            let owed = preStart ? preStartOwes(other, b, view) : rule != nil || isPassed
             let out: Double
             if case let .circle(radius) = reaction {
                 out = radius + length * Self.collisionLengths
@@ -500,24 +542,42 @@ extension BotBrain {
         if let passing, let latch = keepClearLatch, latch.lane == passing.seat { laneSide = latch.side }
         var lane: (side: Double, heading: Double)?
         if let passing { lane = self.lane(past: passing, b, view, desired: desired, side: laneSide) }
-        let extra: [Double] = lane.map { [$0.heading] } ?? []
+        var extra: [Double] = lane.map { [$0.heading] } ?? []
+        // Before the gun, her start luff's headings inside her hold angle, to its floor (`startLuff`, #542).
+        if preGun { extra += startLuffHeadings(b, view, desired: desired) }
         // Right of way unchanged (#101, #228): she gives way here, and a turn towards a boat that must keep clear of her
         // is left to `holdingCourse` as before, never a filter on her candidates: cutting a side whenever such a boat was
         // near took her escape from the boat she owes (racing fouls 312 → 466 per 8 seeds, live National).
-        let headings = keepClearHeadings(b, view, desired: desired, extra: extra)
+        let headings = keepClearHeadings(b, view, desired: desired, extra: extra, closest: floor)
         var scored: [Scored] = headings.map { (heading: Double) -> Scored in
-            let sailed = herTrack(b, view, heading: heading, steps: steps, axis: axis)
+            let sailed = herTrack(b, view, heading: heading, steps: steps, axis: axis, closest: floor)
             var s = score(sailed.track, progress: sailed.progress, tack: false)
             s.heading = heading
+            if preGun, crossesEarlyKeepingClear(b, view, heading: heading) {
+                s.early = true
+                s.cost += Self.earlyLineCost
+            }
             return s
         }
         if tackable, upwind {
             let track = tapTrack(b, view, seconds: horizon)
             let progress = ((track.last ?? b.position) - b.position).dot(axis)
-            scored.append(score(Array(track.prefix(steps)), progress: progress, tack: true))
+            var s = score(Array(track.prefix(steps)), progress: progress, tack: true)
+            let onTheOther: Double = b.tack == .port ? -1 : 1
+            if preGun, crossesEarlyKeepingClear(b, view, heading: b.windDirection
+                                                + onTheOther * Self.closeHauled(b.polarWindSpeed, view)) {
+                s.early = true
+                s.cost += Self.earlyLineCost
+            }
+            scored.append(s)
         }
         func pick(_ list: [Scored]) -> Scored? {
             list.filter { $0.margin >= 1 }.min { $0.cost < $1.cost }
+        }
+        // None clearing, the furthest pass that isn't early; an early one only if every course is (#542 Q4). Racing,
+        // no course is early.
+        func furthest(_ list: [Scored]) -> Scored? {
+            list.filter { !$0.early }.max(by: { $0.margin < $1.margin }) ?? list.max(by: { $0.margin < $1.margin })
         }
         // Committed to a side, she looks that way (and on her plan's heading) while a heading there clears.
         let committed = lane.map { KeepClearLatch(side: $0.side, lane: passing?.seat) } ?? keepClearLatch
@@ -528,15 +588,118 @@ extension BotBrain {
                 return abs(off) <= Self.clearingStep || off * latch.side > 0
             })
         }
-        guard let best = latched ?? pick(scored) ?? scored.max(by: { $0.margin < $1.margin }) else { return (nil, scored) }
-        guard let heading = best.heading else {
-            return (RacingKeepClear(heading: nil, tacks: true, threat: threat.seat), scored)
+        guard let best = latched ?? pick(scored) ?? furthest(scored) else { return (nil, scored) }
+        guard var heading = best.heading else {
+            return (RacingKeepClear(heading: nil, tacks: true, threat: threat.seat, furthest: best.margin < 1,
+                                    early: best.early), scored)
+        }
+        // A windward boat before her start with no course clearing the leeward one: #280's ease to drop astern, exactly
+        // where `startLuff` has her today (G1: no new ease), at its floor.
+        var dropsAstern = false
+        if preStart, best.margin < 1, let right = threat.rightOfWay, right.keepClear == view.seat,
+           right.rule == .windwardLeeward {
+            let luffed = startLuff(b, view, desired: desired, lookahead: lookahead)
+            if luffed.dropsAstern {
+                heading = luffed.heading
+                dropsAstern = true
+            }
         }
         let off = offDesired(b, heading: heading, desired: desired)
         let latch = lane.map { KeepClearLatch(side: $0.side, lane: passing?.seat) }
             ?? (abs(off) > Self.clearingStep ? KeepClearLatch(side: off > 0 ? 1 : -1) : keepClearLatch)
         let steered = abs(wrapAngle(heading - desired)) < deg2rad(1) ? nil : heading
-        return (RacingKeepClear(heading: steered, latch: latch, threat: threat.seat), scored)
+        return (RacingKeepClear(heading: steered, latch: latch, threat: threat.seat, closest: floor, dropsAstern: dropsAstern,
+                                furthest: best.margin < 1, early: best.early,
+                                latchHeld: latched != nil && keepClearLatch != nil), scored)
+    }
+
+    /// What the pre-start scorer decided at a decision (#542), report-only (`BotDriver`'s counters): her plan's heading
+    /// (or a committed tack under way), her heading held, a turn, or the tack; and whether the winner passes no boat
+    /// clear (the furthest pass), is early (`earlyLineCost`), and was chosen on her latched side.
+    struct PreStartScorerCall: Equatable, Sendable {
+        enum Kind: Equatable, Sendable { case plan, hold, turn, tack }
+        var kind: Kind
+        var furthest: Bool
+        var early: Bool
+        var latchHeld: Bool
+
+        init(_ decided: RacingKeepClear, _ b: SeatView.OwnBoat) {
+            kind = decided.tacks ? .tack
+                : decided.heading.map { abs(wrapAngle($0 - b.heading)) < deg2rad(1) ? .hold : .turn } ?? .plan
+            furthest = decided.furthest
+            early = decided.early
+            latchHeld = decided.latchHeld
+        }
+    }
+
+    /// Hull lengths of progress a course before the gun costs when it carries her over the line early (#542 Q4): more
+    /// than the spread between clearing courses at pre-start speeds, so a clear course that isn't early beats one that
+    /// is, and an early one that clears still beats one that doesn't ("a contact ranks worse than an early cross",
+    /// #541). Placeholder.
+    static let earlyLineCost = 10.0
+
+    /// Whether `heading`, kept clear on before the gun, carries her over the line early (#542 Q4): at the sheeting she
+    /// would sail it (`easesKeepingClear`), within `luffLineSeconds` for a luff inside her hold angle (`isStartLuff`),
+    /// else before the gun (`keepClear`'s line fallback and `startKeepClear`'s grid).
+    func crossesEarlyKeepingClear(_ b: SeatView.OwnBoat, _ view: SeatView, heading: Double) -> Bool {
+        crossesEarly(b, view, heading: heading, within: isStartLuff(b, view, heading) ? Self.luffLineSeconds : nil,
+                     ease: easesKeepingClear(b, view, heading: heading))
+    }
+
+    /// Her start luff's headings (`startLuff`, #280), as the pre-start scorer's extra candidates (#542): from her hold
+    /// angle, or her own or her plan's angle if closer to the wind, every `startLuffStep` to `startLuffFloor`.
+    func startLuffHeadings(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double) -> [Double] {
+        let side: Double = b.tack == .port ? 1 : -1
+        let floor = Self.startLuffFloor(view)
+        var angle = max(floor, min(Self.holdAngle(view), abs(wrapAngle(desired - b.windDirection)),
+                                   abs(wrapAngle(b.heading - b.windDirection))))
+        var headings: [Double] = []
+        while true {
+            headings.append(b.windDirection + side * angle)
+            guard angle > floor else { break }
+            angle = max(floor, angle - Self.startLuffStep)
+        }
+        return headings
+    }
+
+    /// The pre-start keep-clear on the shared scorer (#542): `scoredRacingKeepClear` before her start (prestart or OCS),
+    /// weighing `startKeepClear`'s threats (`preStartOwes`: OCS every boat, a boat under rule 21 close aboard, the
+    /// boats she must keep clear of and doesn't misjudge) on its trigger (her plan's heading at no less than 1 m/s); her
+    /// plan's heading the axis (Q5); her start luff's floor and headings before the gun (Q6); a course over the line
+    /// early costed `earlyLineCost`, not vetoed (Q4); no overtake lane (G2); #280's drop astern where `startLuff` has
+    /// it (G1). Rule 13 and the committed tack as racing.
+    func scorePreStartKeepClear(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double, lookahead: Double,
+                                tackable: Bool = false) -> RacingKeepClear? {
+        scoredRacingKeepClear(b, view, desired: desired, lookahead: lookahead, tackable: tackable, overtakes: false,
+                              preStart: true).decision
+    }
+
+    /// Whether before her start she keeps clear of `other` (`startKeepClear`'s threats, shared with the scorer, #542):
+    /// near her (`keepClearRange`), and OCS or the cautious bot every boat (rule 21.1, #104); else a boat under rule 21
+    /// within `penalisedBerthLengths` (#337 round 4), and a boat she must keep clear of whose encounter she doesn't
+    /// misjudge (#280).
+    func preStartOwes(_ other: SeatView.OtherBoat, _ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+        guard !other.isGhost, (other.position - b.position).length < Self.keepClearRange else { return false }
+        if b.status == .ocs || keepsClearOfEveryBoat { return true }
+        if let right = other.rightOfWay, right.keepClear == other.seat, right.rule.isRule21,
+           (other.position - b.position).length < view.boatClass.hull.length * Self.penalisedBerthLengths { return true }
+        guard let right = other.rightOfWay, right.keepClear == view.seat else { return false }
+        return !misjudges(other, right.rule)
+    }
+
+    /// Whether before her start she leaves `other` out of her keep-clear altogether (`startKeepClear`): she must keep
+    /// clear of it and misjudges the encounter (#280), not returning.
+    func misjudgesBeforeStart(_ other: SeatView.OtherBoat, _ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+        guard b.status != .ocs, !keepsClearOfEveryBoat, let right = other.rightOfWay, right.keepClear == view.seat
+        else { return false }
+        return misjudges(other, right.rule)
+    }
+
+    /// Whether she keeps clear before her start on the shared scorer (#542 Q7): prestart or OCS, a live bot that isn't
+    /// the cautious one (#104) nor the suite's hunter, with the test seam `scoresPreStartKeepClear` on. Racing is
+    /// `usesKeepClearScorer`'s, which also gates `tapIsClear`'s track test, so it isn't widened.
+    func usesPreStartScorer(_ b: SeatView.OwnBoat) -> Bool {
+        scoresPreStartKeepClear && (b.status == .prestart || b.status == .ocs) && caution == nil && !tactics.hunts
     }
 
     /// Whether the racing scorer (#531) keeps her clear: racing, a live bot that isn't the cautious one (#531 Q5) nor

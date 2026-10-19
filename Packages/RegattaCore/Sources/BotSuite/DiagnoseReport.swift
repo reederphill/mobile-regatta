@@ -33,6 +33,31 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
     /// Before the gun, the bots' avoidance of a boat not keeping clear (#541, report-only), by tier; nil in a report from
     /// before it.
     public var preGunAvoidance: [PreGunAvoidanceRow]?
+    /// Before her start, the bots' pre-start scorer decisions (#542, report-only), by tier; nil in a report from before it.
+    public var preStartScorer: [PreStartScorerRow]?
+
+    /// `tier`'s bot seats' pre-start scorer decisions (#542, `SeatMetrics.preStartScorerPlans` …): the seat-races with
+    /// any decision other than her plan's, the decisions of each kind, and the tails: the latest start and the OCS
+    /// within 6 s of a decision of a deciding seat; with the avoidance's commitment (#542 Q8) and early headings (Q4).
+    public struct PreStartScorerRow: Codable, Hashable, Sendable {
+        public var tier: String
+        public var seats: Int
+        public var decidingSeats: Int
+        public var plans: Int
+        public var holds: Int
+        public var turns: Int
+        public var tacks: Int
+        public var furthest: Int
+        public var early: Int
+        public var latchHeld: Int
+        public var avoidCommitted: Int
+        public var avoidEarly: Int
+        public var decidingOnTimeShare: Double
+        public var restOnTimeShare: Double
+        public var decidingOCS: Int
+        public var latestStartAfterDecision: Double?
+        public var ocsWithin6sOfDecision: Int
+    }
 
     /// `tier`'s bot seats' avoidance before the gun (#541, `SeatMetrics.preGunAvoidLuffs` …): the seat-races with any
     /// (a luff, a bear-away or a centred hold), the decisions of each kind a seat-race, and how the avoiding seats
@@ -441,6 +466,25 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
                 avoidingNeverStarted: avoiding.filter { $0.startSeconds == nil }.count,
                 ocsWithin6sOfAvoidance: avoiding.filter { $0.ocsCount > 0 && ($0.preGunLastAvoidSeconds ?? -.infinity) > -6 }.count)
         }
+        let scorerSeats = seats.filter { $0.preStartScorerPlans != nil }
+        preStartScorer = ([(Self.all, scorerSeats)] + sailed.map { tier in (tier.rawValue, scorerSeats.filter { $0.tier == tier }) }).map { name, seats in
+            func total(_ value: KeyPath<SeatMetrics, Int?>) -> Int { seats.reduce(0) { $0 + ($1[keyPath: value] ?? 0) } }
+            func decides(_ seat: SeatMetrics) -> Bool { seat.preStartScorerLastSeconds != nil }
+            let deciding = seats.filter(decides)
+            let rest = seats.filter { !decides($0) }
+            func onTime(_ of: [SeatMetrics]) -> Double {
+                share(of.filter { ($0.startSeconds ?? .infinity) <= LateCause.onTimeSeconds }.count, of: of.count)
+            }
+            return PreStartScorerRow(
+                tier: name, seats: seats.count, decidingSeats: deciding.count, plans: total(\.preStartScorerPlans),
+                holds: total(\.preStartScorerHolds), turns: total(\.preStartScorerTurns), tacks: total(\.preStartScorerTacks),
+                furthest: total(\.preStartScorerFurthest), early: total(\.preStartScorerEarly),
+                latchHeld: total(\.preStartScorerLatchHeld), avoidCommitted: total(\.preGunAvoidCommitted),
+                avoidEarly: total(\.preGunAvoidEarly), decidingOnTimeShare: onTime(deciding), restOnTimeShare: onTime(rest),
+                decidingOCS: deciding.filter { $0.ocsCount > 0 }.count,
+                latestStartAfterDecision: deciding.compactMap(\.startSeconds).max(),
+                ocsWithin6sOfDecision: deciding.filter { $0.ocsCount > 0 && ($0.preStartScorerLastSeconds ?? -.infinity) > -6 }.count)
+        }
         let wide = RoundingObservation.wideMetres
         roundings = boats.allSatisfy(\.roundings.isEmpty) ? [] : groups.flatMap { group in
             let seen = group.boats.flatMap(\.roundings)
@@ -551,6 +595,19 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
                      "\(text($0.avoidingMeanStartSeconds, 2)) / \(text($0.restMeanStartSeconds, 2))",
                      "\($0.avoidingOCS) / \($0.restOCS)", text($0.latestStartAfterAvoidance, 1), "\($0.avoidingNeverStarted)",
                      "\($0.ocsWithin6sOfAvoidance)"]
+                })
+        }
+        if let scorer = preStartScorer {
+            lines.append("pre-start scorer (#542): bot seat-races deciding (anything but her plan); decisions: plan, hold, "
+                + "turn, tack; the furthest passes, early courses and latched side's; the avoidance's commitment and its early "
+                + "headings; on time deciding / the rest, OCS deciding, the latest deciding start, OCS within 6 s of a decision")
+            lines += table([["tier", "seats", "deciding", "plan", "hold", "turn", "tack", "furthest", "early", "latched",
+                             "committed", "avoid early", "on time", "ocs", "latest", "ocs < 6 s"]]
+                + printed(scorer, \.tier).map {
+                    [$0.tier, "\($0.seats)", "\($0.decidingSeats)", "\($0.plans)", "\($0.holds)", "\($0.turns)", "\($0.tacks)",
+                     "\($0.furthest)", "\($0.early)", "\($0.latchHeld)", "\($0.avoidCommitted)", "\($0.avoidEarly)",
+                     "\(fixed($0.decidingOnTimeShare, 3)) / \(fixed($0.restOnTimeShare, 3))", "\($0.decidingOCS)",
+                     text($0.latestStartAfterDecision, 1), "\($0.ocsWithin6sOfDecision)"]
                 })
         }
         lines.append("non-finishers by cause: per 1000 boats (boats; median metres to go)")

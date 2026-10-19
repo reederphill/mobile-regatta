@@ -519,21 +519,13 @@ extension BotBrain {
         // OCS, she keeps clear of every boat as a returning one (rule 21.1), whatever rules 10–13 would give her
         // (`OtherBoat.rightOfWay` gives her own relations by those alone, `Race.rightsOfWay(of:)`): she is returning as soon as she heads back. The cautious bot keeps
         // clear of every boat before her start in any case (#104, `keepsClearOfEveryBoat`).
-        let returning = b.status == .ocs || keepsClearOfEveryBoat
         // Not returning, she leaves out a boat she misjudges her encounter with (#280, `judgeEncounters`).
-        let threats = view.others.filter { other in
-            guard !other.isGhost, (other.position - b.position).length < Self.keepClearRange else { return false }
-            if returning { return true }
-            // Rule 14 before her start: a boat under rule 21 close aboard keeps clear of her, but turning circles or
-            // running back in the crowd it can't promise to, so she gives it berth (#337 round 4). Holding on for it,
-            // as her view's right of way has it, pin-style bots working down the line from the committee end lost the
-            // pin third among the pre-start penalty turns (0.701 to 0.674 of `BotStartSuiteTests`). Racing she holds her
-            // course for it (`holdingCourse`), as round 3 has her.
-            if let right = other.rightOfWay, right.keepClear == other.seat, right.rule.isRule21,
-               (other.position - b.position).length < view.boatClass.hull.length * Self.penalisedBerthLengths { return true }
-            guard let right = other.rightOfWay, right.keepClear == view.seat else { return false }
-            return !misjudges(other, right.rule)
-        }
+        // Rule 14 before her start: a boat under rule 21 close aboard keeps clear of her, but turning circles or running
+        // back in the crowd it can't promise to, so she gives it berth (#337 round 4). Holding on for it, as her view's
+        // right of way has it, pin-style bots working down the line from the committee end lost the pin third among the
+        // pre-start penalty turns (0.701 to 0.674 of `BotStartSuiteTests`). Racing she holds her course for it
+        // (`holdingCourse`), as round 3 has her. The threats are the pre-start scorer's too (`preStartOwes`, #542).
+        let threats = view.others.filter { preStartOwes($0, b, view) }
         guard !threats.isEmpty else { return nil }
         let speed = max(b.speed, 1)
         func closest(_ heading: Double) -> Double {

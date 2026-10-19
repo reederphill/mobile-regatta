@@ -167,6 +167,16 @@ public enum BotRaceHarness {
                 metrics.preGunAvoidTurnsUpOver10 = driver.preGunAvoidTurnsUpOver10
                 metrics.preGunPreferredLuffDegrees = driver.preGunPreferredLuffs.map(rad2deg)
                 metrics.preGunLastAvoidSeconds = driver.preGunLastAvoidTime
+                metrics.preGunAvoidCommitted = driver.preGunAvoidCommitted
+                metrics.preGunAvoidEarly = driver.preGunAvoidEarly
+                metrics.preStartScorerPlans = driver.preStartScorerPlans
+                metrics.preStartScorerHolds = driver.preStartScorerHolds
+                metrics.preStartScorerTurns = driver.preStartScorerTurns
+                metrics.preStartScorerTacks = driver.preStartScorerTacks
+                metrics.preStartScorerFurthest = driver.preStartScorerFurthest
+                metrics.preStartScorerEarly = driver.preStartScorerEarly
+                metrics.preStartScorerLatchHeld = driver.preStartScorerLatchHeld
+                metrics.preStartScorerLastSeconds = driver.preStartScorerLastTime
                 if profiles[seat] == nil, !cautiousSeats.contains(seat) { metrics.engagement = driver.style.engagement }
                 metrics.handling = driver.handling
             }

@@ -255,3 +255,211 @@ extension BotConductTests {
         #expect(!far.pilot.brain.tapMeetsBoatNotKeepingClear(far.view.own, far.view))
     }
 }
+
+// MARK: - Pre-start keep-clear on the shared scorer (#542)
+
+extension BotConductTests {
+    /// #542: seat 0 a bot before her start, `below` hull lengths below the middle of the line `toGun` seconds before the
+    /// gun, on `own` at `angle` off the wind (her hold, 3° outside the no-go zone, unless given) at the water's upwind
+    /// speed; the other seats each `ahead` hull lengths up her course and `across` to starboard of it, on its tack's
+    /// beat at `share` of that speed (a share under 0.1 parks it, the autohelm off). `herWind`: her angle is off the
+    /// wind she sails in (`SeatView.OwnBoat.windDirection`), not the water's.
+    static func preStartScorerScene(_ others: [(ahead: Double, across: Double, tack: Tack, share: Double)],
+                                    own: Tack = .port, angle: Double? = nil, toGun: Int = 30, below: Double = 8,
+                                    seed: UInt64 = 3, herWind: Bool = false) throws -> Race {
+        var shift = 0.0
+        if herWind {
+            let race = try preStartScorerScene(others, own: own, angle: angle, toGun: toGun, below: below, seed: seed)
+            shift = wrapAngle(race.seatView(for: 0).own.windDirection - Water(seed: seed, toGun: toGun, below: below).wind)
+        }
+        let water = Water(seed: seed, toGun: toGun, below: below, seats: others.count + 1)
+        let hold = BoatDynamics.noGoAngle(water.race.boatClass.polar) + BotBrain.holdMargin
+        let course = water.heading(own, angle ?? hold) + shift
+        let forward = Vec2.heading(course)
+        var placements = [Placement(position: water.centre, heading: course, speed: water.up.speed, status: .prestart)]
+        for other in others {
+            placements.append(Placement(
+                position: water.centre + forward * water.length * other.ahead + forward.rightPerp * water.length * other.across,
+                heading: other.share < 0.1 ? water.heading(other.tack, deg2rad(30)) : water.beat(other.tack),
+                speed: water.up.speed * other.share, status: .prestart))
+        }
+        return try place(water, placements) { snapshot in
+            for (i, other) in others.enumerated() where other.share < 0.1 { snapshot.seats[i + 1].boat.autohelm = nil }
+        }
+    }
+
+    /// The pre-start scorer's decision and every candidate's score for seat 0 of `race`, on `desired` (her heading).
+    static func preStartScored(_ race: Race, _ brain: BotBrain, desired: Double? = nil, tackable: Bool = false)
+        -> (decision: BotBrain.RacingKeepClear?, scores: [BotBrain.KeepClearScore], view: SeatView) {
+        let view = race.seatView(for: 0)
+        let scored = brain.scoredRacingKeepClear(view.own, view, desired: desired ?? view.own.heading,
+                                                 lookahead: brain.keepClearLookahead, tackable: tackable, overtakes: false,
+                                                 preStart: true)
+        return (scored.decision, scored.scores, view)
+    }
+
+    /// The crossings the pre-start acceptance tests sweep: a port bot at her hold meeting a starboard boat.
+    static let preStartCrossings: [(ahead: Double, across: Double)] = stride(from: 1.5, through: 4.5, by: 0.5).flatMap { ahead in
+        stride(from: -1.0, through: 3.0, by: 0.5).map { (ahead, $0) }
+    }
+
+    /// #542 acceptance: before the gun, holding her course wins when it clears. A port bot holding just outside the
+    /// no-go zone (her hold, 3° out: under the racing floor of 5°, so the pre-start floor, `startLuffFloor`, keeps it a
+    /// candidate as it is, Q6), her plan's heading 15-30° down onto a starboard boat parked on it: wherever her heading
+    /// held clears it, no bear-away short of her plan's does, and it costs least of the clearing courses (#529: holding
+    /// is costed like every other, never ranked first), she holds it, steered (not nil, not her plan's).
+    @Test func preStartHoldingCourseWinsWhenItClears() throws {
+        var found = 0
+        for (distance, plan) in [3.0, 3.5, 4.0, 4.5, 5.0].flatMap({ d in [15.0, 20.0, 25.0, 30.0].map { (d, $0) } }) {
+            // A starboard boat parked `distance` lengths down her plan's heading, `plan` degrees below her hold.
+            let theta = deg2rad(plan)
+            let race = try Self.preStartScorerScene([(distance * cos(theta), distance * sin(theta), .starboard, 0.02)],
+                                                    toGun: 20, below: 20, herWind: true)
+            let brain = Self.scorerBrain(race)
+            let b = race.seatView(for: 0).own
+            let (ahead, across) = (distance, plan)
+            let desired = b.heading + theta
+            let (decision, scores, _) = Self.preStartScored(race, brain, desired: desired)
+            guard let decision else { continue }
+            let hold = try #require(scores.first { $0.heading.map { abs(wrapAngle($0 - b.heading)) < 1e-9 } == true },
+                                    "her hold is a candidate as it is: \(rad2deg(abs(wrapAngle(b.heading - b.windDirection))))°")
+            // Her plan's heading, and every bear-away short of it, runs onto the parked boat.
+            let between = scores.filter { s in
+                guard let h = s.heading else { return false }
+                let off = wrapAngle(h - b.heading) * (b.tack == .port ? 1 : -1)
+                return off > 1e-9 && off <= theta + 1e-9
+            }
+            let others = scores.filter { $0.heading != hold.heading && $0.margin >= 1 }
+            guard hold.margin >= 1, !hold.early, between.allSatisfy({ $0.margin < 1 }),
+                  others.allSatisfy({ $0.cost > hold.cost }) else { continue }
+            #expect(decision.heading.map { abs(wrapAngle($0 - b.heading)) < 1e-9 } == true,
+                    "distance \(ahead), plan \(across)°: \(decision)")
+            found += 1
+        }
+        #expect(found > 0, "no crossing held")
+    }
+
+    /// #542 acceptance: a committed side is kept while it clears (#529 Q5, `KeepClearLatch`). Wherever courses on both
+    /// sides of her plan's heading clear the starboard boat, latched to the side the free pick didn't take she sails a
+    /// clearing course on the latched side.
+    @Test func preStartCommittedSideIsKeptWhileItClears() throws {
+        var found = 0
+        for (ahead, across) in Self.preStartCrossings {
+            let race = try Self.preStartScorerScene([(ahead, across, .starboard, 0.02)], angle: deg2rad(60))
+            var brain = Self.scorerBrain(race)
+            let b = race.seatView(for: 0).own
+            let (free, scores, _) = Self.preStartScored(race, brain)
+            guard let free, let heading = free.heading else { continue }
+            let off = brain.offDesired(b, heading: heading, desired: b.heading)
+            guard abs(off) > BotBrain.clearingStep else { continue }
+            let other = -(off > 0 ? 1.0 : -1.0)
+            guard scores.contains(where: { s in
+                s.margin >= 1 && s.heading.map { brain.offDesired(b, heading: $0, desired: b.heading) * other > BotBrain.clearingStep } == true
+            }) else { continue }
+            brain.keepClearLatch = BotBrain.KeepClearLatch(side: other)
+            brain.keepClearLatchTack = b.tack
+            let latched = try #require(Self.preStartScored(race, brain).decision)
+            let kept = try #require(latched.heading, "ahead \(ahead), across \(across)")
+            #expect(brain.offDesired(b, heading: kept, desired: b.heading) * other > 0, "ahead \(ahead), across \(across)")
+            #expect(latched.latchHeld && !latched.furthest, "\(latched)")
+            found += 1
+        }
+        #expect(found > 0, "no crossing clears both ways")
+    }
+
+    /// #542 acceptance: before the gun, the tack wins on a thin margin, as racing (#531), on the pre-start axis (her
+    /// plan's heading, Q5: the tack makes little progress along it, so it wins only when the courses on her tack lose
+    /// it too). Of the crossings a port bot at tacking speed meets a starboard boat in where every heading on her tack
+    /// that clears does so on a thin margin and the tack she can tap clears wider: she tacks exactly when the tack costs
+    /// least; and in some the thin margin's cost is what makes the tack win.
+    @Test func preStartTheTackWinsOnAThinMargin() throws {
+        var decisive = 0, tapless = 0
+        for (angle, share) in [(45.0, 1.0), (45.0, 0.02), (70.0, 1.0), (70.0, 0.02)] {
+            for ahead in stride(from: 1.5, through: 5.0, by: 0.25) {
+                for across in stride(from: -1.0, through: 4.0, by: 0.25) {
+                    let race = try Self.preStartScorerScene([(ahead, across, .starboard, share)], angle: deg2rad(angle),
+                                                            toGun: 20, below: 20)
+                    let brain = Self.scorerBrain(race)
+                    let view = race.seatView(for: 0)
+                    guard brain.canTap(view.own, view, byHand: true) else { tapless += 1; continue }
+                    let (decision, scores, _) = Self.preStartScored(race, brain, tackable: true)
+                    guard let decision, let tack = scores.first(where: { $0.heading == nil }) else { continue }
+                    let clearing = scores.filter { $0.heading != nil && $0.margin >= 1 }
+                    guard tack.margin >= BotBrain.thinMargin, !tack.early, let best = clearing.min(by: { $0.cost < $1.cost }),
+                          clearing.allSatisfy({ $0.margin < BotBrain.thinMargin }) else { continue }
+                    #expect(decision.tacks == (tack.cost < best.cost), "\(angle)° share \(share) ahead \(ahead), across \(across): \(decision)")
+                    if decision.tacks, best.cost - BotBrain.thinMarginCost < tack.cost { decisive += 1 }
+                }
+            }
+        }
+        #expect(decisive > 0, "no crossing where the thin margin makes the tack win (\(tapless) she couldn't tap)")
+    }
+
+    /// #542 acceptance: a cluster of parked boats is decided by the tack's cost. A port bot at tacking speed (at a third
+    /// of polar `canTap` refuses: #529) meets two starboard boats parked ahead of her: wherever the tack clears and costs
+    /// least of the clearing courses, she tacks; and the tack is costed against them, never left out.
+    @Test func preStartAClusterOfParkedBoatsIsDecidedByTheTacksCost() throws {
+        var found = 0
+        for ahead in stride(from: 1.5, through: 4.0, by: 0.5) {
+            for across in stride(from: -1.5, through: 1.5, by: 0.5) {
+                let race = try Self.preStartScorerScene([(ahead, across, .starboard, 0.02), (ahead + 1.5, across + 1.5, .starboard, 0.02)],
+                                                        angle: deg2rad(45))
+                let brain = Self.scorerBrain(race)
+                let view = race.seatView(for: 0)
+                guard brain.canTap(view.own, view, byHand: true) else { continue }
+                let (decision, scores, _) = Self.preStartScored(race, brain, tackable: true)
+                guard let decision else { continue }
+                let tack = try #require(scores.first { $0.heading == nil }, "the tack is a candidate")
+                let cheapest = scores.filter { $0.margin >= 1 }.min { $0.cost < $1.cost }
+                guard let cheapest, cheapest.heading == nil, tack.margin >= 1 else { continue }
+                #expect(decision.tacks, "ahead \(ahead), across \(across): \(decision)")
+                found += 1
+            }
+        }
+        #expect(found > 0, "no cluster decided by the tack")
+    }
+
+    /// #542 acceptance (Q4): before the gun an early course that clears beats a contact. Close below the line near
+    /// the gun, wherever every course that clears a starboard boat is early, she takes a clearing early one, costed
+    /// `earlyLineCost`, over the furthest pass that doesn't clear; and a clearing course that isn't early always beats
+    /// an early one.
+    @Test func preStartAnEarlyCourseThatClearsBeatsAContact() throws {
+        var found = 0, ordered = 0
+        for toGun in [8, 12] {
+            for (ahead, across) in Self.preStartCrossings {
+                let race = try Self.preStartScorerScene([(ahead, across, .starboard, 0.8)], angle: deg2rad(70),
+                                                        toGun: toGun, below: 1.5)
+                let brain = Self.scorerBrain(race)
+                let (decision, scores, _) = Self.preStartScored(race, brain)
+                guard let decision else { continue }
+                let clearing = scores.filter { $0.margin >= 1 }
+                if clearing.contains(where: { !$0.early }) {
+                    #expect(!decision.early, "toGun \(toGun) ahead \(ahead), across \(across): \(decision)")
+                    ordered += 1
+                } else if !clearing.isEmpty {
+                    #expect(decision.early && !decision.furthest, "toGun \(toGun) ahead \(ahead), across \(across): \(decision)")
+                    found += 1
+                }
+            }
+        }
+        #expect(found > 0, "no crossing where only early courses clear")
+        #expect(ordered > 0)
+    }
+
+    /// #542 acceptance: before the gun, a person's port boat is never rolled giving way (#531's rule carries over): the
+    /// same boat sailed by a bot is.
+    @Test func preStartAPersonsPortBoatIsNotRolledGivingWay() throws {
+        let race = try Self.preStartScorerScene([(4, 2, .port, 1)], own: .starboard)
+        let view = race.seatView(for: 0)
+        let other = try #require(view.others.first)
+        #expect(view.own.status == .prestart && view.time < 0)
+        #expect(other.rightOfWay?.keepClear == 1)
+        var brain = Self.scorerBrain(race)
+        guard case .givesWay = brain.reaction(of: other, view.own, view) else {
+            Issue.record("a bot owing her gives way: \(brain.reaction(of: other, view.own, view))")
+            return
+        }
+        brain.humanSeats = [false, true]
+        #expect(brain.reaction(of: other, view.own, view) == .measured)
+    }
+}

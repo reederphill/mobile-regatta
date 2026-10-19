@@ -121,6 +121,22 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
     public var preGunAvoidTurnsUpOver10: Int? = nil
     public var preGunPreferredLuffDegrees: [Double]? = nil
     public var preGunLastAvoidSeconds: Double? = nil
+    /// Before the gun, her avoidance's commitment decisions and its early headings (#542 Q8, Q4,
+    /// `BotDriver.preGunAvoidCommitted`). Report-only; nil for a seat no bot sailed.
+    public var preGunAvoidCommitted: Int? = nil
+    public var preGunAvoidEarly: Int? = nil
+    /// Before her start, the pre-start scorer's decisions (#542, `BotDriver.preStartScorerPlans` …): her plan's heading,
+    /// her heading held, a turn, the tack; the furthest passes, early courses and her latched side's; and the seconds
+    /// to the gun of her last decision other than her plan's (negative before it). Report-only
+    /// (`DiagnoseSummary.preStartScorer`); nil for a seat no bot sailed, and the last with none.
+    public var preStartScorerPlans: Int? = nil
+    public var preStartScorerHolds: Int? = nil
+    public var preStartScorerTurns: Int? = nil
+    public var preStartScorerTacks: Int? = nil
+    public var preStartScorerFurthest: Int? = nil
+    public var preStartScorerEarly: Int? = nil
+    public var preStartScorerLatchHeld: Int? = nil
+    public var preStartScorerLastSeconds: Double? = nil
 
     public static let metricKeys = [
         "finished", "place", "ironsSeconds", "markContacts", "boatContacts", "contactsEndingInFouls",
@@ -145,6 +161,9 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         case preGunAvoidLuffs, preGunAvoidBearAways, preGunAvoidHolds, preGunAvoidFurthest, preGunHoldsRefusedEarly
         case preGunAvoidLargestTurnUpDegrees, preGunAvoidTurnsUpOver10, preGunPreferredLuffDegrees, preGunLastAvoidSeconds
         case preGunRefusedHoldsTurned, preGunHeldEarly, preGunLastHeldEarlySeconds, preGunEarlyLuffs
+        case preGunAvoidCommitted, preGunAvoidEarly
+        case preStartScorerPlans, preStartScorerHolds, preStartScorerTurns, preStartScorerTacks, preStartScorerFurthest
+        case preStartScorerEarly, preStartScorerLatchHeld, preStartScorerLastSeconds
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -212,6 +231,16 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         try c.encodeIfPresent(preGunHeldEarly, forKey: .preGunHeldEarly)
         try c.encodeIfPresent(preGunLastHeldEarlySeconds, forKey: .preGunLastHeldEarlySeconds)
         try c.encodeIfPresent(preGunEarlyLuffs, forKey: .preGunEarlyLuffs)
+        try c.encodeIfPresent(preGunAvoidCommitted, forKey: .preGunAvoidCommitted)
+        try c.encodeIfPresent(preGunAvoidEarly, forKey: .preGunAvoidEarly)
+        try c.encodeIfPresent(preStartScorerPlans, forKey: .preStartScorerPlans)
+        try c.encodeIfPresent(preStartScorerHolds, forKey: .preStartScorerHolds)
+        try c.encodeIfPresent(preStartScorerTurns, forKey: .preStartScorerTurns)
+        try c.encodeIfPresent(preStartScorerTacks, forKey: .preStartScorerTacks)
+        try c.encodeIfPresent(preStartScorerFurthest, forKey: .preStartScorerFurthest)
+        try c.encodeIfPresent(preStartScorerEarly, forKey: .preStartScorerEarly)
+        try c.encodeIfPresent(preStartScorerLatchHeld, forKey: .preStartScorerLatchHeld)
+        try c.encodeIfPresent(preStartScorerLastSeconds, forKey: .preStartScorerLastSeconds)
     }
 
     static func name(_ status: BoatStatus) -> String {

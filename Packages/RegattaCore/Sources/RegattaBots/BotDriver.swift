@@ -70,6 +70,22 @@ public struct BotDriver: Sendable {
     public private(set) var preGunAvoidTurnsUpOver10 = 0
     public private(set) var preGunPreferredLuffs: [Double] = []
     public private(set) var preGunLastAvoidTime: Double?
+    /// Before the gun, her avoidance's commitment (#542 Q8: her plan refused, she held or turned further away) and its
+    /// early headings taken for a boat that can't keep clear (#542 Q4). Report-only.
+    public private(set) var preGunAvoidCommitted = 0
+    public private(set) var preGunAvoidEarly = 0
+    /// Before her start, the pre-start scorer's decisions (#542, `BotBrain.preStartScorerCall`), report-only: her plan's
+    /// heading, her heading held, a turn, the tack; of those, the furthest pass (none clearing), an early course
+    /// (`earlyLineCost`) and her latched side's; and the race time of her last decision other than her plan's
+    /// (negative before the gun), nil with none.
+    public private(set) var preStartScorerPlans = 0
+    public private(set) var preStartScorerHolds = 0
+    public private(set) var preStartScorerTurns = 0
+    public private(set) var preStartScorerTacks = 0
+    public private(set) var preStartScorerFurthest = 0
+    public private(set) var preStartScorerEarly = 0
+    public private(set) var preStartScorerLatchHeld = 0
+    public private(set) var preStartScorerLastTime: Double?
 
     private(set) var brain: BotBrain
     /// Her own hand on the helm for a class whose autohelm doesn't hold a centred rudder (#434); idle otherwise.
@@ -177,10 +193,25 @@ public struct BotDriver: Sendable {
         if decision.startLuff { startLuffDecisions += 1 }
         if decision.avoidsContact { avoidContactDecisions += 1 }
         if let avoidance = decision.avoidance, view.own.status == .prestart, view.time < 0 { notePreGun(avoidance, view) }
+        if let call = brain.preStartScorerCall { notePreStartScorer(call, view) }
         let next = race.tick + 1
         race.apply(decision.input, seat: seat, atTick: next)
         if let tap = decision.tap { race.tap(tap, seat: seat, atTick: next) }
         return decision
+    }
+
+    /// Counts a pre-start scorer decision (#542's report-only rows).
+    private mutating func notePreStartScorer(_ call: BotBrain.PreStartScorerCall, _ view: SeatView) {
+        switch call.kind {
+        case .plan: preStartScorerPlans += 1
+        case .hold: preStartScorerHolds += 1
+        case .turn: preStartScorerTurns += 1
+        case .tack: preStartScorerTacks += 1
+        }
+        if call.kind != .plan { preStartScorerLastTime = view.time }
+        if call.furthest { preStartScorerFurthest += 1 }
+        if call.early { preStartScorerEarly += 1 }
+        if call.latchHeld { preStartScorerLatchHeld += 1 }
     }
 
     /// Counts an avoidance before the gun (#541's report-only rows).
@@ -195,6 +226,8 @@ public struct BotDriver: Sendable {
             }
         }
         if avoidance.earlyLuff { preGunEarlyLuffs += 1 }
+        if avoidance.committed { preGunAvoidCommitted += 1 }
+        if avoidance.early { preGunAvoidEarly += 1 }
         guard let turn = avoidance.turn else { return }
         preGunLastAvoidTime = view.time
         switch turn {

@@ -242,6 +242,26 @@ struct BotBrain: Sendable {
     /// Whether she keeps clear racing on the shared scorer (`scoreRacingKeepClear`, #531). A test seam: always true in
     /// play; only tests that sail her without it, to show what it changes, set it false.
     var scoresKeepClear = true
+    /// Whether she keeps clear before her start on the shared scorer (`scorePreStartKeepClear`, #542). Off in play: #542's
+    /// gate parked it (in a pack nearly no candidate clears every boat, so it sails the furthest pass away from the line,
+    /// costing on time and OCS); only tests that sail her with it set it true.
+    var scoresPreStartKeepClear = false
+    /// What the pre-start scorer decided at this decision (#542), nil when it didn't run or had nothing to say:
+    /// report-only, the suite counts it (`BotDriver`). Written in `sail`.
+    var preStartScorerCall: PreStartScorerCall?
+    /// The boat she turned away from before the gun, and which way (#542 Q8, `avoidance`): her plan's heading is refused
+    /// while it turns her back onto that boat. Written in `sail`, cleared at any decision her avoidance doesn't make.
+    var avoidCommitment: AvoidCommitment?
+    /// Whether her pre-gun avoidance commits to the way she turned (`committedAvoidance`, #542 Q8). A test seam: always
+    /// true in play; only tests that sail her without it, to show what it changes, set it false.
+    var commitsAvoidance = true
+    /// Whether her pre-gun avoidance costs a course over the line early rather than ending the way at it (#542 Q4,
+    /// `avoidanceSearch`). A test seam: always true in play; only tests that sail her without it (#541's veto and its
+    /// least clearing luff), to show what it changes, set it false.
+    var costsEarlyAvoidance = true
+    /// Whether her pre-gun avoidance's centred hold is held at her own angle (#542, `holding`), not left to the
+    /// helm's snap to the groove. A test seam: always true in play; only tests that sail her without it set it false.
+    var holdsPreGunAvoidanceAngle = true
     /// Whether she holds her aim within her proper course while told she is restricted under rule 17
     /// (`properCourseLimited`, #346). A test seam: always true in play; only tests that compare her steering with the
     /// limit left out set it false.
@@ -331,6 +351,10 @@ struct BotBrain: Sendable {
         if keepClearLatchTack != boat.tack { keepClearLatch = nil }
         var scorerDecided = false
         defer { if !scorerDecided { keepClearLatch = nil } }
+        preStartScorerCall = nil
+        // Her pre-gun avoidance's commitment holds only through decisions her avoidance makes (#542 Q8).
+        var avoidanceDecided = false
+        defer { if !avoidanceDecided { avoidCommitment = nil } }
         let byHand = Self.turnsByHand(view)
         guard boat.isOnCourse else {
             handTurn = nil
@@ -373,14 +397,19 @@ struct BotBrain: Sendable {
         var desired = aim.tack == boat.tack ? aim.heading(wind: boat.windDirection) : boat.heading
         // Racing on the shared scorer (#531): its side latched, and a tack it chooses committed and sailed as the plan's.
         var scored: RacingKeepClear?? = nil
-        if usesKeepClearScorer(boat) {
+        // Before her start on the same scorer (#542), with the line a cost and no lane.
+        let preStartScored = usesPreStartScorer(boat)
+        if usesKeepClearScorer(boat) || preStartScored {
             // Over, or given up: no turn under way since the decision that chose it.
             if let committed = keepClearTack, view.time > committed.since, handTurn == nil, !senses.tacking {
                 keepClearTack = nil
             }
             let tackable = byHand && keepClearTack == nil && aim.tack == boat.tack && canTap(boat, view, byHand: true)
-            let decided = scoreRacingKeepClear(boat, view, desired: desired, lookahead: keepClearLookahead,
-                                               tackable: tackable, overtakes: aim.tack == boat.tack)
+            let decided = preStartScored
+                ? scorePreStartKeepClear(boat, view, desired: desired, lookahead: keepClearLookahead, tackable: tackable)
+                : scoreRacingKeepClear(boat, view, desired: desired, lookahead: keepClearLookahead,
+                                       tackable: tackable, overtakes: aim.tack == boat.tack)
+            if preStartScored, let decided { preStartScorerCall = PreStartScorerCall(decided, boat) }
             keepClearLatch = decided?.latch
             keepClearLatchTack = boat.tack
             scorerDecided = true
@@ -399,7 +428,11 @@ struct BotBrain: Sendable {
             let ease = aim.ease && aim.tack == boat.tack || evasion.dropsAstern
                 || easesKeepingClear(boat, view, heading: evasion.heading)
             let input = steer(boat, toHeading: evasion.heading, view, closest: evasion.closest)
-            return BotDecision(input: clearingQuarter(boat, view, input.eased(ease)))
+            var decision = BotDecision(input: clearingQuarter(boat, view, input.eased(ease)))
+            // Before the gun, a keep-clear heading she is on already is held at her own angle, never a centred rudder
+            // the helm snaps to the groove (#542, s10's lesson).
+            decision.holdsHerAngle = preStartScorerCall != nil && boat.status == .prestart && view.time < 0
+            return decision
         }
         if aim.tack == boat.tack { gybeWantedSince = nil }
         if aim.tack != boat.tack {
@@ -449,11 +482,13 @@ struct BotBrain: Sendable {
                 if byHand, !running, let reach = startReachAim(boat, view, groove: groove) { own = reach }
             }
             var decision = holding(boat, view, helm(boat, to: own, view), desired: own.heading(wind: boat.windDirection))
-            decision.holdsHerAngle = holdsHerAngle(own, boat, view)
+            decision.holdsHerAngle = decision.holdsHerAngle || holdsHerAngle(own, boat, view)
+            avoidanceDecided = commitAvoidance(decision, boat, view)
             return decision
         }
         var decision = holding(boat, view, helm(boat, to: aim, view).eased(aim.ease), desired: desired)
-        decision.holdsHerAngle = holdsHerAngle(aim, boat, view)
+        decision.holdsHerAngle = decision.holdsHerAngle || holdsHerAngle(aim, boat, view)
+        avoidanceDecided = commitAvoidance(decision, boat, view)
         return decision
     }
 
@@ -471,6 +506,10 @@ struct BotBrain: Sendable {
                 // own, the rudder centred, which overrides the plan's helm; only a turn away counts as an avoidance.
                 decision.avoidsContact = avoided.rudderValue != 0
                 decision.avoidance = avoiding
+                // Before the gun her centred hold is held at her own angle (#542, s10: the helm's snap to the groove
+                // turned a centred rudder towards the boat she held for).
+                decision.holdsHerAngle = holdsPreGunAvoidanceAngle && avoiding.turn == .hold && b.status == .prestart
+                    && view.time < 0
                 return decision
             }
             // #337: a combative live bot luffs a windward boat before her start (`startLuffing`).
@@ -486,6 +525,8 @@ struct BotBrain: Sendable {
             var decision = BotDecision(input: clearingQuarter(b, view, avoided))
             decision.avoidsContact = avoided.rudderValue != 0
             decision.avoidance = avoiding
+            decision.holdsHerAngle = holdsPreGunAvoidanceAngle && avoiding.turn == .hold && b.status == .prestart
+                && view.time < 0
             return decision
         }
         let (held, step) = hunting(b, view, input, desired: desired)
@@ -1681,9 +1722,15 @@ struct BotBrain: Sendable {
                            scored: RacingKeepClear?? = nil) -> Evasion? {
         let lookahead = keepClearLookahead
         // Racing, the shared scorer weighs every boat near her at once (#531), in place of the first boat's give-way.
-        if usesKeepClearScorer(b) {
-            let decided = scored ?? scoreRacingKeepClear(b, view, desired: desired, lookahead: lookahead)
-            return decided?.heading.map { Evasion(heading: $0) }
+        // Before her start, the same scorer with the line a cost (#542), `startKeepClear` and `startLuff` left to the
+        // cautious bot and the hunter.
+        if usesKeepClearScorer(b) || usesPreStartScorer(b) {
+            let decided = scored ?? (usesPreStartScorer(b)
+                ? scorePreStartKeepClear(b, view, desired: desired, lookahead: lookahead)
+                : scoreRacingKeepClear(b, view, desired: desired, lookahead: lookahead))
+            return decided.flatMap { kept in
+                kept.heading.map { Evasion(heading: $0, closest: kept.closest, dropsAstern: kept.dropsAstern) }
+            }
         }
         guard b.status == .prestart || b.status == .ocs else {
             return ruleKeepClear(b, view, desired: desired, lookahead: lookahead)
