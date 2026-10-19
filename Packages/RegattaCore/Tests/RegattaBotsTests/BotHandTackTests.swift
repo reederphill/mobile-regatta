@@ -77,11 +77,14 @@ import Testing
     /// - #542 (the pre-gun avoidance's early course a cost, its commitment to the way she turned, its hold at her own
     ///   angle): both; with `commitsAvoidance`, `costsEarlyAvoidance` and `holdsPreGunAvoidanceAngle` off both kept
     ///   their digests. Racing is unchanged: the tracks part before the gun.
+    /// - #542 PR 2 (the penalty way out on the shared scorer's prediction: turn-aware, boats rolled on what they are
+    ///   doing, holding, the hard bear-away and the dodge's ease among the candidates): the long; with
+    ///   `scoresPenaltyEscape` off it kept its digest. The short race holds no way out.
     @Test(.onSixRules) func skiffEightBotsAreBitIdentical() throws {
         let short = try Self.digest(seed: 459, boatClass: Self.skiffEight)
         let long = try Self.digest(seed: 462, boatClass: Self.skiffEight, seconds: 700)
         #expect(hex64(short) == "0x4f00590d705debff")
-        #expect(hex64(long) == "0x664e87d796070e5d")
+        #expect(hex64(long) == "0xbf5a0cf301a33d34")
     }
 
     // MARK: - skiff@8: tacks and gybes by hand

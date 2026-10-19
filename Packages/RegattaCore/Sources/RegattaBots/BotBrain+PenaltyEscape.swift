@@ -6,7 +6,11 @@ import RegattaCore
 // turns, holds that way until her sweep is clear. What she commits to is the direction of the way out (`EscapeSide`, the
 // owner's ruling on round 2), not a heading: a heading near moving boats is one something is still closing on, so she
 // picks it again along that direction whenever it stops keeping her room. The heading she steers either time is one
-// function's (`penaltyEscapeHeading`), which #529's shared scorer replaces.
+// function's (`penaltyEscapeHeading`). #542 PR 2 puts it on #531's shared scorer's prediction (`scoredEscape`): her own
+// track turning to each heading (`herTrack`) against every boat rolled on what it is doing (`predictedTrack`), never
+// on one giving way to her (a boat owing a turn clears every boat round her, the owner's rule of 2026-10-15), with
+// holding, a hard bear-away and, dodging, easing to slow among the candidates. #528's order stands: a candidate that
+// clears loses only to one that also clears.
 
 extension BotBrain {
     /// A way out of a boat crossing her penalty turn's sweep she has chosen and holds until clear (#528): the heading
@@ -18,6 +22,15 @@ extension BotBrain {
         /// The heading she first chose away from the boats (#528 fix 3): she picks again round it, never round the
         /// heading she has come to, so a long hold cannot ratchet her round.
         var toward: Double
+        /// Whether she eases to slow on it (#542 PR 2, the dodge's ease; `EscapeCourse`).
+        var ease = false
+    }
+
+    /// A way out she may sail (`penaltyEscapeCourse`): the heading, and whether she eases to slow on it (#542 PR 2:
+    /// only the dodge, `penaltyDodge`, weighs easing; it is never a keep-clear candidate, owner #529).
+    struct EscapeCourse: Sendable, Equatable {
+        var heading: Double
+        var ease = false
     }
 
     /// The direction of a way out she has committed to (#528, the owner's ruling of 2026-10-15, "commit the direction,
@@ -52,10 +65,33 @@ extension BotBrain {
     /// (`penaltyEscapeEdgeWater`, #528 fix 5): of two ways out that clear her alike she takes the one away from the
     /// edge, before she holds (as a tie between the two sides alone, after holding, it never broke one: the sweep's
     /// seconds always differ). At a mark she waits: a tie goes to the least change of heading (she holds), then the
-    /// heading that leaves her furthest from the nearest boat. Non-mutating; #529's shared scorer replaces its body.
+    /// heading that leaves her furthest from the nearest boat. Non-mutating. On the shared scorer's prediction
+    /// (`scoresPenaltyEscape`, #542 PR 2) unless the seam is off: `penaltyEscapeCourse` without the ease.
     func penaltyEscapeHeading(_ b: SeatView.OwnBoat, _ view: SeatView, ways: [Double], angle: (Double) -> Double,
                               horizon: Double, side: EscapeSide? = nil, around: Double? = nil,
                               openWater: Bool = false) -> Double? {
+        penaltyEscapeCourse(b, view, ways: ways, angle: angle, horizon: horizon, side: side, around: around,
+                            openWater: openWater)?.heading
+    }
+
+    /// The way out she sails for her penalty turn (`penaltyEscapeHeading`), with `eases` (the dodge only) easing to
+    /// slow on each heading weighed besides. With the seam `scoresPenaltyEscape` off, #528's straight-line pick
+    /// (`straightEscapeHeading`), never easing.
+    func penaltyEscapeCourse(_ b: SeatView.OwnBoat, _ view: SeatView, ways: [Double], angle: (Double) -> Double,
+                             horizon: Double, side: EscapeSide? = nil, around: Double? = nil,
+                             openWater: Bool = false, eases: Bool = false) -> EscapeCourse? {
+        guard scoresPenaltyEscape else {
+            return straightEscapeHeading(b, view, ways: ways, angle: angle, horizon: horizon, side: side,
+                                         around: around, openWater: openWater).map { EscapeCourse(heading: $0) }
+        }
+        return scoredEscape(b, view, ways: ways, angle: angle, horizon: horizon, side: side, around: around,
+                            openWater: openWater, eases: eases)
+    }
+
+    /// #528's pick (`penaltyEscapeHeading`), every boat sailing on in a straight line (`penaltyEscapeRoom`) and her
+    /// heading's water reckoned at her speed: main's before #542 PR 2, kept behind `scoresPenaltyEscape`.
+    func straightEscapeHeading(_ b: SeatView.OwnBoat, _ view: SeatView, ways: [Double], angle: (Double) -> Double,
+                               horizon: Double, side: EscapeSide?, around: Double?, openWater: Bool) -> Double? {
         let tack = wrapAngle(b.windDirection - b.heading) >= 0
         let others = view.others.filter { !$0.isGhost }
         let nearest = others.min { ($0.position - b.position).length < ($1.position - b.position).length }
@@ -99,6 +135,134 @@ extension BotBrain {
         return best?.heading
     }
 
+    /// The boats her way out is weighed against (`scoredEscape`, `penaltyEscapeHolds`), rolled on the shared scorer's
+    /// prediction (#542 PR 2, #531's `predictedTrack`): every non-ghost boat that could come within `roomLengths` of
+    /// her inside `steps`, on what it is doing (its circle if taking a penalty; can't when not keeping clear of her;
+    /// else its measured motion), never giving way to her: a boat owing a turn clears every boat round her (the
+    /// owner's rule of 2026-10-15), so `.givesWay` is rolled as measured, the human-seat rule (`reaction`) unchanged.
+    /// `extra` is how much further off than `roomLengths` she must pass it: a circle's radius.
+    struct EscapeBoat {
+        var other: SeatView.OtherBoat
+        var track: [Vec2]
+        var extra: Double
+    }
+
+    func escapeBoats(_ b: SeatView.OwnBoat, _ view: SeatView, steps: Int) -> [EscapeBoat] {
+        let room = view.boatClass.hull.length * roomLengths
+        let seconds = Double(steps) * Self.keepClearPredictionStep
+        let reach = b.speed * 1.5 * seconds + room
+        return view.others.compactMap { other in
+            guard !other.isGhost,
+                  (other.position - b.position).length - other.speed * seconds < reach + room else { return nil }
+            var reaction = reaction(of: other, b, view)
+            if case .givesWay = reaction { reaction = .measured }
+            var extra = 0.0
+            if case let .circle(radius) = reaction { extra = radius }
+            return EscapeBoat(other: other, track: predictedTrack(of: other, reaction, view, steps: steps), extra: extra)
+        }
+    }
+
+    /// The closest any of `boats` comes to `track` (hers, a step apart from now), metres between centres less each
+    /// boat's `extra`, now included: the room she has now bounds it, as it does a straight line's. #528's tie in a
+    /// pack rests on every heading that closes on no boat leaving her the room she has, so a track that never comes
+    /// more than `escapeRoomTolerance` inside it leaves her that room: holding alongside a boat at her speed, rolling
+    /// the two forward drifts them a rounding error together, which #531's attempt lost the tie on (her heading held
+    /// a hair short, 5° off a hair long; `inAPackAtAMarkSheWaits` broke on 5 of 20 seeds).
+    static func escapeRoom(_ track: [Vec2], from position: Vec2, _ boats: [EscapeBoat]) -> Double {
+        var least = Double.infinity
+        for boat in boats {
+            let now = (boat.other.position - position).length
+            var closest = now
+            for i in 0..<min(track.count, boat.track.count) {
+                closest = min(closest, (boat.track[i] - track[i]).length)
+            }
+            if closest > now - escapeRoomTolerance { closest = now }
+            least = min(least, closest - boat.extra)
+        }
+        return least
+    }
+
+    /// Metres a track may come inside the room she has now and still leave her it (`escapeRoom`): a rounding error's
+    /// worth, far under anything a hull feels.
+    static let escapeRoomTolerance = 0.001
+
+    /// `penaltyEscapeHeading` on the shared scorer's prediction (#542 PR 2). Candidates, on her own tack's sailable
+    /// angles: every `clearingStep` within `penaltyEscapeSpread` of `around` (or her heading), her heading held, the
+    /// hard bear-away (`keepClearDeepest` off the wind), and with `eases` each of them eased to slow. Filters as #528's
+    /// (marks, edges, her committed side, before the gun not over the line early, her turn fitting where it puts her).
+    /// Each is sailed in her mind (`herTrack`, turning to it and settling to its speed, eased or not) against every
+    /// boat (`escapeBoats`) for her keep-clear lookahead or `horizon`, the longer. #528's lexicographic order stands
+    /// on that prediction: the room it keeps her (to `roomLengths`), then her sweep from where it puts her, the pack's
+    /// room in open water, the race area's edge; a candidate that clears loses only to one that also clears. An eased
+    /// one is weighed only if it clears. Then sheeted before eased (she keeps her speed where easing buys nothing), the least change of heading (at a mark
+    /// she waits), and the furthest from the nearest boat.
+    func scoredEscape(_ b: SeatView.OwnBoat, _ view: SeatView, ways: [Double], angle: (Double) -> Double,
+                      horizon: Double, side: EscapeSide?, around: Double?, openWater: Bool,
+                      eases: Bool) -> EscapeCourse? {
+        let tack = wrapAngle(b.windDirection - b.heading) >= 0
+        let sign: Double = tack ? 1 : -1
+        let dt = Self.keepClearPredictionStep
+        let lookahead = min(max(keepClearLookahead, horizon), Self.scorerHorizon)
+        let steps = max(1, Int((lookahead / dt).rounded(.up)))
+        let at = max(1, min(steps, Int((horizon / dt).rounded())))
+        let boats = escapeBoats(b, view, steps: steps)
+        let nearest = boats.min { ($0.other.position - b.position).length < ($1.other.position - b.position).length }
+        let room = view.boatClass.hull.length * roomLengths
+        let spread = Int((Self.penaltyEscapeSpread / Self.clearingStep).rounded())
+        let centre = around ?? b.heading
+        var headings: [Double] = []
+        func add(_ heading: Double) {
+            let heading = wrapAngle(heading)
+            if !headings.contains(where: { abs(wrapAngle($0 - heading)) < deg2rad(1) }) { headings.append(heading) }
+        }
+        for step in -spread...spread { add(centre + Double(step) * Self.clearingStep) }
+        add(b.heading)
+        add(b.windDirection - sign * Self.keepClearDeepest)
+        let closest = BoatDynamics.noGoAngle(view.boatClass.polar) + deg2rad(5)
+        typealias Key = (clear: Double, score: Double, after: Double, edge: Double)
+        var best: (course: EscapeCourse, key: Key, change: Double, apart: Double)?
+        for heading in headings {
+            let relative = wrapAngle(b.windDirection - heading)
+            guard (relative >= 0) == tack, abs(relative) >= closest, abs(relative) <= Self.keepClearDeepest + 1e-9,
+                  avoidMarks(b, view, desired: heading) == nil, avoidEdges(b, view, desired: heading) == nil,
+                  side?.allows(heading) ?? true,
+                  !crossesEarly(b, view, heading: heading) else { continue }
+            let change = (abs(wrapAngle(heading - b.heading)) / Self.clearingStep).rounded()
+            for ease in eases ? [false, true] : [false] {
+                let track = herTrack(b, view, heading: heading, steps: steps, axis: b.forward, ease: ease).track
+                let point = track[at - 1]
+                guard penaltyTurnFits(b, view, at: point) else { continue }
+                let there = (position: point, heading: heading, seconds: Double(at) * dt)
+                let clear = min(room, Self.escapeRoom(track, from: b.position, boats))
+                // Eased, only a course that clears: slowing short of room is waiting in the pack, the wait #528 and
+                // #534 removed (an eased hold's turn fits where a sheeted one's doesn't, and she sat in the pack).
+                if ease, clear < room { continue }
+                let score = clear < room ? 0 : ways.map {
+                    turnSweep(b, view, direction: $0, angle: angle($0), from: there)?.seconds ?? .infinity
+                }.max() ?? 0
+                func then(_ boat: EscapeBoat) -> Vec2 { boat.track[min(at, boat.track.count) - 1] }
+                let apart = nearest.map { (then($0) - point).length } ?? .infinity
+                let after = openWater && clear < room
+                    ? min(room, boats.map { (then($0) - point).length - $0.extra }.min() ?? .infinity)
+                    : 0
+                let edge = penaltyEscapeEdgeWater(view, at: point)
+                let key: Key = (clear, score, after, edge)
+                if let current = best {
+                    if key < current.key { continue }
+                    if key == current.key {
+                        if ease && !current.course.ease { continue }
+                        if ease == current.course.ease {
+                            if change > current.change { continue }
+                            if change == current.change, apart <= current.apart { continue }
+                        }
+                    }
+                }
+                best = (EscapeCourse(heading: heading, ease: ease), key, change, apart)
+            }
+        }
+        return best?.course
+    }
+
     /// The water `point` has to the race area's edge (#528 fix 5, the owner's ruling: "away from the pack" is toward
     /// where the boats aren't, at the line and the leeward gate the race area's edge), in whole hull lengths up to
     /// `penaltyEscapeEdgeLengths`: further in, every heading is alike. The start line before the gun is not weighed:
@@ -120,11 +284,24 @@ extension BotBrain {
     /// Whether `heading` is still one she may hold for her penalty turn (#528): no boat comes within `roomLengths` of
     /// her on it (`penaltyEscapeRoom`), it sails her into no mark or edge, and her turn still fits in the race area
     /// where it puts her after `horizon` (`penaltyTurnFits`).
-    func penaltyEscapeHolds(_ b: SeatView.OwnBoat, _ view: SeatView, heading: Double, horizon: Double) -> Bool {
-        penaltyEscapeRoom(b, view, heading: heading, horizon: horizon) >= view.boatClass.hull.length * roomLengths
-            && avoidMarks(b, view, desired: heading) == nil && avoidEdges(b, view, desired: heading) == nil
-            && !crossesEarly(b, view, heading: heading)
-            && penaltyTurnFits(b, view, at: b.position + Vec2.heading(heading) * (b.speed * horizon))
+    /// On the shared scorer's prediction (`scoresPenaltyEscape`, #542 PR 2) the room and where it puts her are
+    /// `scoredEscape`'s, eased if she eases on it.
+    func penaltyEscapeHolds(_ b: SeatView.OwnBoat, _ view: SeatView, heading: Double, horizon: Double,
+                            ease: Bool = false) -> Bool {
+        guard avoidMarks(b, view, desired: heading) == nil, avoidEdges(b, view, desired: heading) == nil,
+              !crossesEarly(b, view, heading: heading) else { return false }
+        let room = view.boatClass.hull.length * roomLengths
+        guard scoresPenaltyEscape else {
+            return penaltyEscapeRoom(b, view, heading: heading, horizon: horizon) >= room
+                && penaltyTurnFits(b, view, at: b.position + Vec2.heading(heading) * (b.speed * horizon))
+        }
+        let dt = Self.keepClearPredictionStep
+        let lookahead = min(max(keepClearLookahead, horizon), Self.scorerHorizon)
+        let steps = max(1, Int((lookahead / dt).rounded(.up)))
+        let at = max(1, min(steps, Int((horizon / dt).rounded())))
+        let track = herTrack(b, view, heading: heading, steps: steps, axis: b.forward, ease: ease).track
+        return Self.escapeRoom(track, from: b.position, escapeBoats(b, view, steps: steps)) >= room
+            && penaltyTurnFits(b, view, at: track[at - 1])
     }
 
     /// Whether her penalty turn, either way, fits in the race area from `point` (#528 fix 2): every point of a disc a

@@ -317,15 +317,21 @@ extension BotBrain {
     /// `keepClearTurnSpeedLoss` of her speed each second she turns, and settling to the polar's speed for the new
     /// heading over `keepClearSpeedSettle`; and the progress it makes along `axis`, metres. Her polar speeds are read
     /// no closer to the wind than `closest` (racing's 5° outside the no-go zone unless given: before the gun
-    /// `startLuffFloor`, #542 Q8's `committedAvoidance`).
+    /// `startLuffFloor`, #542 Q8's `committedAvoidance`). With `ease` (#542 PR 2, the penalty way out's ease, dodge
+    /// only) she settles to the class's `ease.speedFraction` of that speed over its `ease.timeConstant`.
     func herTrack(_ b: SeatView.OwnBoat, _ view: SeatView, heading target: Double, steps: Int,
-                  axis: Vec2, closest: Double? = nil) -> (track: [Vec2], progress: Double) {
+                  axis: Vec2, closest: Double? = nil, ease: Bool = false) -> (track: [Vec2], progress: Double) {
         let dt = Self.keepClearPredictionStep
         let polar = view.boatClass.polar
         let floor = closest ?? BoatDynamics.noGoAngle(polar) + deg2rad(5)
         let now = polar.speed(twa: max(b.twa, floor), tws: b.polarWindSpeed)
         let then = polar.speed(twa: max(abs(wrapAngle(target - b.windDirection)), floor), tws: b.polarWindSpeed)
-        let settled = b.speed * (now > 1e-6 ? (then / now).clamped(to: 0.5...1.5) : 1)
+        var settled = b.speed * (now > 1e-6 ? (then / now).clamped(to: 0.5...1.5) : 1)
+        var settle = Self.keepClearSpeedSettle
+        if ease {
+            settled *= view.boatClass.ease.speedFraction
+            settle = view.boatClass.ease.timeConstant
+        }
         var position = b.position, heading = b.heading, speed = b.speed
         var track: [Vec2] = []
         track.reserveCapacity(steps)
@@ -336,7 +342,7 @@ extension BotBrain {
                 heading += remaining > 0 ? turn : -turn
                 speed *= 1 - Self.keepClearTurnSpeedLoss * dt
             } else {
-                speed += (settled - speed) * min(dt / Self.keepClearSpeedSettle, 1)
+                speed += (settled - speed) * min(dt / settle, 1)
             }
             position = position + Vec2.heading(heading) * (speed * dt)
             track.append(position)
