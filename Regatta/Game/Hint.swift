@@ -64,19 +64,24 @@ enum HintLearning: Equatable, Sendable {
 struct HintText: Equatable, Sendable {
     var halves: String
     var tiller: String
+    /// The words while the opening's seated ease holds her (#477, `GameSession.isSeatedEasing`), either scheme; nil
+    /// keeps the scheme's.
+    var seatedEasing: String?
 
     init(_ both: String) {
         halves = both
         tiller = both
     }
 
-    init(halves: String, tiller: String) {
+    init(halves: String, tiller: String, seatedEasing: String? = nil) {
         self.halves = halves
         self.tiller = tiller
+        self.seatedEasing = seatedEasing
     }
 
-    func text(for steering: DeviceSettings.Steering) -> String {
-        switch steering {
+    func text(for steering: DeviceSettings.Steering, seatedEasing isSeated: Bool = false) -> String {
+        if isSeated, let seatedEasing { return seatedEasing }
+        return switch steering {
         case .halves: halves
         case .tiller: tiller
         }
@@ -116,7 +121,8 @@ enum HintCatalogue {
         Hint(id: .ruleCall, delivery: .presenter, text: HintText(RuleWords.defaultPenaltyLine), isPlaceholderCopy: true,
              learning: .never, trigger: { _, _ in nil }),
         Hint(id: .startSequence, delivery: .engine, text: HintText(halves: "Hold both sides to ease.",
-                                                                    tiller: "Pull down to ease."),
+                                                                    tiller: "Pull down to ease.",
+                                                                    seatedEasing: "Eased. Steer to sail."),
              isPlaceholderCopy: true, learning: .never, trigger: HintTriggers.startSequence),
         Hint(id: .noGo, delivery: .engine, text: HintText("Too close to the wind. Steer through it."),
              isPlaceholderCopy: true, learning: .tacked, trigger: HintTriggers.noGo),

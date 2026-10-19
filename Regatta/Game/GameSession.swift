@@ -63,9 +63,14 @@ final class GameSession {
     /// A race from the practice setup (#235): your finish goes into the practice history. A launch argument's or an
     /// online race doesn't.
     @ObservationIgnored var recordsPracticeHistory = false
-    /// Ease is on (#99, #112, #453): the gesture's (both halves held, or the tiller pulled down) or VoiceOver's.
-    /// The scene sends it with the rudder every frame.
-    var isEasing: Bool { isGestureEasing || isVoiceOverEasing }
+    /// Ease is on (#99, #112, #453): the gesture's (both halves held, or the tiller pulled down), VoiceOver's, or the
+    /// opening's seated ease. The scene sends it with the rudder every frame.
+    var isEasing: Bool { isSeatedEasing || isGestureEasing || isVoiceOverEasing }
+    /// The opening's ease (#477): a rules file with an opening seats every boat eased (`Race.heldInputs`), and the
+    /// scene's every-frame input would sheet her in on its first frame. So she stays eased from seating until her first
+    /// touch on the water or VoiceOver's Ease; a pause or Help keeps it, as they touch nothing. Off from the first frame
+    /// where the race seats her sheeted in (fleet-rules@7 and older), and in a render fixture.
+    private(set) var isSeatedEasing = false
     /// The steering gesture eases (#453): the scene sets it from its `SteeringInterpreter`.
     private(set) var isGestureEasing = false
     /// VoiceOver's Ease (`race-ease`, or the water's Ease action) is on.
@@ -224,6 +229,8 @@ final class GameSession {
         self.sound = RaceSound(output: sound)
         self.controls = controls
         let me = driver.myBoatIndex
+        let seated = driver.currentFrame.heldInputs
+        isSeatedEasing = !driver.isFrozen && seated.indices.contains(me) && seated[me].ease
         presenter = RaceEventPresenter(me: me, seen: rulesSeen, penaltyTurn: driver.currentFrame.penalty?.turn ?? .fullCircle) {
             rosterSource.current().label(of: $0, playerSeat: me)
         }
@@ -268,7 +275,19 @@ final class GameSession {
     /// VoiceOver's Ease (#112): an accessibility action can't hold, so the first activation holds Ease and the
     /// second lets it go.
     func toggleEase() {
+        // While seated eased, Ease shows on: the first activation lets it go.
+        if isSeatedEasing {
+            endSeatedEase()
+            return
+        }
         setEase(!isVoiceOverEasing)
+    }
+
+    /// Her first touch sheets her in from the opening's seated ease (#477): from here Ease is the gesture's or
+    /// VoiceOver's alone.
+    func endSeatedEase() {
+        guard isSeatedEasing else { return }
+        updateEase { isSeatedEasing = false }
     }
 
     /// The steering gesture's ease (#453), from the scene as it changes: a light haptic tick on and off for the
@@ -406,7 +425,7 @@ final class GameSession {
         }
         guard let next else { return }
         let id = noticeSlot.nextID
-        post(.hint, next.hint.text.text(for: controls.steering), leader: next.leader, held: next.held)
+        post(.hint, next.hint.text.text(for: controls.steering, seatedEasing: isSeatedEasing), leader: next.leader, held: next.held)
         hints.posted(next.hint.id, noticeID: id, held: next.held)
     }
 
@@ -453,6 +472,7 @@ final class GameSession {
     private func finishForPlayer(showsAt: Date?) {
         if !playerDone {
             playerDone = true
+            isSeatedEasing = false
             isVoiceOverEasing = false
             isGestureEasing = false
             finishedAt = showsAt

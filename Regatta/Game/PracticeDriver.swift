@@ -32,6 +32,8 @@ final class PracticeDriver: RaceDriver {
     private var clock: TickClock
     /// The latest input you sent, applied at the next tick if it changed.
     private var latchedInput = BoatInput.neutral
+    /// What the race holds for your seat: neutral as it seats you, or eased under an opening (#477), so the scene's
+    /// first eased input there changes nothing.
     private var appliedInput = BoatInput.neutral
     private var queuedTaps: [BoatTap] = []
     private var events: [RaceEvent] = []
@@ -57,6 +59,8 @@ final class PracticeDriver: RaceDriver {
         venue = race.files.venue.content
         boatClass = race.boatClass
         clock = TickClock(timescale: timescale)
+        appliedInput = race.heldInputs[myBoatIndex]
+        latchedInput = appliedInput
         currentFrame = TickFrame(race: race, keepClearOf: myBoatIndex)
         previousFrame = currentFrame
     }
