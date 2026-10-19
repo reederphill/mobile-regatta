@@ -108,6 +108,14 @@ public enum HandTackTable {
     /// (`BotBrain.tackSeconds`): the turn, and the way it costs her won back.
     public static let startTackSeconds = 9.0
 
+    /// That share for the start plan's own tacks by hand before the gun on a rules file with an opening (#477 PR 2,
+    /// `BotBrain.waitsOnTheOpening`): the wait's tack and the run in's, never a penalty turn (`BotBrain.penaltyInput` turns those, #471),
+    /// `BotBrain.overEarlyAim`, an OCS boat or the cautious bot. #532's ruling, "don't hold eased", read as never below tacking
+    /// speed: the opening trims her ease to 0.5 of her target before the gun, and from a wait at that trim the tack
+    /// completes (#477 Step 0: the boom across within 5 s at 6–20 kn, never head to wind, 0.9 of close-hauled speed
+    /// within the full-speed tack's time and 5 s). The class's own measure: about 2 kn carries a tack (#461). Placeholder.
+    public static let startTackingSpeed = 0.45
+
     /// The least rudder of a gybe before her start, a share of full: a gentle gybe (`gybeFraction.good`) is 12 s and
     /// 30 m of water downwind of the line.
     public static let startGybeFraction = 0.7

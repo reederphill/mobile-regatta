@@ -176,10 +176,14 @@ extension BotBrain {
                      tolerance: Self.approachTolerance)
         // On starboard she keeps to her approach while she lands on the line, however far below her spot. On port,
         // she joins it once to the right of the line she holds along to it, or once time is short.
+        let opening = waitsOnTheOpening(view)
+        // On the opening (#477 Q5) her go reckons from no more than her sheeted-in speed at the go's angle.
+        let goSpeed = opening ? goStartSpeed(b, view, angle: go.angle) : nil
         let joins = b.tack == .starboard
             ? toSpot >= hold - Self.fetchMargin && landingRoom(b, view, hold: hold) > 0
             : toSpot >= hold + Self.joinMargin
-                || secondsToLine(b, view, angle: go.angle, ease: false, within: arrival) + Self.tackSeconds(view) >= arrival
+                || secondsToLine(b, view, angle: go.angle, ease: false, within: arrival, fromSpeed: goSpeed)
+                    + startTackSeconds(b, view) >= arrival
         // Over the line before the gun, she runs back below it as an OCS boat would, on her own tack. Over is any
         // point of her hull (`hullDepth`), as the race calls it: easing along the line with her bow up, her windward
         // bow quarter crosses it before her bow does (#388, seed 9 of `aBotTakingOverBeforeTheGunStarts`).
@@ -193,21 +197,123 @@ extension BotBrain {
         guard view.time < 0 else { return b.tack == .starboard ? go : lateStartAim(b, view) }
         // Further from the gun than she reckons, she's early by any reckoning.
         guard arrival < Self.timingHorizon else {
-            return wait(b, view, spot: spot, hold: hold, early: .infinity, arrival: arrival)
-                ?? toSetup(b, view, spot: spot, hold: hold, arrival: arrival)
+            return wait(b, view, spot: spot, hold: hold, early: .infinity, arrival: arrival).map { tackable($0, b, view) }
+                ?? lapTack(b, view) ?? toSetup(b, view, spot: spot, hold: hold, arrival: arrival)
         }
 
-        let run = secondsToLine(b, view, angle: go.angle, ease: false, within: arrival)
-            + (b.tack == .port ? Self.tackSeconds(view) : turnUpSeconds(b, view, to: go.angle))
+        let run = secondsToLine(b, view, angle: go.angle, ease: false, within: arrival, fromSpeed: goSpeed)
+            + (b.tack == .port ? startTackSeconds(b, view) : turnUpSeconds(b, view, to: go.angle))
         let needed = run + max(0, run - Self.clearRunSeconds) * Self.trafficAllowance
         let going = b.ease == false && b.tack == .starboard
         if needed >= arrival - (going ? Self.goHysteresis : 0) { return go }
-        let holdAim = Aim(angle: max(min(toSpot, toPin), hold), tack: .starboard, tolerance: Self.approachTolerance, ease: true)
+        // On the opening her hold is the tackable wait (`tackable`): no closer to the wind than she keeps her tacking speed.
+        let holdAngle = max(min(toSpot, toPin), opening ? max(hold, tackableWaitAngle(b, view)) : hold)
+        let holdAim = Aim(angle: holdAngle, tack: .starboard, tolerance: Self.approachTolerance, ease: true)
         let holding = secondsToLine(b, view, angle: holdAim.angle, ease: true, within: arrival)
             + turnUpSeconds(b, view, to: holdAim.angle)
-        if holding >= arrival { return holdAim }
-        return wait(b, view, spot: spot, hold: hold, early: arrival - holding, arrival: arrival)
-            ?? toSetup(b, view, spot: spot, hold: hold, arrival: arrival)
+        if holding >= arrival { return tackable(holdAim, b, view) }
+        return wait(b, view, spot: spot, hold: hold, early: arrival - holding, arrival: arrival).map { tackable($0, b, view) }
+            ?? lapTack(b, view) ?? toSetup(b, view, spot: spot, hold: hold, arrival: arrival)
+    }
+
+    // MARK: - The tackable wait (#477 PR 2)
+
+    /// Whether she waits on the opening (#477 PR 2): a rules file with one (schema 8), and not the cautious bot, who
+    /// waits as before. #532's ruling, "don't hold eased", read as never below tacking speed: her ease before the gun is
+    /// the opening's trim, and she waits where that trim keeps her tackable (`tackable`). On a file before schema 8
+    /// nothing reads this: her track is as it was.
+    func waitsOnTheOpening(_ view: SeatView) -> Bool { caution == nil && view.course.opening != nil }
+
+    /// The share over the start plan's tacking floor (`startTackingSpeed`) her speed keeps waiting: 5 %.
+    static let waitSpeedMargin = 0.05
+    /// The step of her search for the tackable wait's angle (`tackableWaitAngle`).
+    static let waitAngleStep = deg2rad(1)
+    /// Radians added to the tackable wait's angle (V3's lever, ±10°; 0 as built).
+    static let waitAngleOffset = 0.0
+    /// Whether, out of room to reach along the line with time to go round, she tacks onto port and reaches back (the
+    /// figure of eight, V2) rather than sail round to her setup point, a gybe.
+    static let figureOfEight = true
+
+    /// Her speed waiting must keep (`waitSpeedMargin` over `startTackingSpeed` of her close-hauled speed), m/s.
+    func waitSpeedFloor(_ b: SeatView.OwnBoat, _ view: SeatView) -> Double {
+        closeHauledSpeed(b, view) * Self.startTackingSpeed * (1 + Self.waitSpeedMargin)
+    }
+
+    /// The closest to the wind she waits on the opening, at the trim (`SeatView.easeSpeedFraction`) and off the plane, as
+    /// the dynamics sail an ease: the least sailing angle from her hold whose eased target keeps `waitSpeedFloor`, a
+    /// `waitAngleStep` at a time; no broader than the opening's own angle (`RulesConfig.Opening.trueWindAngle`), which
+    /// keeps it at every wind the class sails (#477 G1: 14 % over the 0.45 floor at the tightest).
+    func tackableWaitAngle(_ b: SeatView.OwnBoat, _ view: SeatView) -> Double {
+        let floor = waitSpeedFloor(b, view)
+        let top = view.course.opening?.trueWindAngle ?? .pi / 2
+        var angle = Self.holdAngle(view)
+        while angle < top, easedSpeed(b, view, angle: angle) < floor { angle += Self.waitAngleStep }
+        return min(angle, top) + Self.waitAngleOffset
+    }
+
+    /// The broadest she waits deeper on the opening (`wait`): from `deepWaitAngle` up, a `waitAngleStep` at a time, the first
+    /// sailing angle whose eased target at the trim keeps `waitSpeedFloor`; no closer to the wind than a beam reach.
+    func deepTackableAngle(_ b: SeatView.OwnBoat, _ view: SeatView) -> Double {
+        let floor = waitSpeedFloor(b, view)
+        var angle = Self.deepWaitAngle
+        while angle > .pi / 2, easedSpeed(b, view, angle: angle) < floor { angle -= Self.waitAngleStep }
+        return max(angle, .pi / 2)
+    }
+
+    /// Her eased target at sailing `angle`, at the trim, off the plane, kite down.
+    func easedSpeed(_ b: SeatView.OwnBoat, _ view: SeatView, angle: Double) -> Double {
+        BoatDynamics.polarTarget(relativeWind: angle, boomSide: .port, tws: b.polarWindSpeed, isPlaning: false, spinnaker: .down,
+                                 boatClass: view.boatClass) * b.speedShadow * view.easeSpeedFraction
+    }
+
+    /// An eased wait on the opening made tackable (#477 PR 2): no closer to the wind than `tackableWaitAngle`, and
+    /// sheeted in while her speed is under `waitSpeedFloor` (after a tack, a luff or in a lull), so she never waits
+    /// slower than she can tack from, unless sheeted in she would be over the line before the gun. Anything else, and
+    /// every aim off the opening, as it is.
+    func tackable(_ aim: Aim, _ b: SeatView.OwnBoat, _ view: SeatView) -> Aim {
+        guard aim.ease, waitsOnTheOpening(view) else { return aim }
+        var tackable = aim
+        tackable.angle = max(aim.angle, tackableWaitAngle(b, view))
+        if b.speed < waitSpeedFloor(b, view),
+           !crossesEarly(b, view, heading: tackable.heading(wind: b.windDirection), ease: false) {
+            tackable.ease = false
+        }
+        return tackable
+    }
+
+    /// The figure of eight (`figureOfEight`, V2): on starboard on the opening, out of room to reach (`wait` gave up),
+    /// she tacks onto port at her wait's angle and reaches back below the starboard boats, rather than gybe round.
+    func lapTack(_ b: SeatView.OwnBoat, _ view: SeatView) -> Aim? {
+        guard Self.figureOfEight, waitsOnTheOpening(view), b.tack == .starboard else { return nil }
+        return Aim(angle: tackableWaitAngle(b, view), tack: .port, tolerance: Self.approachTolerance)
+    }
+
+    /// The speed her go reckoning starts from on the opening (#477 Q5): her own, but no more than her sheeted-in target at
+    /// the go's `angle`: off a reach at speed she turns up and slows to it.
+    func goStartSpeed(_ b: SeatView.OwnBoat, _ view: SeatView, angle: Double) -> Double {
+        let target = BoatDynamics.polarTarget(relativeWind: angle, boomSide: .port, tws: b.polarWindSpeed, isPlaning: senses.planing,
+                                              spinnaker: .down, boatClass: view.boatClass) * b.speedShadow
+        return min(b.speed, target)
+    }
+
+    /// Seconds over `HandTackTable.startTackSeconds` a tack by hand takes her to 0.9 of close-hauled speed from the
+    /// opening's wait, eased at its trim, by true wind speed in knots (#477 Step 0, measured: from 14.3–14.7 s at 6 kn
+    /// to 11.3 s at 20 kn, against the full-speed tack's ~10 s).
+    static let waitTackExtra: [(knots: Double, seconds: Double)] = [(6, 4.7), (10, 4.0), (14, 3.3), (20, 3.0)]
+
+    /// Seconds her tack onto starboard for her run in takes (`tackSeconds`): on the opening, from her wait (eased, or
+    /// slower than she sails sheeted in), the measured extra (`waitTackExtra`) on top.
+    func startTackSeconds(_ b: SeatView.OwnBoat, _ view: SeatView) -> Double {
+        let base = Self.tackSeconds(view)
+        guard waitsOnTheOpening(view), Self.turnsByHand(view), b.ease || b.speed < closeHauledSpeed(b, view) * 0.75 else {
+            return base
+        }
+        let knots = RegattaCore.knots(metresPerSecond: b.polarWindSpeed)
+        let table = Self.waitTackExtra
+        guard let upper = table.firstIndex(where: { $0.knots >= knots }) else { return base + table.last!.seconds }
+        guard upper > 0 else { return base + table[0].seconds }
+        let (lo, hi) = (table[upper - 1], table[upper])
+        return base + lo.seconds + (hi.seconds - lo.seconds) * (knots - lo.knots) / (hi.knots - lo.knots)
     }
 
     /// Hull lengths below the start line within which, late in the sequence, she is set up where she is
@@ -335,7 +441,9 @@ extension BotBrain {
         let rightOfHold = (b.position - spot).dot(Vec2.heading(b.windDirection - hold).rightPerp)
         if early > Self.deepWaitEarly, rightOfHold > Self.deepWaitMargin, rightOfHold < Self.farFromApproach,
            maxHoldDepth(view, at: b.position) > -line.side(b.position) {
-            return Aim(angle: Self.deepWaitAngle, tack: .starboard, tolerance: Self.approachTolerance, ease: true)
+            // On the opening she waits deeper on the broadest reach that keeps her tacking speed (`deepTackableAngle`).
+            let angle = waitsOnTheOpening(view) ? deepTackableAngle(b, view) : Self.deepWaitAngle
+            return Aim(angle: angle, tack: .starboard, tolerance: Self.approachTolerance, ease: true)
         }
         let slide = wrapAngle(b.windDirection - (line.pin.position - line.committee.position).bearing) + Self.waitOffLine
         if arrival > Self.repositionSeconds, b.tack == .starboard {
@@ -376,8 +484,10 @@ extension BotBrain {
         let boatClass = view.boatClass
         let length = boatClass.hull.length
         let course = Vec2.heading(b.windDirection - hold - Self.joinMargin - Self.setupMargin)
-        let holdCourse = Vec2.heading(b.windDirection - hold)
-        let eased = BoatDynamics.polarTarget(relativeWind: hold, boomSide: .port, tws: b.polarWindSpeed, isPlaning: false,
+        // On the opening her eased hold is the tackable wait (`tackableWaitAngle`), at the trim.
+        let waitAngle = waitsOnTheOpening(view) ? max(hold, tackableWaitAngle(b, view)) : hold
+        let holdCourse = Vec2.heading(b.windDirection - waitAngle)
+        let eased = BoatDynamics.polarTarget(relativeWind: waitAngle, boomSide: .port, tws: b.polarWindSpeed, isPlaning: false,
                                              spinnaker: .down, boatClass: boatClass) * b.speedShadow * view.easeSpeedFraction
         let scheduled = eased * max(holdCourse.dot(c.upwind), 0.3) * max(0, arrival - Self.setupSeconds)
         let deepest = max(maxHoldDepth(view, at: spot), length * 2)
@@ -386,8 +496,9 @@ extension BotBrain {
     }
 
     /// Seconds until her hull reaches the start line sailing `angle` on starboard (`secondsToLine(_:_:heading:ease:within:)`).
-    func secondsToLine(_ b: SeatView.OwnBoat, _ view: SeatView, angle: Double, ease: Bool, within: Double) -> Double {
-        secondsToLine(b, view, heading: b.windDirection - angle, ease: ease, within: within)
+    func secondsToLine(_ b: SeatView.OwnBoat, _ view: SeatView, angle: Double, ease: Bool, within: Double,
+                       fromSpeed: Double? = nil) -> Double {
+        secondsToLine(b, view, heading: b.windDirection - angle, ease: ease, within: within, fromSpeed: fromSpeed)
     }
 
     /// Metres below the start line of the point of her hull furthest over it, her centre at `position` sailing `heading`:
@@ -405,7 +516,8 @@ extension BotBrain {
     /// now: reckoned from her class's polar and momentum, in the wind at her and the current carrying her, a
     /// `timingStep` at a time as the dynamics sail it (`BoatDynamics.advance`). Infinity if not within `within`
     /// seconds and a second more, or if her course never gets there.
-    func secondsToLine(_ b: SeatView.OwnBoat, _ view: SeatView, heading: Double, ease: Bool, within: Double) -> Double {
+    func secondsToLine(_ b: SeatView.OwnBoat, _ view: SeatView, heading: Double, ease: Bool, within: Double,
+                       fromSpeed: Double? = nil) -> Double {
         let boatClass = view.boatClass
         let line = view.course.startLine
         let course = Vec2.heading(heading)
@@ -421,7 +533,7 @@ extension BotBrain {
         if ease { target *= view.easeSpeedFraction }
         let slowing = ease ? boatClass.ease.timeConstant : boatClass.momentum.slowingDown
         let dt = Self.timingStep
-        var speed = b.speed
+        var speed = fromSpeed ?? b.speed
         var t = 0.0
         while t < min(within + 1, Self.timingHorizon) {
             speed += (target - speed) * min(1, dt / (target > speed ? boatClass.momentum.speedingUp : slowing))

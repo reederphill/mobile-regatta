@@ -192,8 +192,8 @@ extension BotBrain {
             var tacking = senses.tacking
             var worst = 0.0, marks = 0.0
             for step in 0..<steps {
-                state = BoatDynamics.advance(state, control: .init(rudder: rudder, ease: ease), env: env,
-                                             boatClass: view.boatClass, dt: Self.guardStep)
+                let control = BoatDynamics.Control(rudder: rudder, ease: ease, easeSpeedFraction: view.easeSpeedFraction)
+                state = BoatDynamics.advance(state, control: control, env: env, boatClass: view.boatClass, dt: Self.guardStep)
                 let twa = abs(wrapAngle(b.windDirection - state.heading))
                 // Owing a turn, any turn she sails counts towards it: 30° on, she keeps clear of every boat.
                 let ofAll = keepsClearOfAll

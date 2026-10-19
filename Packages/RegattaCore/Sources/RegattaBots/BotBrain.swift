@@ -431,7 +431,8 @@ struct BotBrain: Sendable {
         if aim.tack == boat.tack { gybeWantedSince = nil }
         if aim.tack != boat.tack {
             // "Set, then gybe" (#462): on the plane but slow, she builds speed for the gybe first.
-            if canTap(boat, view, byHand: byHand), !(byHand && buildsSpeedToGybe(boat, view)) {
+            let startPlan = boat.status == .prestart && view.time < 0 && waitsOnTheOpening(view)
+            if canTap(boat, view, byHand: byHand, startPlan: startPlan), !(byHand && buildsSpeedToGybe(boat, view)) {
                 lastTapTime = view.time
                 let play = lastFleetPlayTime == view.time ? lastFleetPlay : nil
                 if byHand {
@@ -1318,6 +1319,9 @@ struct BotBrain: Sendable {
     /// #464's sweep, variant S on top of the final approach: roundings 50 m or more over 96 to 78 in 80 races, mark
     /// touches 23 to 15.
     static let nearMarkTackingSpeed = 0.55
+    /// That share for the start plan's own tacks by hand before the gun on a rules file with an opening
+    /// (`HandTackTable.startTackingSpeed`, #477 PR 2).
+    static let startTackingSpeed = HandTackTable.startTackingSpeed
 
     /// Hull lengths a mark must be clear of her for a tap: the tack or gybe sails itself, hands off.
     static let tapMarkClearance = 2.0
@@ -1349,11 +1353,13 @@ struct BotBrain: Sendable {
     /// Whether she can tap now: a tap done, no mark close enough for the turn to swing her onto, and for a
     /// tack, the speed to carry her through it; for a gybe, room to leeward inside the race area. Racing, she also
     /// taps only clear of every boat (`tapIsClear`, #101). `byHand`: the turn asked about is one she steers herself,
-    /// which near her mark she tacks from less speed (`nearMarkTackingSpeed`).
-    func canTap(_ b: SeatView.OwnBoat, _ view: SeatView, byHand: Bool = false) -> Bool {
+    /// which near her mark she tacks from less speed (`nearMarkTackingSpeed`). `startPlan`: the turn is her start plan's,
+    /// before the gun on the opening (`waitsOnTheOpening`), which by hand she tacks from `startTackingSpeed`.
+    func canTap(_ b: SeatView.OwnBoat, _ view: SeatView, byHand: Bool = false, startPlan: Bool = false) -> Bool {
         guard view.time - lastTapTime >= Self.tapInterval, isClearToTurn(b, view) else { return false }
         guard abs(sailingAngle(b)) < .pi / 2 else { return hasGybeRoom(b, view) }
         let closeHauled = view.boatClass.polar.bestUpwind(tws: b.polarWindSpeed).speed * b.speedShadow
+        if byHand, startPlan { return b.speed >= closeHauled * Self.startTackingSpeed }
         return b.speed >= closeHauled * (byHand && isNearMarkOfHerLeg(b, view) ? Self.nearMarkTackingSpeed : Self.tackingSpeed)
     }
 

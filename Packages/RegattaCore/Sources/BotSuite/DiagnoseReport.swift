@@ -61,6 +61,17 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
         /// Turns from starboard onto port before the gun (the pin end of a lap), a boat-race and the most.
         public var pinEndTurnsPerBoat: Double
         public var pinEndTurnsMax: Int
+        /// Of the boat-seconds 2–8 hull lengths down in the last 40 s, either tack, the share under the start plan's
+        /// tacking floor (`HandTackTable.startTackingSpeed`), of the eased ones (the waiting boats) and of all (#477 PR 2).
+        public var waitEasedBelowFloorShare: Double?
+        public var waitBelowFloorShare: Double?
+        /// Tacks before the gun, penalty turns aside: seconds to 0.9 of close-hauled speed, mean and max, and those not
+        /// back to it by the gun or the next turn (#477 PR 2).
+        public var waitTackRecoveries: Int?
+        public var waitTackRecoveryMean: Double?
+        public var waitTackRecoveryMax: Double?
+        public var waitTacksEased: Int?
+        public var waitTacksUnrecovered: Int?
     }
 
     /// `tier`'s bot seats' avoidance before the gun (#541, `SeatMetrics.preGunAvoidLuffs` …): the seat-races with any
@@ -480,6 +491,7 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
             func total(_ value: KeyPath<StartPlanObservation, Int>) -> Int { plans.reduce(0) { $0 + $1[keyPath: value] } }
             let bots = seats.filter { $0.preGunHeldOffTackCalls != nil && (group.name == Self.all || $0.tier.rawValue == group.name) }
             let portTacks = plans.flatMap(\.portTackDepths)
+            let recoveries = plans.flatMap(\.waitTackRecoveries)
             return StartPlanRow(
                 tier: group.name, boats: plans.count,
                 bandShare: share(total(\.bandSeconds), of: total(\.lastThirtySeconds)),
@@ -494,7 +506,14 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
                 heldOffTackCalls: bots.reduce(0) { $0 + ($1.preGunHeldOffTackCalls ?? 0) },
                 heldOffTackSecondsPerRace: bots.reduce(0) { $0 + ($1.preGunHeldOffTackSeconds ?? 0) } / Double(max(bots.count, 1)),
                 pinEndTurnsPerBoat: Double(total(\.pinEndTurns)) / Double(max(plans.count, 1)),
-                pinEndTurnsMax: plans.map(\.pinEndTurns).max() ?? 0)
+                pinEndTurnsMax: plans.map(\.pinEndTurns).max() ?? 0,
+                waitEasedBelowFloorShare: share(total(\.waitEasedBelowFloorSeconds), of: total(\.waitEasedSeconds)),
+                waitBelowFloorShare: share(total(\.waitWindowBelowFloorSeconds), of: total(\.waitWindowSeconds)),
+                waitTackRecoveries: recoveries.count,
+                waitTackRecoveryMean: recoveries.isEmpty ? nil : recoveries.reduce(0, +) / Double(recoveries.count),
+                waitTackRecoveryMax: recoveries.max(),
+                waitTacksEased: total(\.waitTacksEased),
+                waitTacksUnrecovered: total(\.waitTacksUnrecovered))
         }
         let wide = RoundingObservation.wideMetres
         roundings = boats.allSatisfy(\.roundings.isEmpty) ? [] : groups.flatMap { group in
@@ -625,6 +644,16 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
                      "\(text($0.portTackDepth?.median, 2)) / \(text($0.portTackDepth?.p90, 2))", fixed($0.portTackCrowdedShare, 3),
                      "\($0.heldOffTackCalls)", fixed($0.heldOffTackSecondsPerRace, 2),
                      "\(fixed($0.pinEndTurnsPerBoat, 2)) / \($0.pinEndTurnsMax)"]
+                })
+            lines.append("tackable wait (#477 PR 2): of the boat-seconds 2-8 L down in the last 40 s, either tack, the share under "
+                + "the start plan's tacking floor (\(fixed(HandTackTable.startTackingSpeed, 2)) of close-hauled speed), of the eased "
+                + "(waiting) ones and of all; tacks before the gun, penalty turns aside: seconds to 0.9 of close-hauled speed "
+                + "(n, mean / max), those eased again first (waiting on) and those not back to it by the gun or the next turn")
+            lines += table([["tier", "eased below floor", "all below floor", "tacks", "to 0.9 mean / max", "eased first", "unrecovered"]]
+                + printed(plan, \.tier).map {
+                    [$0.tier, text($0.waitEasedBelowFloorShare, 3), text($0.waitBelowFloorShare, 3), "\($0.waitTackRecoveries ?? 0)",
+                     "\(text($0.waitTackRecoveryMean, 2)) / \(text($0.waitTackRecoveryMax, 2))", "\($0.waitTacksEased ?? 0)",
+                     "\($0.waitTacksUnrecovered ?? 0)"]
                 })
         }
         lines.append("non-finishers by cause: per 1000 boats (boats; median metres to go)")

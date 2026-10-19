@@ -407,6 +407,18 @@ public struct StartPlanObservation: Hashable, Sendable {
     public var portTacksCrowded = 0
     /// Her turns from starboard onto port before the gun, penalty turns aside: the turn at the pin end of a lap.
     public var pinEndTurns = 0
+    /// Seconds of the last 40 s before the gun 2–8 hull lengths below the line on either tack, and of those under the
+    /// start plan's tacking floor (`HandTackTable.startTackingSpeed` of close-hauled speed, #477 PR 2); the same of the
+    /// seconds she waited eased (her held input's `ease`).
+    public var waitWindowSeconds = 0
+    public var waitWindowBelowFloorSeconds = 0
+    public var waitEasedSeconds = 0
+    public var waitEasedBelowFloorSeconds = 0
+    /// Her tacks before the gun, penalty turns aside: seconds from each to 0.9 of her close-hauled speed (#477 PR 2), those
+    /// she eased again before it (waiting on, not costed), and those not back to it by the gun or her next turn.
+    public var waitTackRecoveries: [Double] = []
+    public var waitTacksEased = 0
+    public var waitTacksUnrecovered = 0
 
     public init() {}
 }
@@ -486,6 +498,8 @@ public struct RaceObserver {
 
     private var starts: [StartObservation]
     private var plans: [StartPlanObservation]
+    /// The tick of her last tack before the gun not yet back to 0.9 of close-hauled speed (#477 PR 2).
+    private var planTackTicks: [Int?]
     private var startTicks: [Int?]
     private var episodes: [[PenaltyEpisode]]
     private var turnsOwed: [Int]
@@ -553,6 +567,7 @@ public struct RaceObserver {
         servedTick = Array(repeating: nil, count: count)
         starts = Array(repeating: StartObservation(), count: count)
         plans = Array(repeating: StartPlanObservation(), count: count)
+        planTackTicks = Array(repeating: nil, count: count)
         startTicks = Array(repeating: nil, count: count)
         episodes = Array(repeating: [], count: count)
         turnsOwed = Array(repeating: 0, count: count)
@@ -626,6 +641,7 @@ public struct RaceObserver {
             lastOnWaterTick[seat] = tick
             if startTicks[seat] == nil { recordStart(seat, boat, race) }
             if tick < 0, tick.isMultiple(of: rate) { recordPlan(seat, boat, race) }
+            recordPlanTackRecovery(seat, boat, race)
             if var turn = open[seat], turn.clockTick == nil, let clock = boat.penaltyClockTick {
                 turn.clockTick = clock // a pending clock started, clear of the mark (#487)
                 open[seat] = turn
@@ -796,7 +812,40 @@ public struct RaceObserver {
             plans[seat].deepStarboardSeconds += 1
             if race.heldInputs[seat].ease { plans[seat].deepStarboardEasedSeconds += 1 }
         }
+        if tick >= -Self.planEasedWindowSeconds * rate, boat.status == .prestart, !boat.isTakingPenalty, depth >= 2, depth <= 8 {
+            let below = boat.speed < Self.closeHauledSpeed(of: boat, in: race.boatClass) * HandTackTable.startTackingSpeed
+            let eased = race.heldInputs[seat].ease
+            plans[seat].waitWindowSeconds += 1
+            if below { plans[seat].waitWindowBelowFloorSeconds += 1 }
+            if eased { plans[seat].waitEasedSeconds += 1 }
+            if eased, below { plans[seat].waitEasedBelowFloorSeconds += 1 }
+        }
     }
+
+    /// Her close-hauled speed in the wind she has, m/s (`BotBrain.closeHauledSpeed`).
+    static func closeHauledSpeed(of boat: Boat, in boatClass: BoatClass) -> Double {
+        boatClass.polar.bestUpwind(tws: boat.polarWindSpeed(in: boatClass)).speed * boat.speedShadow(in: boatClass)
+    }
+
+    /// Each tick of a tack before the gun until she is back to `planTackRecoveredShare` of close-hauled speed (#477 PR 2):
+    /// the seconds it took, or unrecovered at the gun.
+    private mutating func recordPlanTackRecovery(_ seat: Int, _ boat: Boat, _ race: Race) {
+        guard let from = planTackTicks[seat] else { return }
+        if race.tick >= 0 {
+            plans[seat].waitTacksUnrecovered += 1
+            planTackTicks[seat] = nil
+        } else if race.tick > from, abs(boat.twa) < .pi / 2, boat.status == .prestart,
+                  boat.speed >= Self.closeHauledSpeed(of: boat, in: race.boatClass) * Self.planTackRecoveredShare {
+            plans[seat].waitTackRecoveries.append(Double(race.tick - from) / Double(rate))
+            planTackTicks[seat] = nil
+        } else if race.tick > from + rate, race.heldInputs[seat].ease || boat.status != .prestart {
+            plans[seat].waitTacksEased += 1
+            planTackTicks[seat] = nil
+        }
+    }
+
+    /// Back to speed after a tack before the gun: this share of close-hauled speed (#477 Step 0's criterion).
+    static let planTackRecoveredShare = 0.9
 
     /// A tack or gybe before the gun (#477): from port onto starboard in the last 60 s, where she tacked and who was
     /// there; from starboard onto port, the turn at the pin end.
@@ -810,6 +859,8 @@ public struct RaceObserver {
         let boat = race.boats[seat]
         guard race.tick < 0, boat.status == .prestart, !boat.isTakingPenalty, !(tackAndGybe && servedTick[seat] == race.tick)
         else { return }
+        if planTackTicks[seat] != nil { plans[seat].waitTacksUnrecovered += 1 }
+        planTackTicks[seat] = tacked ? race.tick : nil
         guard boat.tack == .starboard else {
             plans[seat].pinEndTurns += 1
             return

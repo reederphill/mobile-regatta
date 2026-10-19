@@ -348,4 +348,138 @@ import RegattaCore
         }
         #expect(checked >= 9, "\(checked) scenes with her spot to her right")
     }
+
+    // MARK: - The tackable wait (#477 PR 2, fleet-rules@8)
+
+    /// On the opening (fleet-rules@8) the start plan tacks by hand from `startTackingSpeed` of close-hauled speed, and only
+    /// there: not on a rules file before schema 8, not the cautious bot, and not without the plan (`startPlan`), where the
+    /// 0.75 stands.
+    @Test(RulesPin(version: 8)) func theStartPlanTacksFromTheStartTackingSpeedOnTheOpeningOnly() throws {
+        #expect(BotBrain.startTackingSpeed == 0.45 && BotBrain.tackingSpeed == 0.75)
+        let water = BotConductTests.Water(seed: 3, toGun: 30, below: 5)
+        let c = water.race.course
+        try #require(c.opening != nil)
+        func scene(share: Double) throws -> (Race, Double) {
+            let probe = try BotConductTests.place(water, [
+                .init(position: water.centre, heading: water.heading(.port, deg2rad(80)), speed: 2, status: .prestart),
+                .init(position: water.centre + c.right * 200, heading: water.heading(.port, deg2rad(80)), speed: 2, status: .prestart),
+            ])
+            let view = probe.seatView(for: 0)
+            let closeHauled = BotTacticsTests.pilot(seat: 0, probe, planned: .port).brain.closeHauledSpeed(view.own, view)
+            let race = try BotConductTests.place(BotConductTests.Water(seed: 3, toGun: 30, below: 5), [
+                .init(position: water.centre, heading: water.heading(.port, deg2rad(80)), speed: closeHauled * share, status: .prestart),
+                .init(position: water.centre + c.right * 200, heading: water.heading(.port, deg2rad(80)), speed: 2, status: .prestart),
+            ])
+            return (race, closeHauled)
+        }
+        for (share, tacks) in [(0.5, true), (0.4, false)] {
+            let (race, _) = try scene(share: share)
+            let view = race.seatView(for: 0)
+            try #require(BotBrain.turnsByHand(view) && view.time < 0)
+            let brain = BotTacticsTests.pilot(seat: 0, race, planned: .starboard).brain
+            #expect(brain.waitsOnTheOpening(view))
+            #expect(brain.canTap(view.own, view, byHand: true, startPlan: true) == tacks, "\(share) of close-hauled")
+            #expect(!brain.canTap(view.own, view, byHand: true), "\(share): off the plan, the 0.75")
+            let cautious = BotConductTests.Pilot(seat: 0, plannedTack: .starboard, race: race, caution: .standard).brain
+            #expect(!cautious.waitsOnTheOpening(view), "the cautious bot waits as before")
+        }
+        // Before schema 8 nothing reads it.
+        try BotConductTests.$waterRules.withValue(RulesConfigFile.bundled(id: "fleet-rules", version: 7).ref) {
+            let race = BotConductTests.Water(seed: 3, toGun: 30, below: 5).race
+            let view = race.seatView(for: 0)
+            #expect(!BotTacticsTests.pilot(seat: 0, race, planned: .starboard).brain.waitsOnTheOpening(view))
+        }
+    }
+
+    /// A waiting boat at the trim reaches with her speed at or over the start plan's tacking floor (#477 PR 2, #532's "don't
+    /// hold eased" read as never below tacking speed): over a 10-boat start on fleet-rules@8, of the bots' eased boat-ticks
+    /// 2–8 hull lengths below the line in the last 40 s, penalty turns aside, at most `waitBelowFloorShare` are under
+    /// `startTackingSpeed` of close-hauled speed; and the fleet stays out of irons.
+    @Test(RulesPin(version: 8)) func aWaitingBoatAtTheTrimReachesAtTackingSpeed() throws {
+        var eased = 0, below = 0
+        for seed: UInt64 in [1, 2, 3] {
+            let race = Self.startRace(seed: seed)
+            try #require(race.course.opening != nil)
+            var controllers = allBots(race)
+            let length = race.boatClass.hull.length
+            let noGo = BoatDynamics.noGoAngle(race.boatClass.polar)
+            var irons = 0
+            sail(race, &controllers, ticks: 60 * Race.tickRate) { race in
+                for (seat, boat) in race.boats.enumerated() where boat.status == .prestart && !boat.isTakingPenalty {
+                    let closeHauled = race.boatClass.polar.bestUpwind(tws: boat.polarWindSpeed(in: race.boatClass)).speed
+                        * boat.speedShadow(in: race.boatClass)
+                    if boat.twa < noGo && boat.speed < 0.3 * closeHauled { irons += 1 }
+                    let depth = -race.course.startLine.side(boat.position) / length
+                    guard race.tick >= -40 * Race.tickRate, depth >= 2, depth <= 8, race.heldInputs[seat].ease else { continue }
+                    eased += 1
+                    if boat.speed < closeHauled * BotBrain.startTackingSpeed { below += 1 }
+                }
+            }
+            #expect(race.tick == 0, "sailed to the gun")
+            #expect(irons < 10 * Race.tickRate, "seed \(seed): \(irons) boat-ticks in irons")
+        }
+        #expect(eased > 0)
+        #expect(Double(below) <= Double(eased) * Self.waitBelowFloorShare, "\(below) of \(eased) eased boat-ticks under the floor")
+    }
+
+    /// The most of the waiting boats' time under the floor (#477 PR 2's row target, ≤ 0.05).
+    static let waitBelowFloorShare = 0.05
+
+    /// A tack from the wait completes (#477 PR 2; Step 0 judged): a bot on port in the opening's wait, eased at the trim
+    /// at 80° (`easeSpeedFraction`), told by her plan to tack for her run in, puts the helm down by hand at that speed;
+    /// her boom crosses within 5 s, she never sits head to wind, and she is back to 0.9 of close-hauled speed within the
+    /// same tack's time from full speed sheeted in, plus 5 s.
+    @Test(RulesPin(version: 8)) func aTackFromTheWaitCompletes() throws {
+        struct Tacked { var boom: Double?; var recovered: Double?; var stuck = 0.0; var began: Double? }
+        func tack(seed: UInt64, fromTheWait: Bool) throws -> Tacked {
+            let water = BotConductTests.Water(seed: seed, toGun: 14, below: 4)
+            let c = water.race.course
+            let heading = water.heading(.port, deg2rad(80))
+            let target = BoatDynamics.polarTarget(relativeWind: deg2rad(80), boomSide: .starboard, tws: water.race.groundWind(at: water.centre).speed,
+                                                  isPlaning: false, spinnaker: .down, boatClass: water.race.boatClass)
+            let trim = try #require(c.opening).easeSpeedFraction
+            let race = try BotConductTests.place(water, [
+                .init(position: water.centre + c.right * (water.length * 3), heading: heading,
+                      speed: fromTheWait ? target * trim : target, status: .prestart),
+                .init(position: water.centre + c.right * 200, heading: heading, speed: 2, status: .prestart),
+            ]) { snapshot in
+                snapshot.seats[0].heldInput = BoatInput(rudder: Int8(0), ease: fromTheWait)
+            }
+            var pilot = BotConductTests.Pilot(seat: 0, plannedTack: .port, race: race)
+            let noGo = BoatDynamics.noGoAngle(race.boatClass.polar)
+            var result = Tacked()
+            let boom = race.boats[0].boomSide
+            for tick in 0..<(25 * Race.tickRate) {
+                _ = pilot.drive(race)
+                if result.began == nil, pilot.brain.handTurn != nil { result.began = Double(tick) * Race.dt }
+                race.step()
+                let boat = race.boats[0]
+                let t = Double(tick + 1) * Race.dt
+                let closeHauled = race.boatClass.polar.bestUpwind(tws: boat.polarWindSpeed(in: race.boatClass)).speed
+                    * boat.speedShadow(in: race.boatClass)
+                if boat.twa < noGo, boat.speed < 0.3 * closeHauled { result.stuck += Race.dt }
+                if result.boom == nil, boat.boomSide != boom { result.boom = t }
+                if result.boom != nil, result.recovered == nil, boat.speed >= 0.9 * closeHauled { result.recovered = t }
+            }
+            return result
+        }
+        var tacked = 0
+        for seed: UInt64 in 1...4 {
+            let wait = try tack(seed: seed, fromTheWait: true)
+            let full = try tack(seed: seed, fromTheWait: false)
+            guard let began = wait.began, let fullBegan = full.began else {
+                Issue.record("seed \(seed): she never put the helm down (wait \(wait.began ?? -1), full \(full.began ?? -1))")
+                continue
+            }
+            tacked += 1
+            #expect(began < 1, "seed \(seed): she tacked from the wait at once (\(began) s)")
+            let boom = try #require(wait.boom, "seed \(seed): her boom never crossed")
+            #expect(boom - began <= 5, "seed \(seed): boom across \(boom - began) s after the helm went down")
+            #expect(wait.stuck == 0, "seed \(seed): \(wait.stuck) s head to wind and stopped")
+            let recovered = try #require(wait.recovered, "seed \(seed): never back to 0.9 of close-hauled speed")
+            let baseline = try #require(full.recovered, "seed \(seed): the full-speed tack never recovered") - fullBegan
+            #expect(recovered - began <= baseline + 5, "seed \(seed): 0.9 speed \(recovered - began) s, full speed's \(baseline) s")
+        }
+        #expect(tacked == 4)
+    }
 }
