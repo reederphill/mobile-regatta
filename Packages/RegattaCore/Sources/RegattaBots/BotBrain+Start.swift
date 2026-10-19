@@ -432,12 +432,13 @@ extension BotBrain {
         return .infinity
     }
 
-    /// Whether sailing `heading` with Ease would still put her hull over the start line before the gun, or within
-    /// `within` seconds if that is sooner.
-    func crossesEarly(_ b: SeatView.OwnBoat, _ view: SeatView, heading: Double, within: Double? = nil) -> Bool {
+    /// Whether sailing `heading` with Ease (or sheeted in, `ease` false: #541, the avoidance's own sheeting) would
+    /// still put her hull over the start line before the gun, or within `within` seconds if that is sooner.
+    func crossesEarly(_ b: SeatView.OwnBoat, _ view: SeatView, heading: Double, within: Double? = nil,
+                      ease: Bool = true) -> Bool {
         guard b.status == .prestart, view.time < 0, view.course.startLine.side(b.position) < 0 else { return false }
         let horizon = min(-view.time, within ?? .infinity)
-        return secondsToLine(b, view, heading: heading, ease: true, within: horizon) < horizon
+        return secondsToLine(b, view, heading: heading, ease: ease, within: horizon) < horizon
     }
 
     /// How far outside the no-go zone she luffs at most before her start (#280): inside her hold angle, so a windward

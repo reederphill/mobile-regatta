@@ -8,6 +8,10 @@ import RegattaCore
 // (`avoidingContact`). Nothing changes before that trigger: no lane is given up early, no slowing, no keeping station
 // ("no orderly bots"), and a turn away from a boat that had no escape is no 16.1 foul on the bot.
 //
+// Before the gun the turn keeps her start (#541): against a port boat she luffs to hold, as close as her start luff
+// goes, rather than bear away to pass, and no turn or centred hold of hers carries her over the line early at her own
+// sheeting (`crossesEarly`). Racing, the least turn, as #537 has it.
+//
 // Racing and before her start, for every live bot and the cautious bot. The suite's hunter avoids so only before her
 // start: racing, her hunting stays as #355 has it (#537 Q1, placeholder). Internal: nothing shows it.
 extension BotBrain {
@@ -166,36 +170,104 @@ extension BotBrain {
         }.min() ?? .infinity
     }
 
+    /// What an avoidance was (#541): a turn up towards the wind, a turn down away from it, or her heading held with the
+    /// rudder centred. Report-only: the suite counts them before the gun (`BotDriver`); nothing reads it in play.
+    enum AvoidTurn: Hashable, Sendable {
+        case luff, bearAway, hold
+    }
+
+    /// `avoidingContact`'s input, and what the suite counts of it (#541, report-only).
+    struct Avoidance: Hashable, Sendable {
+        /// Her input avoiding the boat; nil when there is nothing to avoid, or nothing she may do passes her better.
+        var input: BoatInput?
+        /// What `input` is: nil with no input.
+        var turn: AvoidTurn?
+        /// The heading she turns to, or holds; nil with no input.
+        var heading: Double?
+        /// Radians off her heading of the heading she turns to; 0 holding.
+        var turnSize = 0.0
+        /// Whether, before the gun, she gave up a rudder-centred hold that would have carried her over the line early
+        /// (`crossesEarly`, #541 build 2).
+        var refusedEarlyHold = false
+        /// Whether, before the gun, refused a centred hold as early for a boat on her plan's heading and finding no turn
+        /// away that clears, she held centred all the same (#541 fix round 3): her plan's turn was towards that boat.
+        var heldEarly = false
+        /// Whether, before the gun, tripping on her heading a boat that can't keep clear (`.cannot`) and finding no
+        /// heading that clears and isn't early, she luffed early all the same: the least luff that clears (#541 fix
+        /// round 4, owner: "Relax the veto").
+        var earlyLuff = false
+        /// Whether the heading is the one that passes furthest, no turn clearing her.
+        var furthest = false
+        /// Whether, before the gun, the luff preference chose it (#541 Q3, Q4): a clearing luff taken over a bear-away
+        /// that also cleared.
+        var preferredLuff = false
+    }
+
     /// Her input avoiding a boat clearly not keeping clear of her (#537), or nil when there is none, or no turn she may
-    /// make passes her better than holding on. The nearest boat that trips `notKeepingClear` on her heading (one that
-    /// trips it only on `desired`, she holds her heading for, rudder centred, so once turned clear she doesn't turn back
-    /// into her): the least turn off her heading, in `clearingStep`s, that brings that boat's pass over `avoidHorizon`
-    /// to `clearMarginBeams` of the beam hull to hull (`hullGap`), both in a straight line and going on turning as she
-    /// has been (`track(of:)`); looked for first the way away from the side she passes on, then the other; failing
-    /// that, the turn that passes her furthest. Each way only while every degree of it opens both passes between
-    /// centres (`closestApproach`, `approach`), so no part of the turn is towards her (#101's invariant). Only on her
-    /// own tack, out of the no-go zone and never by the lee (tacks and gybes are the tap's). Never a heading that brings
-    /// any other boat closer than holding on would, inside `roomLengths` within `roomLookahead` (`turnsTowards`); that
-    /// `avoidMarks` or `avoidEdges` would turn her off; or, before the gun, that would carry her over the line within
-    /// `luffLineSeconds` (`crossesEarly`). Holding on already clear of her, she holds: the rudder centred. Her ease is
-    /// `input`'s. Not while she owes a turn.
+    /// make passes her better than holding on (`avoidance`).
     func avoidingContact(_ b: SeatView.OwnBoat, _ view: SeatView, _ input: BoatInput, desired: Double) -> BoatInput? {
+        avoidance(b, view, input, desired: desired).input
+    }
+
+    /// Avoiding a boat clearly not keeping clear of her (#537). The nearest boat that trips `notKeepingClear` on her
+    /// heading (one that trips it only on `desired`, she holds her heading for, rudder centred, so once turned clear she
+    /// doesn't turn back into her): the least turn off her heading, in `clearingStep`s, that brings that boat's pass
+    /// over `avoidHorizon` to `clearMarginBeams` of the beam hull to hull (`hullGap`), both in a straight line and going
+    /// on turning as she has been (`track(of:)`); looked for first the way away from the side she passes on, then the
+    /// other; failing that, the turn that passes her furthest. Each way only while every degree of it opens both passes
+    /// between centres (`closestApproach`, `approach`), so no part of the turn is towards her (#101's invariant). Only on
+    /// her own tack, out of the no-go zone and never by the lee (tacks and gybes are the tap's). Never a heading that
+    /// brings any other boat closer than holding on would, inside `roomLengths` within `roomLookahead` (`turnsTowards`);
+    /// or that `avoidMarks` or `avoidEdges` would turn her off. Holding on already clear of her, she holds: the rudder
+    /// centred. Her ease is `input`'s. Not while she owes a turn.
+    ///
+    /// Before the gun she keeps her start (#541): against a port boat (rule 10) she luffs to hold rather than bear
+    /// away to pass whenever a luff clears, however much bigger a turn, as close as `startLuffFloor` (her start luff's
+    /// floor, under her hold angle); bearing away she may start from her own angle inside the racing floor. No heading
+    /// whose straight line, at her own sheeting, carries her over the line within `luffLineSeconds` (`crossesEarly`): she
+    /// would swing through it, so it ends that way's search. Nor a centred hold that would: clear on her heading but
+    /// early, she looks for a turn as above (nil if none clears); and so, holding for a boat only on `desired`, she
+    /// looks for a turn away from that boat (fix round 2: leaving the helm to her plan was its turn towards her), and
+    /// with none clearing holds centred all the same when that hold doesn't pass her clear (`heldEarly`, fix rounds 3
+    /// and 4). Tripping on her heading a boat that
+    /// can't keep clear (`.cannot`), with no heading that clears and isn't early, she takes the least luff that clears
+    /// even though early (`earlyLuff`, fix round 4).
+    /// Racing, as #537 has it.
+    func avoidance(_ b: SeatView.OwnBoat, _ view: SeatView, _ input: BoatInput, desired: Double) -> Avoidance {
         // Owing a turn, her clearing for it and her wait are the penalty's (#471, #486), which weigh every boat near.
-        guard avoidsContact, b.status == .racing || b.status == .prestart, b.penalty == nil else { return nil }
+        guard avoidsContact, b.status == .racing || b.status == .prestart, b.penalty == nil else { return Avoidance() }
+        let preGun = b.status == .prestart && view.time < 0
+        // Before the gun (#541): sailing `heading` at her own sheeting carries her over the line early.
+        func early(_ heading: Double) -> Bool {
+            preGun && crossesEarly(b, view, heading: heading, within: Self.luffLineSeconds, ease: input.ease)
+        }
+        let centred = BoatInput(rudder: 0 as Int8, ease: input.ease)
         func trips(_ other: SeatView.OtherBoat, heading: Double? = nil) -> Bool {
             notKeepingClear(other, b, view, heading: heading) != nil
         }
-        guard let other = view.others.filter({ trips($0) }).min(by: {
-            ($0.position - b.position).lengthSquared < ($1.position - b.position).lengthSquared
-        }) else {
+        func nearer(_ one: SeatView.OtherBoat, _ two: SeatView.OtherBoat) -> Bool {
+            (one.position - b.position).lengthSquared < (two.position - b.position).lengthSquared
+        }
+        let other: SeatView.OtherBoat
+        // Before the gun, a centred hold for a boat on her plan's heading refused as early (#541 fix round 2).
+        var onPlanRefused = false
+        if let tripping = view.others.filter({ trips($0) }).min(by: nearer) {
+            other = tripping
+        } else {
             // Clear of every such boat on her heading but not on the one her plan sails: she holds her heading, the
             // rudder centred, rather than turn into her (#537 fix round 1: a turn away here, from a boat no threat on
             // her course, was a manoeuvre the autohelm and her hands sailed apart).
             // Only a boat that can't keep clear (`.cannot`) counts on a heading she hasn't sailed yet: whether a sailing
             // boat responds to a turn of hers can't be known before she turns (rule 14, #537 fix round 2).
-            guard view.others.contains(where: { notKeepingClear($0, b, view, heading: desired) == .cannot })
-            else { return nil }
-            return BoatInput(rudder: 0 as Int8, ease: input.ease)
+            guard let onPlan = view.others.filter({ notKeepingClear($0, b, view, heading: desired) == .cannot })
+                .min(by: nearer)
+            else { return Avoidance() }
+            guard early(b.heading) else { return Avoidance(input: centred, turn: .hold, heading: b.heading) }
+            // Before the gun, not a hold that carries her over early (#541 Q5), nor the helm left to her plan, whose
+            // turn onto `desired` is towards the stopped boat (#541 fix round 2: guard over note): she looks for a
+            // turn away from that boat as below, nil only if none clears.
+            other = onPlan
+            onPlanRefused = true
         }
         // Her pass both ways it may be reckoned: sailing on in a straight line (#101's invariant, every bot's reckoning
         // of room), and going on turning as she has been (a boat turning across her bow moves the closest point).
@@ -213,7 +285,10 @@ extension BotBrain {
         }
         let held = passes(b.heading)
         let clear = hull.beam * Self.clearMarginBeams
-        if held.gap >= clear { return BoatInput(rudder: 0 as Int8, ease: input.ease) }
+        // Clear holding on, she holds; before the gun, not on a heading that carries her over early (#541 Q5): then
+        // only a turn that clears her and isn't early.
+        let refusedEarlyHold = onPlanRefused || held.gap >= clear && early(b.heading)
+        if held.gap >= clear && !refusedEarlyHold { return Avoidance(input: centred, turn: .hold, heading: b.heading) }
         // Away from the side she passes on, where she is at their closest (for a stalled boat, the side she is on);
         // dead on, the side she is on now, and failing that, bearing away.
         let offset = other.position - b.position
@@ -225,19 +300,28 @@ extension BotBrain {
         let sideways = abs(passing) > 1e-3 ? passing : offset.dot(right)
         let side: Double = b.tack == .port ? 1 : -1 // heading = wind + side × angle
         let bearAway: Double = side // a turn to starboard (+) bears a port-tack boat away
+        let luff = -bearAway
         let away: Double = abs(sideways) > 1e-6 ? (sideways > 0 ? -1 : 1) : bearAway
         let closest = BoatDynamics.noGoAngle(view.boatClass.polar) + deg2rad(5)
-        func isSailable(_ heading: Double) -> Bool {
-            let angle = wrapAngle(heading - b.windDirection) * side
-            return angle >= closest && angle <= .pi
+        // Before the gun (#541 Q2): luffing, as close as her start luff goes (`startLuffFloor`), under her hold angle;
+        // bearing away, from her own angle, inside the racing floor when she holds there.
+        let ownAngle = wrapAngle(b.heading - b.windDirection) * side
+        func floor(_ way: Double) -> Double {
+            guard preGun else { return closest }
+            return way == luff ? Self.startLuffFloor(view) : min(closest, ownAngle)
         }
-        func isAllowed(_ heading: Double) -> Bool {
+        func isSailable(_ heading: Double, _ way: Double) -> Bool {
+            let angle = wrapAngle(heading - b.windDirection) * side
+            return angle >= floor(way) && angle <= .pi
+        }
+        func isAllowed(_ heading: Double, early: Bool = true) -> Bool {
             !turnsTowards(b, view, heading: heading, except: other.seat)
                 && avoidMarks(b, view, desired: heading) == nil && avoidEdges(b, view, desired: heading) == nil
-                && !crossesEarly(b, view, heading: heading, within: Self.luffLineSeconds)
+                && !(early && crossesEarly(b, view, heading: heading, within: Self.luffLineSeconds))
         }
         var furthest: (heading: Double, distance: Double)?
         var best: (heading: Double, turn: Int)?
+        var bestLuff: (heading: Double, turn: Int)?
         // Weighed every degree, so every bit of the turn opens the pass: past where it closes again she would be turning
         // towards her. Turns are taken in `clearingStep`s.
         let fine = deg2rad(1)
@@ -246,24 +330,75 @@ extension BotBrain {
             var last = held
             for degree in 1...180 {
                 let heading = b.heading + way * Double(degree) * fine
-                guard isSailable(heading) else { break }
+                guard isSailable(heading, way) else { break }
                 let pass = passes(heading)
                 guard pass.straight > last.straight, pass.turning >= last.turning else { break }
                 last = pass
                 let distance = pass.gap
                 guard degree % every == 0 else { continue }
                 let step = degree / every
+                // Before the gun, a heading that carries her over early at her own sheeting ends the way: she would
+                // swing through it (#541 build 2).
+                if early(heading) { break }
                 guard isAllowed(heading) else { continue }
                 if distance >= clear {
                     if step < best?.turn ?? .max { best = (heading, step) }
+                    if way == luff { bestLuff = (heading, step) }
                     break
                 }
                 if distance > furthest?.distance ?? held.gap { furthest = (heading, distance) }
             }
         }
-        guard let heading = best?.heading ?? furthest?.heading else { return nil }
-        let steered = steer(b, toHeading: heading, view)
-        return BoatInput(rudder: steered.rudder, ease: input.ease)
+        // The least luff that clears her, the early veto lifted (#541 fix round 4): the luff way's search above
+        // without `early`.
+        func clearingLuff() -> Double? {
+            var last = held
+            for degree in 1...180 {
+                let heading = b.heading + luff * Double(degree) * fine
+                guard isSailable(heading, luff) else { break }
+                let pass = passes(heading)
+                guard pass.straight > last.straight, pass.turning >= last.turning else { break }
+                last = pass
+                guard degree % every == 0, isAllowed(heading, early: false) else { continue }
+                if pass.gap >= clear { return heading }
+            }
+            return nil
+        }
+        // Before the gun, against a port boat, any luff that clears her (#541 Q3, Q4): rules 12 and 13 keep the least
+        // turn (a luff away from a boat astern can make her the windward boat).
+        let prefersLuff = preGun && other.rightOfWay?.rule == .portStarboard
+        let chosen = (prefersLuff ? bestLuff : nil) ?? best
+        // The least clearing turn was the bear-away way's: the preference made the pick (report-only).
+        let preferredLuff = prefersLuff && bestLuff != nil && best.map { $0.heading != bestLuff?.heading } == true
+        // Before the gun, tripping on her heading a boat that can't keep clear (`.cannot`), with no heading that clears
+        // and isn't early: the least luff that clears her, early or not, over the furthest pass (#541 fix round 4, owner:
+        // "Relax the veto": a contact ranks worse than an early cross she may still correct). Every degree of it still
+        // opens both passes, sailable, and allowed (no boat brought closer, marks and edges).
+        if preGun, chosen == nil, !onPlanRefused, notKeepingClear(other, b, view) == .cannot,
+           let luffed = clearingLuff() {
+            let steered = steer(b, toHeading: luffed, view, closest: Self.startLuffFloor(view))
+            return Avoidance(input: BoatInput(rudder: steered.rudder, ease: input.ease), turn: .luff, heading: luffed,
+                             turnSize: abs(wrapAngle(luffed - b.heading)), refusedEarlyHold: refusedEarlyHold,
+                             earlyLuff: true)
+        }
+        guard let heading = chosen?.heading ?? furthest?.heading else {
+            // Before the gun, holding for a boat only on her plan's heading, no turn away: she holds centred, early,
+            // rather than leave the helm to the plan, whose turn is onto that stopped boat (#541 fix round 3: a contact
+            // ranks worse than an early cross she may still correct, #542's costs over vetoes). Not when she trips on
+            // her heading: there the plan's helm isn't known to be a turn onto her.
+            // Not a hold that passes her clear (fix round 4: case (b)'s water, where the plan's helm keeps her clear and
+            // behind the line, and a held-early hold carried her over): only one that doesn't, s10's.
+            if onPlanRefused && held.gap < clear {
+                return Avoidance(input: centred, turn: .hold, heading: b.heading, refusedEarlyHold: true, heldEarly: true)
+            }
+            return Avoidance(refusedEarlyHold: refusedEarlyHold)
+        }
+        // Her helm goes as close as the search did (#541 Q2: `steer`'s own floor is the racing one).
+        let steered = steer(b, toHeading: heading, view, closest: preGun ? Self.startLuffFloor(view) : nil)
+        let turned = wrapAngle(heading - b.heading)
+        return Avoidance(input: BoatInput(rudder: steered.rudder, ease: input.ease),
+                         turn: turned * bearAway < 0 ? .luff : .bearAway, heading: heading, turnSize: abs(turned),
+                         refusedEarlyHold: refusedEarlyHold, furthest: chosen == nil, preferredLuff: preferredLuff)
     }
 
     /// Whether a tack or gybe begun now would be a turn with a boat clearly not keeping clear of her inside the horizon

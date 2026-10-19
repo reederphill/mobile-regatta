@@ -30,6 +30,60 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
     /// Mark roundings against the ideal path (#511), by tier and mark; empty when no boat sailed a rounding to its leg's
     /// end.
     public var roundings: [RoundingRow]
+    /// Before the gun, the bots' avoidance of a boat not keeping clear (#541, report-only), by tier; nil in a report from
+    /// before it.
+    public var preGunAvoidance: [PreGunAvoidanceRow]?
+
+    /// `tier`'s bot seats' avoidance before the gun (#541, `SeatMetrics.preGunAvoidLuffs` …): the seat-races with any
+    /// (a luff, a bear-away or a centred hold), the decisions of each kind a seat-race, and how the avoiding seats
+    /// started against the rest. A seat no bot sailed doesn't count.
+    public struct PreGunAvoidanceRow: Codable, Hashable, Sendable {
+        public var tier: String
+        public var seats: Int
+        /// Seat-races with any pre-gun avoidance decision, and their share of `seats`.
+        public var avoidingSeats: Int
+        public var avoidingShare: Double
+        /// Decisions in all, and a seat-race.
+        public var luffs: Int
+        public var bearAways: Int
+        public var holds: Int
+        public var luffsPerSeat: Double
+        public var bearAwaysPerSeat: Double
+        public var holdsPerSeat: Double
+        /// Turns to the furthest pass (none clearing), and centred holds given up as early: of those, turned away,
+        /// held centred all the same (`Avoidance.heldEarly`, #541 fix round 3) and left to her plan (nil); and OCS
+        /// seat-races whose last held-early hold was within 6 s of the gun; and luffs taken early for a boat that can't
+        /// keep clear, no other heading clearing (`Avoidance.earlyLuff`, #541 fix round 4).
+        public var furthest: Int
+        public var holdsRefusedEarly: Int
+        public var refusedHoldsTurned: Int
+        public var heldEarly: Int
+        public var refusedHoldsNil: Int
+        public var ocsWithin6sOfHeldEarly: Int
+        public var earlyLuffs: Int
+        /// Turns up: the largest turn towards the wind, degrees (nil with none), and those decisions over 10°. Every
+        /// luff decision counts, the furthest pass's (none clearing) included, not only the luff preference's.
+        public var largestTurnUpDegrees: Double?
+        public var turnsUpOver10: Int
+        /// The luff preference's own picks (#541 Q4): decisions taking a clearing luff over a bear-away that also
+        /// cleared, and their sizes, degrees (nil with none).
+        public var preferredLuffs: Int
+        public var preferredLuffDegrees: Spread?
+        public var preferredLuffMaxDegrees: Double?
+        /// On time (within `LateCause.onTimeSeconds`; never started is late), mean start of those that started, and
+        /// OCS seat-races: the avoiding seats', then the rest's.
+        public var avoidingOnTimeShare: Double
+        public var restOnTimeShare: Double
+        public var avoidingMeanStartSeconds: Double?
+        public var restMeanStartSeconds: Double?
+        public var avoidingOCS: Int
+        public var restOCS: Int
+        /// The worst cases: the latest start of an avoiding seat (nil with none started), those never started, and OCS
+        /// seat-races whose last avoidance was within 6 s of the gun.
+        public var latestStartAfterAvoidance: Double?
+        public var avoidingNeverStarted: Int
+        public var ocsWithin6sOfAvoidance: Int
+    }
 
     /// `tier`'s roundings of `mark` (`RoundingMark.rawValue`, or `all`): how many metres over the ideal path they were
     /// (`RoundingObservation.extraMetres`; negative for a boat that sailed straight inside the tacking or gybing cone).
@@ -351,6 +405,42 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
                               secondsOff: Spread(seen.flatMap(\.secondsOff)),
                               backOnShare: share(total(\.fallsBackOn), of: total(\.fallsWatched)))
         }
+        let bots = seats.filter { $0.preGunAvoidLuffs != nil }
+        preGunAvoidance = ([(Self.all, bots)] + sailed.map { tier in (tier.rawValue, bots.filter { $0.tier == tier }) }).map { name, seats in
+            func total(_ value: KeyPath<SeatMetrics, Int?>) -> Int { seats.reduce(0) { $0 + ($1[keyPath: value] ?? 0) } }
+            func avoids(_ seat: SeatMetrics) -> Bool {
+                (seat.preGunAvoidLuffs ?? 0) + (seat.preGunAvoidBearAways ?? 0) + (seat.preGunAvoidHolds ?? 0) > 0
+            }
+            let avoiding = seats.filter(avoids)
+            let rest = seats.filter { !avoids($0) }
+            func onTime(_ of: [SeatMetrics]) -> Double {
+                share(of.filter { ($0.startSeconds ?? .infinity) <= LateCause.onTimeSeconds }.count, of: of.count)
+            }
+            let count = Double(max(seats.count, 1))
+            let turnsUp = seats.compactMap(\.preGunAvoidLargestTurnUpDegrees).filter { $0 > 0 }
+            let preferred = seats.flatMap { $0.preGunPreferredLuffDegrees ?? [] }
+            return PreGunAvoidanceRow(
+                tier: name, seats: seats.count, avoidingSeats: avoiding.count, avoidingShare: share(avoiding.count, of: seats.count),
+                luffs: total(\.preGunAvoidLuffs), bearAways: total(\.preGunAvoidBearAways), holds: total(\.preGunAvoidHolds),
+                luffsPerSeat: Double(total(\.preGunAvoidLuffs)) / count,
+                bearAwaysPerSeat: Double(total(\.preGunAvoidBearAways)) / count,
+                holdsPerSeat: Double(total(\.preGunAvoidHolds)) / count,
+                furthest: total(\.preGunAvoidFurthest), holdsRefusedEarly: total(\.preGunHoldsRefusedEarly),
+                refusedHoldsTurned: total(\.preGunRefusedHoldsTurned), heldEarly: total(\.preGunHeldEarly),
+                refusedHoldsNil: total(\.preGunHoldsRefusedEarly) - total(\.preGunRefusedHoldsTurned) - total(\.preGunHeldEarly),
+                ocsWithin6sOfHeldEarly: seats.filter { $0.ocsCount > 0 && ($0.preGunLastHeldEarlySeconds ?? -.infinity) > -6 }.count,
+                earlyLuffs: total(\.preGunEarlyLuffs),
+                largestTurnUpDegrees: turnsUp.max(), turnsUpOver10: total(\.preGunAvoidTurnsUpOver10),
+                preferredLuffs: preferred.count, preferredLuffDegrees: Spread(preferred),
+                preferredLuffMaxDegrees: preferred.max(),
+                avoidingOnTimeShare: onTime(avoiding), restOnTimeShare: onTime(rest),
+                avoidingMeanStartSeconds: mean(avoiding.compactMap(\.startSeconds)),
+                restMeanStartSeconds: mean(rest.compactMap(\.startSeconds)),
+                avoidingOCS: avoiding.filter { $0.ocsCount > 0 }.count, restOCS: rest.filter { $0.ocsCount > 0 }.count,
+                latestStartAfterAvoidance: avoiding.compactMap(\.startSeconds).max(),
+                avoidingNeverStarted: avoiding.filter { $0.startSeconds == nil }.count,
+                ocsWithin6sOfAvoidance: avoiding.filter { $0.ocsCount > 0 && ($0.preGunLastAvoidSeconds ?? -.infinity) > -6 }.count)
+        }
         let wide = RoundingObservation.wideMetres
         roundings = boats.allSatisfy(\.roundings.isEmpty) ? [] : groups.flatMap { group in
             let seen = group.boats.flatMap(\.roundings)
@@ -439,6 +529,30 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
         lines += table([["tier"] + rules + ["but 21.2", "all"]] + printed(preStartCalls, \.tier).map { row in
             [row.tier] + rules.map { fixed(row.perBoat[$0] ?? 0, 3) } + [fixed(row.notTurningPerBoat, 3), fixed(row.allPerBoat, 3)]
         })
+        if let avoidance = preGunAvoidance {
+            lines.append("pre-gun avoidance (#541): bot seat-races with any (luff, bear-away or centred hold); decisions a "
+                + "seat-race; turns to the furthest pass and holds refused as early (turned / held early / nil), with OCS "
+                + "within 6 s of a held-early hold, and early luffs for a stopped boat (no other heading clearing); turns up (every turn towards the "
+                + "wind, the furthest pass's included): the largest and those over 10°; the luff preference's own picks (a "
+                + "clearing luff over a bear-away that also cleared): count, median / max°; "
+                + "on time, mean start s and OCS of the avoiding seats / the rest; the latest avoiding start, never "
+                + "started, and OCS within 6 s of an avoidance")
+            lines += table([["tier", "seats", "avoiding", "luff", "bear", "hold", "furthest", "refused", "turned / held / nil",
+                             "ocs < 6 s held", "early luff", "max up°", "up > 10°",
+                             "preferred", "pref med / max°",
+                             "on time", "mean start", "ocs", "latest", "never", "ocs < 6 s"]]
+                + printed(avoidance, \.tier).map {
+                    [$0.tier, "\($0.seats)", "\($0.avoidingSeats) (\(fixed($0.avoidingShare, 3)))", fixed($0.luffsPerSeat, 3),
+                     fixed($0.bearAwaysPerSeat, 3), fixed($0.holdsPerSeat, 3), "\($0.furthest)", "\($0.holdsRefusedEarly)",
+                     "\($0.refusedHoldsTurned) / \($0.heldEarly) / \($0.refusedHoldsNil)", "\($0.ocsWithin6sOfHeldEarly)", "\($0.earlyLuffs)",
+                     text($0.largestTurnUpDegrees, 1), "\($0.turnsUpOver10)", "\($0.preferredLuffs)",
+                     "\(text($0.preferredLuffDegrees?.median, 1)) / \(text($0.preferredLuffMaxDegrees, 1))",
+                     "\(fixed($0.avoidingOnTimeShare, 3)) / \(fixed($0.restOnTimeShare, 3))",
+                     "\(text($0.avoidingMeanStartSeconds, 2)) / \(text($0.restMeanStartSeconds, 2))",
+                     "\($0.avoidingOCS) / \($0.restOCS)", text($0.latestStartAfterAvoidance, 1), "\($0.avoidingNeverStarted)",
+                     "\($0.ocsWithin6sOfAvoidance)"]
+                })
+        }
         lines.append("non-finishers by cause: per 1000 boats (boats; median metres to go)")
         var finishRows: [[String]] = [["cause"] + tiers]
         for (key, label) in NonFinishCause.allCases.map({ ($0.rawValue, $0.label) }) + [(Self.all, Self.all)] {

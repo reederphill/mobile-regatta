@@ -2281,12 +2281,13 @@ extension BotConductTests {
     /// `seconds` of her sailing ahead on her course and `across` hull lengths to starboard of it: stalled in irons
     /// (`stalled`: 10° off head to wind on port, all but stopped, autohelm off), or sailing her beat straight at that
     /// point to arrive with her. `swapped`: seat 0 on port and seat 1 on starboard, so seat 0 keeps clear. `ghost`:
-    /// seat 1 has finished. `third`: seat 2 sailing beside seat 0, a hull length and a bit to port.
+    /// seat 1 has finished. `third`: seat 2 sailing beside seat 0, a hull length and a bit to port. `status`, if given,
+    /// both boats' in place of `prestart`'s (#541: the pre-gun water, racing).
     static func avoidScene(seed: UInt64 = 3, seconds: Double, across: Double = 0.3, stalled: Bool = true,
                            prestart: Bool = false, swapped: Bool = false, ghost: Bool = false,
-                           third: Bool = false) throws -> Race {
+                           third: Bool = false, status: BoatStatus? = nil) throws -> Race {
         let water = prestart ? Water(seed: seed, toGun: 20, below: 5) : Water(seed: seed, seats: third ? 3 : 2)
-        let status: BoatStatus = prestart ? .prestart : .racing
+        let status: BoatStatus = status ?? (prestart ? .prestart : .racing)
         let own: Tack = swapped ? .port : .starboard
         let theirs: Tack = swapped ? .starboard : .port
         let speed = water.up.speed
@@ -2429,5 +2430,313 @@ extension BotConductTests {
         let hunted = pilot.brain.hunting(b, view, .neutral, desired: b.heading).0
         #expect(decision.input == pilot.brain.clearingQuarter(b, view, hunted))
         #expect(pilot.brain.avoidingContact(b, view, .neutral, desired: b.heading) != nil, "a live bot would avoid her")
+    }
+
+    // MARK: - Before the gun the avoidance keeps her start (#541)
+
+    /// #541: before the gun, against a port boat stalled near dead ahead (a touch to leeward, 2.5 s out on her reach,
+    /// where a luff and a bear-away both clear her), she luffs to hold rather than bear away to pass, and neither touches
+    /// her nor crosses early in the 4 s she takes to pass her. (Later, held up at her start's hold angle and slowed by
+    /// her plan's ease, the scene's port boat, a boat no bot sails, falls off out of irons and sails into her: not
+    /// this test's.) Racing, the same water takes #537's least turn (a bear-away, the first way); and against
+    /// a same-tack boat closing from dead astern (rule 12, where both ways clear too, and a luff preference would take
+    /// the luff) she keeps the least turn before the gun as well (Q3).
+    @Test func preGunAvoidanceLuffsToHoldRatherThanBearingAwayToPass() throws {
+        let scene = { (status: BoatStatus) in try Self.avoidScene(seconds: 2.5, across: -0.025, prestart: true, status: status) }
+        let race = try scene(.prestart)
+        var pilot = Pilot(seat: 0, plannedTack: nil, race: race)
+        let start = race.boats[0].heading
+        var contact = false, over = false
+        var firstTurn = 0.0
+        for tick in 0..<(4 * Race.tickRate) where !race.isOver {
+            _ = pilot.drive(race)
+            race.step()
+            if tick == Int(1.5 * Double(Race.tickRate)) { firstTurn = wrapAngle(race.boats[0].heading - start) }
+            if race.drainEvents().contains(where: { if case .contact = $0.kind { true } else { false } }) { contact = true }
+            if race.time < 0, BotBrain.hullDepth(race.boats[0].position, heading: race.boats[0].heading,
+                                                  race.course.startLine, race.boatClass) < 0 { over = true }
+        }
+        #expect(firstTurn > deg2rad(5), "turned \(rad2deg(firstTurn))°: up, to starboard")
+        #expect(!contact && !over, "contact \(contact), over early \(over)")
+
+        // The decision itself, before the gun and racing in the same water.
+        func decided(_ race: Race) -> BotBrain.Avoidance {
+            let pilot = Pilot(seat: 0, plannedTack: nil, race: race)
+            let view = race.seatView(for: 0)
+            return pilot.brain.avoidance(view.own, view, .neutral, desired: view.own.heading)
+        }
+        #expect(decided(try scene(.prestart)).turn == .luff)
+        #expect(decided(try scene(.racing)).turn == .bearAway, "racing: the least turn, as #537 has it")
+
+        // Rule 12: a starboard boat twice her speed, closing from dead astern, before the gun and racing.
+        func astern(_ status: BoatStatus) throws -> Race {
+            let water = Water(seed: 3, toGun: 20, below: 5)
+            let speed = water.up.speed
+            let heading = water.heading(.starboard, deg2rad(70))
+            let forward = Vec2.heading(heading)
+            return try Self.place(water, [
+                Placement(position: water.centre, heading: heading, speed: speed, status: status),
+                Placement(position: water.centre - forward * (speed * 2 + water.length), heading: heading, speed: speed * 2,
+                          status: status),
+            ])
+        }
+        let sameTack = try astern(.prestart)
+        #expect(sameTack.seatView(for: 0).others.first?.rightOfWay?.rule == .clearAstern)
+        let held = decided(sameTack)
+        #expect(held.turn == .bearAway, "rule 12 before the gun: \(String(describing: held.turn))")
+        #expect(held.turn == decided(try astern(.racing)).turn, "rule 12: the least turn, as racing")
+    }
+
+    /// #541 build 2: near the line, no avoidance of hers carries her over it early: not the turn (a luff that clears the
+    /// stalled boat would be early, sheeted in or eased), nor a rudder-centred hold. Every decision to the gun, sheeted in
+    /// and eased, picks no heading that `crossesEarly` at that sheeting over `luffLineSeconds`, but for the early luff
+    /// fix round 4 allows (`earlyLuff`: the only clearing turn from a boat that can't keep clear); sailed to the gun her
+    /// hull is never over before it, and she doesn't touch her. Without the avoidance the luff's scene ends in contact.
+    @Test func preGunAvoidanceNeverCrossesEarlyAlongItsWholeCourse() throws {
+        /// Seat 0 reaching on starboard at 70°, `below` hull lengths below the line `toGun` seconds out; a port boat
+        /// stalled `seconds` ahead and `across` lengths to windward of her course.
+        func scene(toGun: Int, below: Double, seconds: Double, across: Double) throws -> Race {
+            let water = Water(seed: 3, toGun: toGun, below: below)
+            let speed = water.up.speed
+            let heading = water.heading(.starboard, deg2rad(70))
+            let forward = Vec2.heading(heading)
+            return try Self.place(water, [
+                Placement(position: water.centre, heading: heading, speed: speed, status: .prestart),
+                Placement(position: water.centre + forward * speed * seconds + forward.rightPerp * water.length * across,
+                          heading: water.wind + deg2rad(10), speed: 0.1, status: .prestart),
+            ]) { $0.seats[1].boat.autohelm = nil }
+        }
+        /// Sails seat 0 to the gun, weighing her avoidance at every decision sheeted in and eased, and counting the
+        /// centred holds she gives up as early (on her plan's heading and helm, as she sails).
+        func sailed(_ race: Race, avoids: Bool = true)
+            -> (over: Bool, contact: Bool, early: [String], refused: Int, earlyLuffs: Int) {
+            var pilot = Pilot(seat: 0, plannedTack: nil, race: race)
+            pilot.brain.avoidsContact = avoids
+            var over = false, contact = false
+            var early: [String] = []
+            var refused = 0, earlyLuffs = 0
+            while race.time < 0 && !race.isOver {
+                if avoids, race.tick.isMultiple(of: BotDriver.decisionInterval) {
+                    let view = race.seatView(for: 0)
+                    let b = view.own
+                    for ease in [false, true] {
+                        let avoidance = pilot.brain.avoidance(b, view, BoatInput(rudder: 0 as Int8, ease: ease), desired: b.heading)
+                        if let heading = avoidance.heading, !avoidance.earlyLuff,
+                           pilot.brain.crossesEarly(b, view, heading: heading, within: BotBrain.luffLineSeconds, ease: ease) {
+                            early.append("t \(race.time) ease \(ease): \(String(describing: avoidance.turn))")
+                        }
+                        // A luff (up to 30°) that would carry her over early here, at this sheeting.
+                        if avoidance.turn != nil, avoidance.turn != .luff, (1...6).contains(where: { step in
+                            pilot.brain.crossesEarly(b, view, heading: b.heading + Double(step) * BotBrain.clearingStep,
+                                                     within: BotBrain.luffLineSeconds, ease: ease)
+                        }) { earlyLuffs += 1 }
+                    }
+                }
+                if pilot.drive(race)?.avoidance?.refusedEarlyHold == true { refused += 1 }
+                race.step()
+                let boat = race.boats[0]
+                if race.time < 0, BotBrain.hullDepth(boat.position, heading: boat.heading, race.course.startLine,
+                                                     race.boatClass) < 0 { over = true }
+                if race.drainEvents().contains(where: { if case .contact = $0.kind { true } else { false } }) { contact = true }
+            }
+            return (over, contact, early, refused, earlyLuffs)
+        }
+        // (a) The turn: 6 s out and 2 lengths down, the stalled boat near dead ahead as in the luff's scene.
+        let turn = sailed(try scene(toGun: 6, below: 2, seconds: 2.5, across: -0.025))
+        #expect(turn.earlyLuffs > 0, "a luff here would carry her over early")
+        #expect(turn.early.isEmpty, "\(turn.early)")
+        #expect(!turn.over && !turn.contact, "over \(turn.over), contact \(turn.contact)")
+        let alone = sailed(try scene(toGun: 6, below: 2, seconds: 2.5, across: -0.025), avoids: false)
+        #expect(alone.over || alone.contact, "without the avoidance the scene needs none")
+        // (b) The hold: 8 s out and 2 lengths down, the stalled boat 0.6 lengths to windward of her course, where the
+        // heading she would hold on clear of her carries her over early.
+        let hold = sailed(try scene(toGun: 8, below: 2, seconds: 3, across: 0.6))
+        #expect(hold.refused > 0, "a centred hold here would carry her over early")
+        #expect(hold.early.isEmpty, "\(hold.early)")
+        #expect(!hold.over && !hold.contact, "over \(hold.over), contact \(hold.contact)")
+    }
+
+    /// #541 fix round 2 (guard over note): before the gun, a centred hold for a stalled port boat that lies only on her
+    /// plan's heading, refused as early, doesn't leave the helm to her plan, whose turn onto that heading is towards the
+    /// stopped boat (the overtake cell s10 trace: refused holds, then the plan's turn into her). She turns away from
+    /// that boat instead, onto a heading that is not early at either sheeting. Case (b)'s water, 2.6 lengths down 8 s
+    /// out, where her heading is early sheeted in but a 5° bear-away isn't; the stalled boat 30° above her heading, on
+    /// her plan's luff: so the turn away is a bear-away. (With the boat to leeward on a plan's bear-away, the turn away
+    /// is a luff, and a luff reaches the line sooner than her early hold: the search finds none, nil, as before; so in
+    /// s10 itself.) Sailed to the gun with her plan she neither touches her nor is over early. With nothing on
+    /// `desired` the same scene leaves the helm to her plan (an empty `Avoidance`).
+    @Test func preGunRefusedEarlyHoldTurnsAwayFromTheBoatOnHerPlansHeading() throws {
+        let water = Water(seed: 3, toGun: 8, below: 2.6)
+        let speed = water.up.speed
+        let heading = water.heading(.starboard, deg2rad(70))
+        let plan = water.heading(.starboard, deg2rad(70 - 30))
+        let scene = {
+            try Self.place(water, [
+                Placement(position: water.centre, heading: heading, speed: speed, status: .prestart),
+                Placement(position: water.centre + Vec2.heading(plan) * speed * 2, heading: water.wind + deg2rad(10),
+                          speed: 0.1, status: .prestart),
+            ]) { $0.seats[1].boat.autohelm = nil }
+        }
+        let race = try scene()
+        let pilot = Pilot(seat: 0, plannedTack: nil, race: race)
+        let view = race.seatView(for: 0)
+        let b = view.own
+        let other = try #require(view.others.first)
+        #expect(other.rightOfWay?.rule == .portStarboard)
+        #expect(pilot.brain.notKeepingClear(other, b, view) == nil, "no boat trips on her heading")
+        #expect(pilot.brain.notKeepingClear(other, b, view, heading: plan) == .cannot, "the stalled boat is on her plan's")
+        #expect(pilot.brain.crossesEarly(b, view, heading: b.heading, within: BotBrain.luffLineSeconds, ease: false),
+                "a centred hold here would carry her over early")
+        let avoided = pilot.brain.avoidance(b, view, .neutral, desired: plan)
+        #expect(avoided.refusedEarlyHold)
+        #expect(avoided.input != nil && avoided.turn != nil && avoided.turn != .hold, "\(avoided)")
+        #expect(avoided.turn == .bearAway, "away from the boat on her plan's luff: \(String(describing: avoided.turn))")
+        let chosen = try #require(avoided.heading)
+        for ease in [false, true] {
+            #expect(!pilot.brain.crossesEarly(b, view, heading: chosen, within: BotBrain.luffLineSeconds, ease: ease),
+                    "ease \(ease): the turn is early")
+        }
+        // Away: every degree of the turn opens her pass with the stalled boat.
+        #expect(BotBrain.closestApproach(of: other, to: b, heading: chosen, lookahead: BotBrain.avoidHorizon)
+                > BotBrain.closestApproach(of: other, to: b, heading: b.heading, lookahead: BotBrain.avoidHorizon))
+
+        // Control: with nothing on `desired`, the plan steers, as before.
+        #expect(pilot.brain.avoidance(b, view, .neutral, desired: b.heading) == BotBrain.Avoidance())
+
+        // Sailed to the gun with her plan: no contact, never over before it.
+        let sailed = try scene()
+        var driven = Pilot(seat: 0, plannedTack: nil, race: sailed)
+        var over = false, contact = false
+        while sailed.time < 0 && !sailed.isOver {
+            _ = driven.drive(sailed)
+            sailed.step()
+            let boat = sailed.boats[0]
+            if sailed.time < 0, BotBrain.hullDepth(boat.position, heading: boat.heading, sailed.course.startLine,
+                                                   sailed.boatClass) < 0 { over = true }
+            if sailed.drainEvents().contains(where: { if case .contact = $0.kind { true } else { false } }) { contact = true }
+        }
+        #expect(!over && !contact, "over \(over), contact \(contact)")
+    }
+
+    /// Sails seat 0 of `race` to the gun, deciding as she does (`Pilot.drive`): whether her hull was ever over the line
+    /// before it, and whether she touched seat 1.
+    static func sailedToGun(_ race: Race) -> (over: Bool, contact: Bool) {
+        var pilot = Pilot(seat: 0, plannedTack: nil, race: race)
+        var over = false, contact = false
+        while race.time < 0 && !race.isOver {
+            _ = pilot.drive(race)
+            race.step()
+            let boat = race.boats[0]
+            if race.time < 0, BotBrain.hullDepth(boat.position, heading: boat.heading, race.course.startLine,
+                                                 race.boatClass) < 0 { over = true }
+            if race.drainEvents().contains(where: { if case .contact = $0.kind { true } else { false } }) { contact = true }
+        }
+        return (over, contact)
+    }
+
+    /// #541 fix round 3 (the s10 judgement): before the gun, a centred hold refused as early for a stalled port boat
+    /// only on her plan's heading, with no turn away that clears, holds centred all the same (`heldEarly`) rather than
+    /// leave the helm to her plan, whose turn onto that heading is onto the stopped boat. s10's geometry: case (b)'s
+    /// water, 2.6 lengths down 8 s out, her hold early; the stalled boat 30° below her heading, on her plan's bear-away,
+    /// off her own heading: the way away, a luff, reaches the line early at its first step, and the bear-away closes.
+    /// Sailed to the gun with her plan she doesn't touch her. Control: steering her plan's heading (the helm left to
+    /// the plan) reaches the stalled boat inside `clearMarginBeams`.
+    @Test func preGunRefusedEarlyHoldWithNoTurnAwayHoldsRatherThanLeavingTheHelmToThePlan() throws {
+        let plan = Water(seed: 3, toGun: 8, below: 2.6).heading(.starboard, deg2rad(70 + 30))
+        // A fresh race each time: `place` places the boats in the water's own race.
+        let scene = {
+            let water = Water(seed: 3, toGun: 8, below: 2.6)
+            let speed = water.up.speed
+            let heading = water.heading(.starboard, deg2rad(70))
+            return try Self.place(water, [
+                Placement(position: water.centre, heading: heading, speed: speed, status: .prestart),
+                Placement(position: water.centre + Vec2.heading(plan) * speed * 2, heading: water.wind + deg2rad(10),
+                          speed: 0.1, status: .prestart),
+            ]) { $0.seats[1].boat.autohelm = nil }
+        }
+        let race = try scene()
+        let pilot = Pilot(seat: 0, plannedTack: nil, race: race)
+        let view = race.seatView(for: 0)
+        let b = view.own
+        let other = try #require(view.others.first)
+        #expect(other.rightOfWay?.rule == .portStarboard)
+        #expect(pilot.brain.notKeepingClear(other, b, view) == nil, "no boat trips on her heading")
+        #expect(pilot.brain.notKeepingClear(other, b, view, heading: plan) == .cannot, "the stalled boat is on her plan's")
+        #expect(pilot.brain.crossesEarly(b, view, heading: b.heading, within: BotBrain.luffLineSeconds, ease: false),
+                "a centred hold here would carry her over early")
+        let ease = false
+        let avoided = pilot.brain.avoidance(b, view, BoatInput(rudder: 0 as Int8, ease: ease), desired: plan)
+        #expect(avoided.refusedEarlyHold && avoided.heldEarly, "\(avoided)")
+        #expect(avoided.turn == .hold && avoided.heading == b.heading && !avoided.earlyLuff)
+        #expect(avoided.input == BoatInput(rudder: 0 as Int8, ease: ease), "rudder centred, her ease")
+
+        // Sailed to the gun with her plan: no contact. (Over early is allowed here: the hold is taken knowingly.)
+        #expect(!Self.sailedToGun(try scene()).contact)
+
+        // Control: the helm left to her plan, steering her plan's heading, reaches the stalled boat.
+        let control = try scene()
+        let helm = Pilot(seat: 0, plannedTack: nil, race: control)
+        var gap = Double.infinity, contact = false
+        for _ in 0..<(3 * Race.tickRate) where control.time < 0 {
+            if control.tick.isMultiple(of: BotDriver.decisionInterval) {
+                let view = control.seatView(for: 0)
+                control.apply(helm.brain.steer(view.own, toHeading: plan, view), seat: 0, atTick: control.tick + 1)
+            }
+            control.step()
+            let (own, stalled) = (control.boats[0], control.boats[1])
+            gap = min(gap, BotBrain.hullGap(offset: stalled.position - own.position, heading: own.heading,
+                                            otherHeading: stalled.heading, hull: control.boatClass.hull))
+            if control.drainEvents().contains(where: { if case .contact = $0.kind { true } else { false } }) { contact = true }
+        }
+        #expect(contact || gap < control.boatClass.hull.beam * BotBrain.clearMarginBeams,
+                "the plan's heading passes her clear: gap \(gap) m")
+    }
+
+    /// #541 fix round 4 (owner: "Relax the veto"): before the gun, a port boat stalled just to leeward of her course,
+    /// tripping on her own heading (`.cannot`), close enough to the line that every clearing turn is early (the luff
+    /// away from her) or none clears (the bear-away towards her): she takes the least luff that clears, early as it is
+    /// (`earlyLuff`), rather than nil. Every degree of it still opens her pass. Control: the same water with a port boat
+    /// sailing into her (`.isNot`, a boat that can keep clear) keeps the veto: no early luff, nothing early chosen.
+    @Test func preGunEarlyLuffClearsABoatThatCannotKeepClearWhenNoOtherTurnDoes() throws {
+        func scene(stalled: Bool) throws -> Race {
+            let water = Water(seed: 3, toGun: 6, below: 2)
+            let speed = water.up.speed
+            let heading = water.heading(.starboard, deg2rad(70))
+            let forward = Vec2.heading(heading)
+            let meet = water.centre + forward * speed * 2 - forward.rightPerp * water.length * 0.2
+            let theirs = water.beat(.port)
+            let port = stalled
+                ? Placement(position: meet, heading: water.wind + deg2rad(10), speed: 0.1, status: .prestart)
+                : Placement(position: meet - Vec2.heading(theirs) * speed * 2, heading: theirs, speed: speed, status: .prestart)
+            return try Self.place(water, [Placement(position: water.centre, heading: heading, speed: speed, status: .prestart),
+                                          port]) { if stalled { $0.seats[1].boat.autohelm = nil } }
+        }
+        for stalled in [true, false] {
+            let race = try scene(stalled: stalled)
+            let pilot = Pilot(seat: 0, plannedTack: nil, race: race)
+            let view = race.seatView(for: 0)
+            let b = view.own
+            let other = try #require(view.others.first)
+            #expect(other.rightOfWay?.rule == .portStarboard)
+            #expect(pilot.brain.notKeepingClear(other, b, view) == (stalled ? .cannot : .isNot))
+            for ease in [false, true] {
+                let input = BoatInput(rudder: 0 as Int8, ease: ease)
+                let avoided = pilot.brain.avoidance(b, view, input, desired: b.heading)
+                let crosses = { (heading: Double) in
+                    pilot.brain.crossesEarly(b, view, heading: heading, within: BotBrain.luffLineSeconds, ease: ease)
+                }
+                if stalled {
+                    #expect(avoided.earlyLuff && avoided.turn == .luff, "ease \(ease): \(avoided)")
+                    let chosen = try #require(avoided.heading)
+                    #expect(crosses(chosen), "ease \(ease): the luff is early, so the veto would have refused it")
+                    #expect(avoided.input?.rudderValue ?? 0 > 0, "ease \(ease): up, to starboard: \(avoided)")
+                    #expect(BotBrain.closestApproach(of: other, to: b, heading: chosen, lookahead: BotBrain.avoidHorizon)
+                            > BotBrain.closestApproach(of: other, to: b, heading: b.heading, lookahead: BotBrain.avoidHorizon))
+                } else {
+                    #expect(!avoided.earlyLuff, "ease \(ease): \(avoided)")
+                    if let heading = avoided.heading { #expect(!crosses(heading), "ease \(ease): \(avoided)") }
+                }
+            }
+        }
     }
 }

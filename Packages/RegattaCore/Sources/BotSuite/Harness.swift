@@ -153,6 +153,20 @@ public enum BotRaceHarness {
                 metrics.tackOnWindTaps = driver.tackOnWindTaps
                 metrics.coverTaps = driver.coverTaps
                 metrics.startLuffDecisions = driver.startLuffDecisions
+                // #541: her avoidance before the gun (report-only).
+                metrics.preGunAvoidLuffs = driver.preGunAvoidLuffs
+                metrics.preGunAvoidBearAways = driver.preGunAvoidBearAways
+                metrics.preGunAvoidHolds = driver.preGunAvoidHolds
+                metrics.preGunAvoidFurthest = driver.preGunAvoidFurthest
+                metrics.preGunHoldsRefusedEarly = driver.preGunHoldsRefusedEarly
+                metrics.preGunRefusedHoldsTurned = driver.preGunRefusedHoldsTurned
+                metrics.preGunHeldEarly = driver.preGunHeldEarly
+                metrics.preGunLastHeldEarlySeconds = driver.preGunLastHeldEarlyTime
+                metrics.preGunEarlyLuffs = driver.preGunEarlyLuffs
+                metrics.preGunAvoidLargestTurnUpDegrees = rad2deg(driver.preGunAvoidLargestTurnUp)
+                metrics.preGunAvoidTurnsUpOver10 = driver.preGunAvoidTurnsUpOver10
+                metrics.preGunPreferredLuffDegrees = driver.preGunPreferredLuffs.map(rad2deg)
+                metrics.preGunLastAvoidSeconds = driver.preGunLastAvoidTime
                 if profiles[seat] == nil, !cautiousSeats.contains(seat) { metrics.engagement = driver.style.engagement }
                 metrics.handling = driver.handling
             }
