@@ -20,6 +20,8 @@ public struct BotSuiteOptions: Hashable, Sendable {
     public var autohelmOff: Bool?
     /// `--boat-class id@version` (#462): sail every race on that bundled class instead of the default.
     public var boatClass: String?
+    /// `--rules id@version` (#477): sail every race on those bundled rules instead of the default.
+    public var rules: String?
     /// Races sailed at once; nil for `BotSuite.defaultJobs`. 1 sails them one after another.
     public var jobs: Int?
     /// Where to write the JSON report; `-` for stdout (the text report then goes to stderr).
@@ -30,7 +32,7 @@ public struct BotSuiteOptions: Hashable, Sendable {
     public var diagnose = false
     /// `--scenario pack` (#525) or `overtake` (#530): sail that scenario (`PackScenario`, `OvertakeScenario`) instead of
     /// the matrix. `--fleet-size` (the pack
-    /// size), `--tier-mix`, `--seeds`, `--jobs`, `--json`, `--autohelm` and `--boat-class` apply to it as they do to the
+    /// size), `--tier-mix`, `--seeds`, `--jobs`, `--json`, `--autohelm`, `--boat-class` and `--rules` apply to it as they do to the
     /// matrix; `--matrix`, `--thresholds`, `--profile-mix`, `--laps` and `--diagnose` do not.
     public var scenario: String?
     /// `--pack-current with|without|both`: the venues the pack scenario sails; nil for both.
@@ -66,6 +68,7 @@ public struct BotSuiteOptions: Hashable, Sendable {
           --autohelm <on|off>    off: sail each race on a copy of its class with the autohelm off a centred
                                  rudder, so the bots steer by hand (default: the matrix's, the class as bundled)
           --boat-class <id@v>    sail every race on that bundled class (e.g. skiff@8) instead of the default
+          --rules <id@v>         sail every race on those bundled rules (e.g. fleet-rules@8) instead of the default
           --laps <n>             laps per race instead of the matrix's
           --json <path|->        write the JSON report there (- for stdout)
           --diagnose             also print, and write under the JSON's "diagnose" key, why boats start late,
@@ -76,13 +79,13 @@ public struct BotSuiteOptions: Hashable, Sendable {
           --scenario <name>      sail a scenario instead of the matrix. pack: 4-6 boats in a bunch above the leeward
                                  gate, sailed through it, and measured (no thresholds; exits 0 on a sailed run).
                                  Uses --fleet-size (pack size, default 4, 5 and 6), --tier-mix (default national),
-                                 --seeds (default 16), --jobs, --json, --autohelm and --boat-class; takes none of
+                                 --seeds (default 16), --jobs, --json, --autohelm, --boat-class and --rules; takes none of
                                  --matrix, --thresholds, --profile-mix, --laps or --diagnose.
                                  overtake: a scripted boat at 60-70% of the polar on the first beat, or eased below
                                  the line before the gun, with live bots placed astern of her on her tack (no
                                  thresholds; exits 0 on a sailed run). Uses --fleet-size (her and the bots, default
-                                 2), --tier-mix (default national), --seeds (default 16), --jobs, --json, --autohelm
-                                 and --boat-class; takes none of the pack's or the matrix's own flags
+                                 2), --tier-mix (default national), --seeds (default 16), --jobs, --json, --autohelm,
+                                 --boat-class and --rules; takes none of the pack's or the matrix's own flags
           --pack-current <c>     with the pack scenario: with, without or both (default) a current
           --pack-offset <n>      with the pack scenario: the bunch's centre this many hull lengths across the gate from
                                  its middle (repeatable; default -6, 0 and 6; the gate is 10 hull lengths wide)
@@ -132,6 +135,7 @@ public struct BotSuiteOptions: Hashable, Sendable {
                 case let text: throw BotSuiteError.usage("--autohelm: on or off, not \(text)")
                 }
             case "--boat-class": boatClass = try value(flag)
+            case "--rules": rules = try value(flag)
             case "--json": jsonPath = try value(flag)
             case "--jobs": jobs = try number(flag)
             case "--diagnose": diagnose = true
@@ -239,6 +243,10 @@ public struct BotSuiteOptions: Hashable, Sendable {
         if let boatClass {
             _ = try BotRaceHarness.bundledClass(boatClass)
             matrix.boatClass = boatClass
+        }
+        if let rules {
+            _ = try BotRaceHarness.bundledRules(rules)
+            matrix.rules = rules
         }
         try matrix.validate()
         return matrix

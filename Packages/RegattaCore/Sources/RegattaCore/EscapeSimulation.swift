@@ -33,7 +33,12 @@ public struct RecordedBoat: Sendable, Equatable {
     public var current: Vec2
 
     /// `boat` as she is now, holding `ease`.
-    public init(_ boat: Boat, ease: Bool) {
+    /// The fraction of her target her ease sailed this tick (`Race`'s `easeSpeedFraction(sailingTick:)`): nil for the
+    /// class's. The simulation sails her on at it.
+    public var easeSpeedFraction: Double?
+
+    public init(_ boat: Boat, ease: Bool, easeSpeedFraction: Double? = nil) {
+        self.easeSpeedFraction = easeSpeedFraction
         state = BoatDynamics.State(position: boat.position, heading: boat.heading, speed: boat.speed, rudder: boat.rudder,
                                    boomSide: boat.boomSide, isPlaning: boat.isPlaning, spinnaker: boat.spinnaker)
         desiredRudder = boat.desiredRudder
@@ -686,7 +691,8 @@ public struct EscapeSimulation: Sendable {
         let moved = BoatDynamics.advance(
             BoatDynamics.State(position: boat.position, heading: boat.heading, speed: boat.speed, rudder: boat.rudder,
                                boomSide: boat.boomSide, isPlaning: boat.isPlaning, spinnaker: boat.spinnaker),
-            control: BoatDynamics.Control(rudder: boat.desiredRudder, ease: ease, sailing: true),
+            control: BoatDynamics.Control(rudder: boat.desiredRudder, ease: ease, sailing: true,
+                                          easeSpeedFraction: environment.easeSpeedFraction),
             env: BoatDynamics.Environment(windDirection: boat.sailingWind.direction, windSpeed: tws, current: boat.current,
                                           shadow: boat.speedShadow(in: boatClass)),
             boatClass: boatClass, dt: Race.dt)
@@ -718,15 +724,21 @@ struct EscapeRecorder: Sendable, Equatable {
     private var overlaps: [[Bool]] = []
 
     /// Records tick `tick`'s boats, their held inputs and the overlaps (by `OverlapTracker.index`).
-    mutating func record(tick: Int, boats fleet: [Boat], inputs: [BoatInput], overlaps certain: [Bool], capacity size: Int) {
+    mutating func record(tick: Int, boats fleet: [Boat], inputs: [BoatInput], overlaps certain: [Bool], capacity size: Int,
+                         easeSpeedFraction: Double? = nil) {
         if count == 0 || tick != newestTick + 1 || size != capacity || fleet.count != boats.count {
             self = EscapeRecorder()
             capacity = max(size, 1)
-            boats = fleet.indices.map { Array(repeating: RecordedBoat(fleet[$0], ease: inputs[$0].ease), count: capacity) }
+            boats = fleet.indices.map {
+                Array(repeating: RecordedBoat(fleet[$0], ease: inputs[$0].ease, easeSpeedFraction: easeSpeedFraction),
+                      count: capacity)
+            }
             overlaps = Array(repeating: certain, count: capacity)
         }
         let slot = self.slot(tick)
-        for seat in fleet.indices { boats[seat][slot] = RecordedBoat(fleet[seat], ease: inputs[seat].ease) }
+        for seat in fleet.indices {
+            boats[seat][slot] = RecordedBoat(fleet[seat], ease: inputs[seat].ease, easeSpeedFraction: easeSpeedFraction)
+        }
         overlaps[slot] = certain
         newestTick = tick
         count = min(count + 1, capacity)

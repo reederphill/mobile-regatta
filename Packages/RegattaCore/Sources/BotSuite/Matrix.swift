@@ -224,6 +224,9 @@ public struct BotMatrix: Codable, Hashable, Sendable {
     /// The bundled class every race sails, `id@version` (#462, `--boat-class`): to measure the bots on a class before
     /// it is the default. Nil sails the default class (`RaceFiles.defaults`), and is left out of a matrix file.
     public var boatClass: String?
+    /// The bundled rules every race sails, `id@version` (#477, `--rules`): to measure the bots on a rules file before it
+    /// is the default. Nil sails the default rules (`RaceFiles.defaults`), and is left out of a matrix file.
+    public var rules: String?
 
     /// The bots steer by hand: the matrix sails a copy with the autohelm off, or its class's autohelm already
     /// doesn't hold a centred rudder (skiff@7, skiff@8 and skiff@9, the default since #437, #461 and #462).
@@ -236,7 +239,7 @@ public struct BotMatrix: Codable, Hashable, Sendable {
                 conditionsByVenue: [String: [String]] = [:], tideStatesDegrees: [Double] = [0], fleetSizes: [Int], tierMixes: [TierMix] = [.mixed],
                 profileMixes: [ProfileMix] = [.live], mixFleetSizes: [ProfileMix: Int] = [:], laps: Int = RaceSetup.defaultLaps,
                 capSecondsAfterGun: Int = BotMatrix.defaultCapSecondsAfterGun, autohelmOff: Bool = false,
-                boatClass: String? = nil) {
+                boatClass: String? = nil, rules: String? = nil) {
         self.seeds = seeds
         self.venues = venues
         self.conditions = conditions
@@ -250,11 +253,12 @@ public struct BotMatrix: Codable, Hashable, Sendable {
         self.capSecondsAfterGun = capSecondsAfterGun
         self.autohelmOff = autohelmOff
         self.boatClass = boatClass
+        self.rules = rules
     }
 
     private enum CodingKeys: String, CodingKey {
         case seeds, venues, conditions, conditionsByVenue, tideStatesDegrees, fleetSizes, tierMixes, profileMixes, mixFleetSizes, laps
-        case capSecondsAfterGun, autohelmOff, boatClass
+        case capSecondsAfterGun, autohelmOff, boatClass, rules
     }
 
     public init(from decoder: Decoder) throws {
@@ -271,7 +275,8 @@ public struct BotMatrix: Codable, Hashable, Sendable {
                   laps: try c.decode(Int.self, forKey: .laps),
                   capSecondsAfterGun: try c.decode(Int.self, forKey: .capSecondsAfterGun),
                   autohelmOff: try c.decodeIfPresent(Bool.self, forKey: .autohelmOff) ?? false,
-                  boatClass: try c.decodeIfPresent(String.self, forKey: .boatClass))
+                  boatClass: try c.decodeIfPresent(String.self, forKey: .boatClass),
+                  rules: try c.decodeIfPresent(String.self, forKey: .rules))
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -292,6 +297,8 @@ public struct BotMatrix: Codable, Hashable, Sendable {
         if autohelmOff { try c.encode(autohelmOff, forKey: .autohelmOff) }
         // Left out when nil, so a matrix on the default class encodes as it did before #462.
         try c.encodeIfPresent(boatClass, forKey: .boatClass)
+        // Left out when nil, so a matrix on the default rules encodes as it did before #477.
+        try c.encodeIfPresent(rules, forKey: .rules)
     }
 
     /// The conditions `venue` sails, in `conditions`' order: those `conditionsByVenue` names for it, else all.
@@ -318,7 +325,7 @@ public struct BotMatrix: Codable, Hashable, Sendable {
                                     BotRaceCell(seed: seed, venue: venue, conditions: conditions, tideStateDegrees: tide,
                                                 fleetSize: fleetSize, tierMix: mix, profileMix: profiles, laps: laps,
                                                 capSecondsAfterGun: capSecondsAfterGun, autohelmOff: autohelmOff ? true : nil,
-                                                boatClass: boatClass)
+                                                boatClass: boatClass, rules: rules)
                                 }
                             }
                         }
@@ -424,6 +431,9 @@ public struct BotRaceCell: Codable, Hashable, Sendable {
     /// The bundled class it sails, `id@version` (#462, `BotMatrix.boatClass`); nil for the default class, and left out
     /// of the report then.
     public var boatClass: String? = nil
+    /// The bundled rules it sails, `id@version` (#477, `BotMatrix.rules`); nil for the default rules, and left out of
+    /// the report then.
+    public var rules: String? = nil
 
     /// The profile sailing `seat`, or nil for a live bot.
     public func profile(ofSeat seat: Int) -> BotProfile? { profileMix.profile(ofSeat: seat, seed: seed, fleetSize: fleetSize) }

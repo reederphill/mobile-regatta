@@ -40,8 +40,10 @@ public struct UmpireState: Sendable, Equatable {
     /// Records tick `tick`: each boat as she is now with her held input's ease (`inputs`, by seat) and each
     /// pair's overlap as of the last point of certainty (`overlaps`, by `OverlapTracker.index`), keeping the
     /// last `ticks` ticks.
-    mutating func record(tick: Int, boats: [Boat], inputs: [BoatInput], overlaps: [Bool], keeping ticks: Int) {
-        recorder.record(tick: tick, boats: boats, inputs: inputs, overlaps: overlaps, capacity: ticks)
+    mutating func record(tick: Int, boats: [Boat], inputs: [BoatInput], overlaps: [Bool], keeping ticks: Int,
+                         easeSpeedFraction: Double? = nil) {
+        recorder.record(tick: tick, boats: boats, inputs: inputs, overlaps: overlaps, capacity: ticks,
+                        easeSpeedFraction: easeSpeedFraction)
     }
 
     /// Seats `a` and `b`'s recorded track, oldest first through the newest tick recorded, over the last `ticks`

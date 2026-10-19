@@ -101,10 +101,36 @@ public struct CourseLayout: Sendable, Equatable {
     public let land: [Venue.LandPolygon]
     /// Boundary behaviour: the fraction of her speed along the edge a boat keeps on meeting it (#82).
     public let edgeSpeedRetention: Double
-    /// Where boats are placed at the start of the sequence (#35).
-    public let placement: RulesConfig.StartRow
+    /// The start row (#35), under a rules file before schema 8: nil under one with an opening (`opening`).
+    public let startRow: RulesConfig.StartRow?
+    /// Where boats are placed at the start of the sequence and their trim (#477), from schema 8: nil before.
+    public let opening: RulesConfig.Opening?
     /// Rule 18 zone radius, metres.
     public let zoneRadius: Double
+
+    /// Where boats are placed at the start of the sequence (#35): the start row. Traps under a rules file with an
+    /// opening, which has none: read `opening` there.
+    public var placement: RulesConfig.StartRow {
+        guard let startRow else { preconditionFailure("a rules file with an opening (schema 8) has no start row") }
+        return startRow
+    }
+
+    init(axis: Double, beat: Double, startLine: Line, finishLine: Line, elements: [Element], legs: [Leg], raceArea: RaceArea,
+         land: [Venue.LandPolygon], edgeSpeedRetention: Double, placement: RulesConfig.StartRow?,
+         opening: RulesConfig.Opening? = nil, zoneRadius: Double) {
+        self.axis = axis
+        self.beat = beat
+        self.startLine = startLine
+        self.finishLine = finishLine
+        self.elements = elements
+        self.legs = legs
+        self.raceArea = raceArea
+        self.land = land
+        self.edgeSpeedRetention = edgeSpeedRetention
+        startRow = placement
+        self.opening = opening
+        self.zoneRadius = zoneRadius
+    }
 
     public var upwind: Vec2 { .heading(axis) }
     public var right: Vec2 { upwind.rightPerp }
@@ -158,7 +184,7 @@ public struct CourseLayout: Sendable, Equatable {
         }
 
         let area = format.raceArea
-        let below = area.belowLineLineLengths * lineLength
+        let below = area.belowLine(lineLength: lineLength, hullLength: hull)
         let above = beat * (1 + area.aboveWindwardBeatFraction)
         let raceArea = RaceArea(
             centre: anchor + up * ((above - below) / 2),
@@ -170,7 +196,7 @@ public struct CourseLayout: Sendable, Equatable {
         return CourseLayout(
             axis: axis, beat: beat, startLine: line, finishLine: line, elements: elements, legs: legs,
             raceArea: raceArea, land: land.filter(raceArea.overlaps), edgeSpeedRetention: format.edgeSpeedRetention,
-            placement: format.startRow,
+            placement: format.startRow, opening: format.opening,
             zoneRadius: rules.zoneRadius(hullLength: hull)
         )
     }
@@ -280,6 +306,117 @@ public struct CourseLayout: Sendable, Equatable {
     /// The start row's heading (#35): on starboard, `placement.trueWindAngle` off the axis (the mean wind),
     /// towards the pin.
     public var startRowHeading: Double { wrapAngle(axis - placement.trueWindAngle) }
+
+    /// Stream tag for `SplitMix64(seed:stream:)` on the race seed, for the opening's jitter (#477): ASCII "openjitr". Its
+    /// order is the start row's (`startRowOrder`), on `startRowStream`.
+    public static let openingJitterStream: UInt64 = 0x6F70_656E_6A69_7472
+
+    /// One slot of the opening (#477): where a boat is, on which tack, and her heading.
+    public struct OpeningSlot: Sendable, Equatable {
+        public let position: Vec2
+        public let tack: Tack
+        /// Compass heading: starboard `opening.trueWindAngle` off the axis towards the pin, port towards the committee end.
+        public let heading: Double
+    }
+
+    /// The opening's `n` slots (#477), in slot order: slot `k` is starboard's `k / 2` for even `k` and port's `(k − 1) / 2`
+    /// for odd, so the tacks alternate along the line and the odd boat is on starboard. Starboard's `⌈n/2⌉` slots are a
+    /// row `opening.rowDepths[0]` below the line, spread over `opening.spreadLineLengths` line lengths centred on its
+    /// centre, `s = span / ⌈n/2⌉` apart, the first `s / 2` in from the pin end; port's are `opening.rowDepths[1]` below
+    /// it, each half a slot towards the committee end of starboard's of the same index.
+    ///
+    /// The grid's closest centres are `g = min(s, hypot(s/2, d))` apart (`d` the rows' depth apart), and each slot is
+    /// moved within a disc of radius `min(opening.jitter, (g − opening.minimumSpacing) / 2)` (none if that is negative),
+    /// drawn in slot order on `openingJitterStream`, so no two boats are closer than `opening.minimumSpacing` by
+    /// construction. Rejection-sampled from the square: no trigonometry (ADR 0002).
+    ///
+    /// The grid is squeezed as `startRowSlots` squeezes the row (#82), for boats of hull `hullLength` metres: both rows
+    /// up together (their depth apart kept) and the spread, each only as far as keeps every slot a hull length and its
+    /// jitter inside the race area; then the whole grid a twentieth at a time until every boat is half a hull length off
+    /// the land in the race area, its spread never so narrow that the grid's closest centres come under
+    /// `opening.minimumSpacing`: the floor wins. A grid that no squeeze takes off the land takes the tightest. With the
+    /// bundled rules the race area reaches the greater of a line length and 15 L below the line, and the bundled venues
+    /// have no land near their lines: neither moves it.
+    public func openingSlots(fleetSize n: Int, raceSeed: RaceSeed, hullLength: Double) -> [OpeningSlot] {
+        precondition(n >= 1, "an opening holds at least one boat")
+        guard let opening else { preconditionFailure("a rules file before schema 8 has a start row, not an opening") }
+        let length = startLine.length
+        let centre = startLine.centre
+        let starboardCount = (n + 1) / 2
+        let shallow = opening.rowDepths[0].metres(hullLength: hullLength)
+        let apart = opening.rowDepths[1].metres(hullLength: hullLength) - shallow
+        let span = opening.spreadLineLengths * length
+        let floor = opening.minimumSpacing.metres(hullLength: hullLength)
+        let cap = opening.jitter.metres(hullLength: hullLength)
+        func closest(_ pitch: Double) -> Double {
+            n > 2 ? min(pitch, (pitch * pitch / 4 + apart * apart).squareRoot())
+                : n == 2 ? (pitch * pitch / 4 + apart * apart).squareRoot() : .infinity
+        }
+        func radius(_ pitch: Double) -> Double { min(cap, max(0, (closest(pitch) - floor) / 2)) }
+        // Along the line from its centre, at the full spread: starboard's slot i, then port's half a slot on.
+        let pitch = span / Double(starboardCount)
+        let along: [Double] = (0..<n).map { k in
+            let stagger: Double = k % 2 == 1 ? 0.5 : 0
+            return pitch * (Double(k / 2) + 0.5 + stagger) - span / 2
+        }
+        let down: [Double] = (0..<n).map { k in k % 2 == 0 ? 0 : apart }
+        // The jitter as fractions of the radius, drawn once at the full spread.
+        var rng = SplitMix64(seed: raceSeed.value, stream: Self.openingJitterStream)
+        let unitJitter: [Vec2] = (0..<n).map { _ in
+            while true {
+                let x = rng.range(-1, 1)
+                let y = rng.range(-1, 1)
+                if x * x + y * y <= 1 { return Vec2(x, y) }
+            }
+        }
+        // Room from the line's centre, less a hull length and the full jitter, to the race area's bottom and its nearer
+        // side; the shallower row moves up as far as its depth, the spread narrows as far as the floor allows.
+        let below = raceArea.halfLength + (centre - raceArea.centre).dot(upwind) - hullLength - cap
+        let across = raceArea.halfWidth - abs((centre - raceArea.centre).dot(right)) - hullLength - cap
+        let outermost = along.map(abs).max()!
+        let shallowInside = ((below - apart) / shallow).clamped(to: 0...1)
+        let spreadInside = outermost > 0 ? (across / outermost).clamped(to: 0...1) : 1
+        // The narrowest spread whose closest centres keep the floor.
+        let tightestSpread: Double = {
+            guard n > 1 else { return 0 }
+            // Across the rows: hypot(s/2, d) ≥ floor; along a row (three boats and more): s ≥ floor.
+            let acrossRows = 2 * max(0, floor * floor - apart * apart).squareRoot()
+            let needed = n > 2 ? max(floor, acrossRows) : acrossRows
+            return min(1, needed / (spreadInside * pitch))
+        }()
+        func grid(_ squeeze: Double) -> [OpeningSlot] {
+            let rowDown = shallow * shallowInside * squeeze
+            let spread = spreadInside * max(squeeze, tightestSpread)
+            let r = radius(pitch * spread)
+            return (0..<n).map { k in
+                let tack: Tack = k % 2 == 0 ? .starboard : .port
+                let slot: Vec2 = centre - upwind * (rowDown + down[k]) + right * (along[k] * spread)
+                let jitter: Vec2 = (right * unitJitter[k].x + upwind * unitJitter[k].y) * r
+                let position = slot + jitter
+                let heading = wrapAngle(tack == .starboard ? axis - opening.trueWindAngle : axis + opening.trueWindAngle)
+                return OpeningSlot(position: position, tack: tack, heading: heading)
+            }
+        }
+        func isOffLand(_ slots: [OpeningSlot]) -> Bool {
+            let halfHull = hullLength / 2
+            return slots.allSatisfy { slot in
+                let p = slot.position
+                let box = [p - right * halfHull - upwind * halfHull, p + right * halfHull - upwind * halfHull,
+                           p + right * halfHull + upwind * halfHull, p - right * halfHull + upwind * halfHull]
+                return landClearance(of: box) >= halfHull
+            }
+        }
+        guard !land.isEmpty else { return grid(1) }
+        let grids = (0..<20).map { grid(1 - Double($0) / 20) }
+        return grids.first(where: isOffLand) ?? grids[grids.count - 1]
+    }
+
+    /// Where each of `n` seats is when the start sequence begins under an opening (#477), `result[seat]`: her slot
+    /// (`openingSlots`) in the race seed's order (`startRowOrder`, the start row's).
+    public func opening(fleetSize n: Int, raceSeed: RaceSeed, hullLength: Double) -> [OpeningSlot] {
+        let slots = openingSlots(fleetSize: n, raceSeed: raceSeed, hullLength: hullLength)
+        return Self.startRowOrder(fleetSize: n, raceSeed: raceSeed).map { slots[$0] }
+    }
 
     /// Whether `boat` is returning to start (rule 21.1, #85): OCS (`BoatStatus.ocs`: some of her hull on the
     /// course side at the gun, and not yet all of it back) and moving over the ground towards the pre-start

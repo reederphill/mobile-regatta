@@ -340,7 +340,7 @@ extension BotBrain {
         let slide = wrapAngle(b.windDirection - (line.pin.position - line.committee.position).bearing) + Self.waitOffLine
         if arrival > Self.repositionSeconds, b.tack == .starboard {
             let speed = BoatDynamics.polarTarget(relativeWind: slide, boomSide: .port, tws: b.polarWindSpeed, isPlaning: false,
-                                                 spinnaker: .down, boatClass: view.boatClass) * b.speedShadow * view.boatClass.ease.speedFraction
+                                                 spinnaker: .down, boatClass: view.boatClass) * b.speedShadow * view.easeSpeedFraction
             if min(early, Self.timingHorizon) * speed > landingRoom(b, view, hold: hold) { return nil }
         }
         return Aim(angle: slide, tack: .starboard, tolerance: Self.approachTolerance, ease: true)
@@ -378,7 +378,7 @@ extension BotBrain {
         let course = Vec2.heading(b.windDirection - hold - Self.joinMargin - Self.setupMargin)
         let holdCourse = Vec2.heading(b.windDirection - hold)
         let eased = BoatDynamics.polarTarget(relativeWind: hold, boomSide: .port, tws: b.polarWindSpeed, isPlaning: false,
-                                             spinnaker: .down, boatClass: boatClass) * b.speedShadow * boatClass.ease.speedFraction
+                                             spinnaker: .down, boatClass: boatClass) * b.speedShadow * view.easeSpeedFraction
         let scheduled = eased * max(holdCourse.dot(c.upwind), 0.3) * max(0, arrival - Self.setupSeconds)
         let deepest = max(maxHoldDepth(view, at: spot), length * 2)
         let depth = min(max(-c.startLine.side(b.position), scheduled, length * 2), deepest)
@@ -418,7 +418,7 @@ extension BotBrain {
         var target = BoatDynamics.polarTarget(relativeWind: relativeWind, boomSide: relativeWind >= 0 ? .port : .starboard,
                                               tws: b.polarWindSpeed, isPlaning: senses.planing, spinnaker: .down,
                                               boatClass: boatClass) * b.speedShadow
-        if ease { target *= boatClass.ease.speedFraction }
+        if ease { target *= view.easeSpeedFraction }
         let slowing = ease ? boatClass.ease.timeConstant : boatClass.momentum.slowingDown
         let dt = Self.timingStep
         var speed = b.speed

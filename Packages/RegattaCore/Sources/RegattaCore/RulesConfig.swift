@@ -36,7 +36,11 @@ public struct RulesConfig: DataFileContent {
     /// Schema 7 (#517) adds how far back the 16.1 test looks for the right-of-way boat's turn in a rule 21.2 incident
     /// (`Escape.penaltyLookBack`); a schema-1 to -6 file has none (nil), and such an incident looks `Escape.horizon`
     /// back, like any other.
-    public static let supportedSchemaVersions = [1, 2, 3, 4, 5, 6, 7]
+    /// Schema 8 (#477) replaces the start row with the opening (`RaceFormat.opening`): two rows, starboard and port, eased
+    /// at a trim before the gun (`easeSpeedFraction(boatClass:beforeGun:)`), and adds the race area's least depth below
+    /// the line (`RaceAreaFactors.belowLineMinimum`). A schema-8 file has no `startRow`; a schema-1 to -7 file has no
+    /// opening (nil) and no least depth: its boats start in the row, eased at the class's fraction.
+    public static let supportedSchemaVersions = [1, 2, 3, 4, 5, 6, 7, 8]
 
     public var incidents: Incidents
     /// The rule 18 zone.
@@ -184,7 +188,11 @@ public struct RulesConfig: DataFileContent {
         public var leewardGate: LeewardGate
         public var offsetMark: OffsetMark
         public var raceArea: RaceAreaFactors
-        public var startRow: StartRow
+        /// Where boats are at the start of the sequence before schema 8 (#35): nil in a schema-8 file, which has
+        /// `opening` instead. Implicitly unwrapped: every reader of the row reads a file that has one.
+        public var startRow: StartRow!
+        /// Where boats are at the start of the sequence, and their trim before the gun, from schema 8 (#477): nil before.
+        public var opening: Opening?
         /// Fraction of her speed along the edge a boat keeps on meeting land or the boundary. Placeholder.
         public var edgeSpeedRetention: Double
         public var beatSizing: BeatSizing
@@ -254,10 +262,46 @@ public struct RulesConfig: DataFileContent {
 
     /// The race area: `acrossAxisBeatFraction` × beat either side of the axis, `belowLineLineLengths`
     /// line lengths below the line and `aboveWindwardBeatFraction` × beat above the windward mark.
+    /// From schema 8 (#477) the race area reaches below the line the greater of `belowLineLineLengths` line lengths and
+    /// `belowLineMinimum` (nil before: line lengths only).
     public struct RaceAreaFactors: Sendable, Equatable {
         public var acrossAxisBeatFraction: Double
         public var belowLineLineLengths: Double
         public var aboveWindwardBeatFraction: Double
+        public var belowLineMinimum: HullLengths? = nil
+
+        /// Metres below the line, for a line `lineLength` metres long and a class whose hull is `hullLength` metres.
+        public func belowLine(lineLength: Double, hullLength: Double) -> Double {
+            let lines = belowLineLineLengths * lineLength
+            guard let minimum = belowLineMinimum else { return lines }
+            return max(lines, minimum.metres(hullLength: hullLength))
+        }
+    }
+
+    /// The opening (schema 8, #477): where boats are at the start of the sequence, and how an ease trims them before the
+    /// gun. Two rows below the line, starboard tack at `rowDepths[0]` and port at `rowDepths[1]`, spread over
+    /// `spreadLineLengths` line lengths; slots alternate the tacks in the seeded order (`CourseLayout.opening`), port's
+    /// staggered half a slot towards the committee end, each jittered within `jitter` and no two closer than
+    /// `minimumSpacing`, centre to centre. Starboard reaches towards the pin and port towards the committee end, both
+    /// `trueWindAngle` off the axis, eased: before the gun an ease sails `easeSpeedFraction` of her target (every seat's,
+    /// the human's too), and from the gun the class's (`BoatClass.ease.speedFraction`).
+    public struct Opening: Sendable, Equatable {
+        /// Starboard's row, then port's.
+        public var rowDepths: [HullLengths]
+        public var spreadLineLengths: Double
+        /// Radians.
+        public var trueWindAngle: Double
+        public var easeSpeedFraction: Double
+        public var minimumSpacing: HullLengths
+        /// The cap on each slot's jitter radius; the drawn radius keeps `minimumSpacing` (`CourseLayout.openingSlots`).
+        public var jitter: HullLengths
+    }
+
+    /// The fraction of her target speed an ease sails (`BoatDynamics.Control.easeSpeedFraction`): the opening's trim
+    /// before the gun under a rules file with one (schema 8, #477), otherwise `boatClass`'s. The only reader of the trim.
+    public func easeSpeedFraction(boatClass: BoatClass, beforeGun: Bool) -> Double {
+        if beforeGun, let opening = raceFormat.opening { return opening.easeSpeedFraction }
+        return boatClass.ease.speedFraction
     }
 
     /// Where boats are at the start of the sequence (#35): one row `depthLineLengths` below the line,
@@ -293,7 +337,7 @@ public struct RulesConfig: DataFileContent {
 
     public init(fileData: Data, header: DataFileHeader) throws {
         switch header.schemaVersion {
-        case 1, 2, 3, 4, 5, 6, 7:
+        case 1, 2, 3, 4, 5, 6, 7, 8:
             // Duplicate keys were already refused by `DataFile`, so every parse below reads the same file.
             let document = try JSONDecoder().decode(RulesConfigSchema.self, from: fileData)
             try document.rejectUnknownFields(in: fileData)
@@ -465,9 +509,26 @@ struct RulesConfigSchema: Decodable {
             let acrossAxisBeatFraction: Double
             let belowLineLineLengths: Double
             let aboveWindwardBeatFraction: Double
+            /// Schema 8.
+            let belowLineMinimumHullLengths: Double?
 
             enum CodingKeys: String, CodingKey, CaseIterable {
-                case acrossAxisBeatFraction, belowLineLineLengths, aboveWindwardBeatFraction
+                case acrossAxisBeatFraction, belowLineLineLengths, aboveWindwardBeatFraction, belowLineMinimumHullLengths
+            }
+        }
+
+        /// Schema 8.
+        struct Opening: Decodable {
+            let rowDepthsHullLengths: [Double]
+            let spreadLineLengths: Double
+            let trueWindAngleDegrees: Double
+            let easeSpeedFraction: Double
+            let minimumSpacingHullLengths: Double
+            let jitterHullLengths: Double
+
+            enum CodingKeys: String, CodingKey, CaseIterable {
+                case rowDepthsHullLengths, spreadLineLengths, trueWindAngleDegrees, easeSpeedFraction
+                case minimumSpacingHullLengths, jitterHullLengths
             }
         }
 
@@ -501,13 +562,16 @@ struct RulesConfigSchema: Decodable {
         let leewardGate: LeewardGate
         let offsetMark: OffsetMark
         let raceArea: RaceArea
-        let startRow: StartRow
+        /// Every schema but 8.
+        let startRow: StartRow?
+        /// Schema 8.
+        let opening: Opening?
         let edgeSpeedRetention: Double
         let beatSizing: BeatSizing
 
         enum CodingKeys: String, CodingKey, CaseIterable {
             case startSequenceSeconds, penalty, protestWindowSeconds, finishWindowSeconds, timeLimitSeconds, startLine
-            case leewardGate, offsetMark, raceArea, startRow, edgeSpeedRetention, beatSizing
+            case leewardGate, offsetMark, raceArea, startRow, opening, edgeSpeedRetention, beatSizing
         }
     }
 
@@ -522,7 +586,7 @@ struct RulesConfigSchema: Decodable {
         }
     }
 
-    /// Every field schemas 1 to 7 have, from each type's `CodingKeys`, so it can't drift from the decoder.
+    /// Every field schemas 1 to 8 have, from each type's `CodingKeys`, so it can't drift from the decoder.
     static let fields: FieldTree = .object(CodingKeys.self, [
         .incidents: .object(Incidents.CodingKeys.self, [
             .nearMissSweep: .object(NearMissSweep.CodingKeys.self),
@@ -539,12 +603,13 @@ struct RulesConfigSchema: Decodable {
             .offsetMark: .object(RaceFormat.OffsetMark.CodingKeys.self),
             .raceArea: .object(RaceFormat.RaceArea.CodingKeys.self),
             .startRow: .object(RaceFormat.StartRow.CodingKeys.self),
+            .opening: .object(RaceFormat.Opening.CodingKeys.self),
             .beatSizing: .object(RaceFormat.BeatSizing.CodingKeys.self),
         ]),
     ])
 
     /// Validates the file and converts it to code units. Throws `DataFileError.invalidContent`, or `malformed`
-    /// for a schema-2 to -7 file without a field its schema requires.
+    /// for a schema-2 to -8 file without a field its schema requires.
     func rulesConfig(id: String, schemaVersion: Int, fileData: Data) throws -> RulesConfig {
         func check(_ condition: Bool, _ reason: @autoclosure () -> String) throws {
             if !condition { throw DataFileError.invalidContent(kind: RulesConfig.kind, id: id, reason: reason()) }
@@ -706,23 +771,62 @@ struct RulesConfigSchema: Decodable {
         try positive(format.raceArea.acrossAxisBeatFraction, "raceFormat.raceArea.acrossAxisBeatFraction")
         try positive(format.raceArea.belowLineLineLengths, "raceFormat.raceArea.belowLineLineLengths")
         try positive(format.raceArea.aboveWindwardBeatFraction, "raceFormat.raceArea.aboveWindwardBeatFraction")
-        try positive(format.startRow.depthLineLengths, "raceFormat.startRow.depthLineLengths")
-        try positive(format.startRow.spreadLineLengths, "raceFormat.startRow.spreadLineLengths")
-        let rowAngle = try angle(format.startRow.trueWindAngleDegrees, "raceFormat.startRow.trueWindAngleDegrees", max: 180)
-        try check(format.startRow.polarSpeedFraction.isFinite && format.startRow.polarSpeedFraction > 0
-                  && format.startRow.polarSpeedFraction <= 1, "raceFormat.startRow.polarSpeedFraction must be in (0, 1]")
-        // Schema 2's start-row spacing floor: required in schema 2, refused in schema 1.
-        var rowSpacing: HullLengths?
-        if schemaVersion >= 2 {
-            guard let spacing = format.startRow.minimumSpacingHullLengths else {
+        // Schema 8's opening and the race area's least depth below the line: required in schema 8, which has no start
+        // row, and refused before it, where the start row is required.
+        var belowLineMinimum: HullLengths?
+        var startRow: RulesConfig.StartRow?
+        var opening: RulesConfig.Opening?
+        if schemaVersion >= 8 {
+            try check(format.startRow == nil, "raceFormat.startRow is gone from schema 8: the opening replaces it")
+            guard let minimum = format.raceArea.belowLineMinimumHullLengths else {
                 throw DataFileError.malformed(
-                    kind: RulesConfig.kind, reason: "schema \(schemaVersion) needs raceFormat.startRow.minimumSpacingHullLengths")
+                    kind: RulesConfig.kind, reason: "schema \(schemaVersion) needs raceFormat.raceArea.belowLineMinimumHullLengths")
             }
-            try positive(spacing, "raceFormat.startRow.minimumSpacingHullLengths")
-            rowSpacing = HullLengths(spacing)
+            try positive(minimum, "raceFormat.raceArea.belowLineMinimumHullLengths")
+            belowLineMinimum = HullLengths(minimum)
+            guard let file = format.opening else {
+                throw DataFileError.malformed(kind: RulesConfig.kind, reason: "schema \(schemaVersion) needs raceFormat.opening")
+            }
+            try check(file.rowDepthsHullLengths.count == 2 && file.rowDepthsHullLengths.allSatisfy { $0.isFinite && $0 > 0 }
+                      && file.rowDepthsHullLengths[0] < file.rowDepthsHullLengths[1],
+                      "raceFormat.opening.rowDepthsHullLengths must be two positive depths, starboard's shallower")
+            try positive(file.spreadLineLengths, "raceFormat.opening.spreadLineLengths")
+            let openingAngle = try angle(file.trueWindAngleDegrees, "raceFormat.opening.trueWindAngleDegrees", max: 180)
+            try check(file.easeSpeedFraction.isFinite && file.easeSpeedFraction > 0 && file.easeSpeedFraction <= 1,
+                      "raceFormat.opening.easeSpeedFraction must be in (0, 1]")
+            try positive(file.minimumSpacingHullLengths, "raceFormat.opening.minimumSpacingHullLengths")
+            try nonNegative(file.jitterHullLengths, "raceFormat.opening.jitterHullLengths")
+            opening = .init(rowDepths: file.rowDepthsHullLengths.map(HullLengths.init), spreadLineLengths: file.spreadLineLengths,
+                            trueWindAngle: openingAngle, easeSpeedFraction: file.easeSpeedFraction,
+                            minimumSpacing: HullLengths(file.minimumSpacingHullLengths),
+                            jitter: HullLengths(file.jitterHullLengths))
         } else {
-            try check(format.startRow.minimumSpacingHullLengths == nil,
-                      "raceFormat.startRow.minimumSpacingHullLengths needs schema 2")
+            try check(format.opening == nil, "raceFormat.opening needs schema 8")
+            try check(format.raceArea.belowLineMinimumHullLengths == nil,
+                      "raceFormat.raceArea.belowLineMinimumHullLengths needs schema 8")
+            guard let row = format.startRow else {
+                throw DataFileError.malformed(kind: RulesConfig.kind, reason: "schema \(schemaVersion) needs raceFormat.startRow")
+            }
+            try positive(row.depthLineLengths, "raceFormat.startRow.depthLineLengths")
+            try positive(row.spreadLineLengths, "raceFormat.startRow.spreadLineLengths")
+            let rowAngle = try angle(row.trueWindAngleDegrees, "raceFormat.startRow.trueWindAngleDegrees", max: 180)
+            try check(row.polarSpeedFraction.isFinite && row.polarSpeedFraction > 0
+                      && row.polarSpeedFraction <= 1, "raceFormat.startRow.polarSpeedFraction must be in (0, 1]")
+            // Schema 2's start-row spacing floor: required in schema 2, refused in schema 1.
+            var rowSpacing: HullLengths?
+            if schemaVersion >= 2 {
+                guard let spacing = row.minimumSpacingHullLengths else {
+                    throw DataFileError.malformed(
+                        kind: RulesConfig.kind, reason: "schema \(schemaVersion) needs raceFormat.startRow.minimumSpacingHullLengths")
+                }
+                try positive(spacing, "raceFormat.startRow.minimumSpacingHullLengths")
+                rowSpacing = HullLengths(spacing)
+            } else {
+                try check(row.minimumSpacingHullLengths == nil,
+                          "raceFormat.startRow.minimumSpacingHullLengths needs schema 2")
+            }
+            startRow = .init(depthLineLengths: row.depthLineLengths, spreadLineLengths: row.spreadLineLengths,
+                             trueWindAngle: rowAngle, polarSpeedFraction: row.polarSpeedFraction, minimumSpacing: rowSpacing)
         }
         try fraction(format.edgeSpeedRetention, "raceFormat.edgeSpeedRetention")
         try positive(format.beatSizing.leaderSeconds, "raceFormat.beatSizing.leaderSeconds")
@@ -757,11 +861,10 @@ struct RulesConfigSchema: Decodable {
                 offsetMark: .init(toPort: HullLengths(format.offsetMark.toPortHullLengths)),
                 raceArea: .init(acrossAxisBeatFraction: format.raceArea.acrossAxisBeatFraction,
                                 belowLineLineLengths: format.raceArea.belowLineLineLengths,
-                                aboveWindwardBeatFraction: format.raceArea.aboveWindwardBeatFraction),
-                startRow: .init(depthLineLengths: format.startRow.depthLineLengths,
-                                spreadLineLengths: format.startRow.spreadLineLengths,
-                                trueWindAngle: rowAngle, polarSpeedFraction: format.startRow.polarSpeedFraction,
-                                minimumSpacing: rowSpacing),
+                                aboveWindwardBeatFraction: format.raceArea.aboveWindwardBeatFraction,
+                                belowLineMinimum: belowLineMinimum),
+                startRow: startRow,
+                opening: opening,
                 edgeSpeedRetention: format.edgeSpeedRetention,
                 beatSizing: .init(leaderSeconds: format.beatSizing.leaderSeconds, maxMetres: format.beatSizing.maxMetres,
                                   calibrationFactor: format.beatSizing.calibrationFactor)),
