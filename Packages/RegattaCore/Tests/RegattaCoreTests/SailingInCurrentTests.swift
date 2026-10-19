@@ -18,7 +18,7 @@ func steadyCurrent(knots: Double, towards bearing: Double) -> CurrentField {
 /// winds, then with its world edited by `place`. `wind` replaces the keyed wind over the ground, as
 /// `Race.init(setup:files:mode:current:wind:)` says. Every boat is let go where she's placed: her autohelm
 /// engages on the next step, on the angle she sails then (ADR 0007). The race is at `venue` if one is given, and
-/// under `rules` (the default rules configuration without).
+/// under `rules` (without, the start row's, `startRowRules`: placed scenes sail sheeted in, as before #477's opening).
 func placedRace(seats: Int = 2, current: CurrentField, seed: UInt64 = 3, wind: ((_ tick: Int) -> GroundWind)? = nil,
                 boatClass: FileRef? = nil, boatClassFile: BoatClassFile? = nil, venue: VenueFile? = nil,
                 rules: RulesConfigFile? = nil, _ place: (inout WorldSnapshot, Race) -> Void) throws -> Race {
@@ -28,10 +28,11 @@ func placedRace(seats: Int = 2, current: CurrentField, seed: UInt64 = 3, wind: (
     var catalog = RaceFileCatalog()
     if let boatClassFile { try catalog.boatClasses.add(boatClassFile) }
     let venue = try venue.map { try catalog.venues.add($0) } ?? RaceFiles.defaults.venue.ref
-    if let rules { try catalog.rulesConfigurations.add(rules) }
+    let rules = rules ?? startRowRules
+    try catalog.rulesConfigurations.add(rules)
     let setup = try RaceSetup(raceSeed: RaceSeed(seed), seats: Array(repeating: .human, count: seats), laps: 2,
                               startSequenceTicks: 60 * Race.tickRate, boatClass: boatClass, venue: venue,
-                              rulesConfiguration: rules?.ref ?? RaceFiles.defaults.rulesConfiguration.ref)
+                              rulesConfiguration: rules.ref)
     let race = try Race(setup: setup, files: RaceFiles(resolving: setup, from: catalog),
                         mode: .authoritative(windSeed: WindSeed(seed &* 0x9E37_79B9_7F4A_7C15 &+ 1)), current: current,
                         wind: wind)

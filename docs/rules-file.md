@@ -33,11 +33,11 @@ changes; a change ships as `<id>@<version + 1>.json`.
   logs replay.
 - `fleet-rules@7` (bundled, schema 7): version 6 plus `escape.penaltyLookBackSeconds`, 8 (#517): a boat that turns
   into a boat taking a penalty takes the call (rule 16.1) when the course she held before the turn would have stayed
-  clear. The default (`RaceFiles.defaults`, `Race.defaultRulesConfiguration`) since #517.
+  clear. The default from #517 until #477; kept so its race logs replay.
 - `fleet-rules@8` (bundled, schema 8): version 7 with the opening in place of the start row (#477): two rows below
   the line, starboard tack at 5.5 L and port at 8.5 L, reaching at 80° eased at 0.5 of the target before the gun, no
-  two boats closer than 3 L; the race area reaches at least 15 L below the line. Not the default yet: the bot suite
-  sails it with `--rules fleet-rules@8`.
+  two boats closer than 3 L; the race area reaches at least 15 L below the line. The default (`RaceFiles.defaults`,
+  `Race.defaultRulesConfiguration`) since #477.
 
 Schema 2 is schema 1 plus `raceFormat.startRow.minimumSpacingHullLengths`, the start row's spacing floor:
 required in schema 2, refused in schema 1. A schema-1 file has no floor (`RulesConfig.StartRow.minimumSpacing`

@@ -582,7 +582,8 @@ import RegattaCore
     /// called. The starboard boat holds her course throughout: she doesn't avoid the port boat (#537's `avoidsContact`
     /// off). With it on she is still never called (#537): with the contact the hull's (fix round 2) she may pass the
     /// port boat clear, and if they touch, the call is the port boat's under rule 10.
-    @Test func misjudgingPortBoatSailsOnAndIsCalled() throws {
+    // fleet-rules@7 (#477): the scene was fitted to the start row's race area and pre-gun ease; the opening's moves it.
+    @Test(.onSevenRules) func misjudgingPortBoatSailsOnAndIsCalled() throws {
         let encounter = Self.portStarboard(seed: 11, early: 0, running: false)
         let judged = Self.sail(try encounter.race(), seconds: encounter.seconds, planned: encounter.planned,
                                weaknesses: [nil, Self.misjudging(0)], avoids: [false, true])
@@ -696,7 +697,8 @@ import RegattaCore
     /// or, with no luff left, eases and drops astern; she never bears away towards her, and the rule 11 call never
     /// comes. #99's luff target sat inside `steer`'s no-go clamp, so she luffed by nothing.
     // skiff@7 until #455: on skiff@8 the windward boat never luffs inside her hold (seeds 3 and 7).
-    @Test(.onSkiffSeven) func windwardLuffHoldingNearCloseHauledLuffs() throws {
+    // fleet-rules@7 (#477): the scene was fitted to the start row's race area and pre-gun ease; the opening's moves it.
+    @Test(.onSkiffSeven, .onSevenRules) func windwardLuffHoldingNearCloseHauledLuffs() throws {
         var failures: [String] = []
         for seed: UInt64 in [3, 7, 13] {
             for (windward, abeam, ahead) in [(36.0, 1.1, 0.3), (33.0, 1.1, 0.3), (36.0, 0.9, 0.0), (40.0, 1.2, 0.5)] {
@@ -1332,7 +1334,8 @@ import RegattaCore
     /// ahead and one across, and is still in what is left of her sweep when her late-dodge time runs out: she holds
     /// off until then, starts at her first decision past it, `penaltyLateDodgeSeconds` past her latest start, the boat still
     /// there, serves the turn and touches nothing.
-    @Test func penaltyTurnPastItsLatestStartStartsAtTheCapWithTheBoatInItsSweep() throws {
+    // fleet-rules@7 (#477): the scene was fitted to the start row's race area and pre-gun ease; the opening's moves it.
+    @Test(.onSevenRules) func penaltyTurnPastItsLatestStartStartsAtTheCapWithTheBoatInItsSweep() throws {
         let (seed, race, way) = try Self.pastLatestStartScene([(3, 1.0, true)])
         let (heldOff, start) = try Self.pastLatestStart(race, way: way)
         let started = try #require(start, "seed \(seed): never started")
@@ -2043,7 +2046,8 @@ import RegattaCore
     /// #280, ruling 2 (#103's model before the start): a port boat that misjudges her encounter before the gun believes
     /// she holds her rights and sails on into the starboard boat, and is called under rule 10; judging it right, she
     /// keeps clear and nobody is called. Never a turn towards: misjudging only leaves her keep-clear out.
-    @Test func prestartMisjudgingPortBoatSailsOnAndIsCalled() throws {
+    // fleet-rules@7 (#477): the scene was fitted to the start row's race area and pre-gun ease; the opening's moves it.
+    @Test(.onSevenRules) func prestartMisjudgingPortBoatSailsOnAndIsCalled() throws {
         // Seeds 1 and 11 (#437): hand steering (skiff@7) puts the port boat 0.3 m wide of the starboard one on seed 3, a miss.
         for seed: UInt64 in [1, 11] {
             let judged = Self.sailOne(try Self.prestartPortStarboard(seed: seed), seat: 1, seconds: 12,
@@ -2394,7 +2398,8 @@ import RegattaCore
     /// the circle's radius (the class's penalty turn) and the sailing after the tack (`penaltyCircleAfter`) are the
     /// same for every bot. Seat 0 taking her penalty far enough up the line of the tack that a skill-1 bot's track
     /// stops short of her circle: the cautious bot's doesn't, and she holds the tack.
-    @Test func cautiousBotHoldsATackThroughTheCircleOfABoatTakingAPenalty() throws {
+    // fleet-rules@7 (#477): the scene was fitted to the start row's race area and pre-gun ease; the opening's moves it.
+    @Test(.onSevenRules) func cautiousBotHoldsATackThroughTheCircleOfABoatTakingAPenalty() throws {
         for seed: UInt64 in [3, 9, 18] {
             let scene = { try Self.tackTowardsATurningBoat(seed: seed, along: 7.7, ahead: 0, turning: $0) }
             let race = try scene(true)
@@ -2546,7 +2551,8 @@ extension BotConductTests {
     /// #537 build 2: racing and before her start, a starboard bot turns away from a port boat stalled 3 s ahead and a
     /// touch to starboard (to port, bearing away) once contact is inside the horizon, and doesn't touch her; holding on,
     /// as before #537, she did.
-    @Test func rightOfWayBotTurnsAwayFromAStalledBoat() throws {
+    // fleet-rules@7 (#477): the scene was fitted to the start row's race area and pre-gun ease; the opening's moves it.
+    @Test(.onSevenRules) func rightOfWayBotTurnsAwayFromAStalledBoat() throws {
         // Before her start her plan luffs her up from her reach; the stalled boat is further to windward there.
         for (prestart, across) in [(false, 0.3), (true, 0.9)] {
             let scene = { try Self.avoidScene(seconds: prestart ? 2.5 : 3, across: across, prestart: prestart) }
@@ -2664,7 +2670,8 @@ extension BotConductTests {
     /// and eased, picks no heading that `crossesEarly` at that sheeting over `luffLineSeconds`, but for the early luff
     /// fix round 4 allows (`earlyLuff`: the only clearing turn from a boat that can't keep clear); sailed to the gun her
     /// hull is never over before it, and she doesn't touch her. Without the avoidance the luff's scene ends in contact.
-    @Test func preGunAvoidanceNeverCrossesEarlyAlongItsWholeCourse() throws {
+    // fleet-rules@7 (#477): the scene was fitted to the start row's race area and pre-gun ease; the opening's moves it.
+    @Test(.onSevenRules) func preGunAvoidanceNeverCrossesEarlyAlongItsWholeCourse() throws {
         /// Seat 0 reaching on starboard at 70°, `below` hull lengths below the line `toGun` seconds out; a port boat
         /// stalled `seconds` ahead and `across` lengths to windward of her course.
         func scene(toGun: Int, below: Double, seconds: Double, across: Double) throws -> Race {

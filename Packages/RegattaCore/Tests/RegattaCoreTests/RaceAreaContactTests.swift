@@ -370,12 +370,15 @@ import Testing
     /// the row reaching to 0.3 line lengths below the line, and a rock in the row under the other half.
     /// Every boat still starts a hull length off both, as off the boundary, in a row squeezed up towards
     /// the line, still parallel to it and still clear ahead and astern; the same row without the land puts
-    /// some of the fleet on it or against it.
+    /// some of the fleet on it or against it. On the start row's rules, fleet-rules@7 (#477): land this close reaches
+    /// into the race area, which `VenueCheck` refuses, and the default's opening seats its port row a fixed 3 L below
+    /// the starboard row's, so no squeeze clears it.
     @Test func everyBoatStartsAHullLengthOffLandNearTheLine() throws {
         var wouldHaveTouched = 0
+        let rowRules = try RulesConfigFile.bundled(id: "fleet-rules", version: 7).ref
         for seats in [2, 8, 16] {
             for seed: UInt64 in 1...6 {
-                let open = testRace(opponents: seats - 1, seed: seed)
+                let open = testRace(opponents: seats - 1, seed: seed, rules: rowRules)
                 let c = open.course
                 let length = c.startLine.length
                 func at(_ across: Double, _ below: Double) -> Vec2 {
@@ -386,7 +389,8 @@ import Testing
                 var catalog = RaceFileCatalog()
                 let venue = try catalog.venues.add(Self.venue(land: land))
                 let setup = try RaceSetup(raceSeed: open.setup.raceSeed, seats: open.setup.seats, laps: open.setup.laps,
-                                          startSequenceTicks: open.setup.startSequenceTicks, venue: venue)
+                                          startSequenceTicks: open.setup.startSequenceTicks, venue: venue,
+                                          rulesConfiguration: rowRules)
                 let race = try Race(setup: setup, files: RaceFiles(resolving: setup, from: catalog),
                                     mode: .authoritative(windSeed: WindSeed(seed)))
                 #expect(race.course.land.count == 2)

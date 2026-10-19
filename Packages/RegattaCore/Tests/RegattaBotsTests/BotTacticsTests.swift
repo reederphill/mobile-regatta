@@ -614,7 +614,8 @@ import Testing
     /// #234 acceptance (#223: "targets by tactical value only, blind to human or bot"): a port bot meeting a starboard
     /// boat she can lee-bow, with another starboard boat near, chooses the same target, and decides the same, whichever
     /// of the two a human sails.
-    @Test func targetIgnoresHumanFlag() throws {
+    // fleet-rules@7 (#477): the scene was fitted to the start row's race area and pre-gun ease; the opening's moves it.
+    @Test(.onSevenRules) func targetIgnoresHumanFlag() throws {
         func play(_ seats: [SeatKind]) throws -> (play: BotBrain.FleetPlay?, decision: BotDecision) {
             let scene = Scene(seats: seats, seed: 9)
             let starboard = scene.centre

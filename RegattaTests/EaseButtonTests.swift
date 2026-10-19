@@ -7,7 +7,13 @@ import RegattaCore
 /// Ease (#99, #112, #453): a gesture, with VoiceOver's `race-ease` toggle beside it; Ease is on while either is, and
 /// each release records your speed for UI tests.
 @MainActor @Suite struct EaseButtonTests {
-    private static let config = RaceConfig(opponents: 1, prestartSeconds: 60, seed: 1, windSeed: RaceConfig.windSeed(pinnedTo: 1))
+    /// A practice race on fleet-rules@7, which seats her sheeted in: Ease is the gesture's and VoiceOver's alone. The
+    /// default rules' opening (fleet-rules@8, #477) seats her eased; its tests use `openingConfig`.
+    private static var config: RaceConfig {
+        var config = RaceConfig(opponents: 1, prestartSeconds: 60, seed: 1, windSeed: RaceConfig.windSeed(pinnedTo: 1))
+        config.files.rulesConfiguration = try! RulesConfigFile.bundled(id: "fleet-rules", version: 7).ref
+        return config
+    }
 
     @Test func voiceOverActionTogglesEase() {
         let session = GameSession(config: Self.config)
@@ -65,7 +71,8 @@ import RegattaCore
 
     // MARK: The opening's seated ease (#477)
 
-    /// A practice race on fleet-rules@8, whose opening seats every boat eased: 60 s to the gun, as practice sails.
+    /// A practice race on fleet-rules@8 (the default since #477), whose opening seats every boat eased: 60 s to the
+    /// gun, as practice sails.
     private static var openingConfig: RaceConfig {
         var config = RaceConfig(opponents: 3, prestartSeconds: 60, seed: 1, windSeed: RaceConfig.windSeed(pinnedTo: 1))
         config.files.rulesConfiguration = try! RulesConfigFile.bundled(id: "fleet-rules", version: 8).ref
@@ -170,7 +177,7 @@ import RegattaCore
         #expect(session.notice?.text == text.text(for: session.controls.steering))
     }
 
-    /// A race that seats her sheeted in (fleet-rules@7 and older, the default) has no seated ease: the first frame
+    /// A race that seats her sheeted in (fleet-rules@7 and older) has no seated ease: the first frame
     /// sends no ease, as before #477.
     @Test func noSeatedEaseWithoutAnOpening() {
         let session = GameSession(config: Self.config)

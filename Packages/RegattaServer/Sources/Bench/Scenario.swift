@@ -21,12 +21,15 @@ public struct Scenario: Codable, Hashable, Sendable {
     /// files' (`RaceFiles.defaults`). A row that leaves them out keeps the race it always sailed.
     public var venue: String?
     public var conditions: String?
+    /// The rules configuration sailed, a bundled file named `id@version` (#477); nil for the default race files'. A row
+    /// pins it when the default's start no longer sails the scene it was probed for.
+    public var rules: String?
     /// Why the row is there and how its seeds were picked (#105): data for a reader, never read by the bench.
     public var note: String?
 
     public init(name: String, boats: Int = 16, raceSeed: UInt64, windSeed: UInt64, laps: Int = RaceSetup.defaultLaps,
                 startSequenceTicks: Int = RaceSetup.defaultStartSequenceTicks, warmupTicks: Int = 30, ticks: Int,
-                venue: String? = nil, conditions: String? = nil, note: String? = nil) {
+                venue: String? = nil, conditions: String? = nil, rules: String? = nil, note: String? = nil) {
         self.name = name
         self.boats = boats
         self.raceSeed = raceSeed
@@ -37,6 +40,7 @@ public struct Scenario: Codable, Hashable, Sendable {
         self.ticks = ticks
         self.venue = venue
         self.conditions = conditions
+        self.rules = rules
         self.note = note
     }
 
@@ -48,7 +52,7 @@ public struct Scenario: Codable, Hashable, Sendable {
                         mode: .authoritative(windSeed: WindSeed(windSeed &+ UInt64(index))))
     }
 
-    /// The `index`th race's setup: every seat a bot, at the scenario's venue and conditions if it names them.
+    /// The `index`th race's setup: every seat a bot, at the scenario's venue, conditions and rules if it names them.
     public func setup(index: Int = 0) throws -> RaceSetup {
         let defaults = RaceFiles.defaults
         let venueRef = try venue.map { name in
@@ -59,8 +63,13 @@ public struct Scenario: Codable, Hashable, Sendable {
             let key = try Scenario.key(name)
             return try ConditionsFile.bundled(id: key.id, version: key.version).ref
         } ?? defaults.conditions.ref
+        let rulesRef = try rules.map { name in
+            let key = try Scenario.key(name)
+            return try RulesConfigFile.bundled(id: key.id, version: key.version).ref
+        } ?? defaults.rulesConfiguration.ref
         return try RaceSetup(raceSeed: RaceSeed(raceSeed &+ UInt64(index)), seats: Array(repeating: .bot, count: boats),
-                             laps: laps, startSequenceTicks: startSequenceTicks, venue: venueRef, conditions: conditionsRef)
+                             laps: laps, startSequenceTicks: startSequenceTicks, venue: venueRef, conditions: conditionsRef,
+                             rulesConfiguration: rulesRef)
     }
 
     /// `id@version`, as a row names a data file.

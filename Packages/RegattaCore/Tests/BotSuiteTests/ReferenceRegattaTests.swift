@@ -38,9 +38,23 @@ import Testing
         #expect(byConditions.values.allSatisfy { $0.count == 4 })
     }
 
+    /// #477: version 7 is version 6's races on fleet-rules@8 and nothing else; version 6 (fleet-rules@7) stays bundled.
+    @Test func versionSevenIsVersionSixOnFleetRulesEight() throws {
+        #expect(ReferenceRegatta.currentVersion == 7)
+        let seven = try ReferenceRegatta.load(version: 7), six = try ReferenceRegatta.load(version: 6)
+        #expect(seven.races.count == six.races.count)
+        for (new, old) in zip(seven.races, six.races) {
+            #expect(new.setup.rulesConfiguration.key == DataFileKey(id: "fleet-rules", version: 8))
+            #expect(old.setup.rulesConfiguration.key == DataFileKey(id: "fleet-rules", version: 7))
+            #expect(new.setup.raceSeed == old.setup.raceSeed && new.windSeed == old.windSeed && new.tier == old.tier)
+            #expect(new.setup.venue == old.setup.venue && new.setup.conditions == old.setup.conditions)
+            #expect(new.setup.boatClass == old.setup.boatClass && new.setup.seats == old.setup.seats)
+            #expect(new.setup.laps == old.setup.laps && new.setup.startSequenceTicks == old.setup.startSequenceTicks)
+        }
+    }
+
     /// #517: version 6 is version 5's races on fleet-rules@7 and nothing else; version 5 (fleet-rules@6) stays bundled.
     @Test func versionSixIsVersionFiveOnFleetRulesSeven() throws {
-        #expect(ReferenceRegatta.currentVersion == 6)
         let six = try ReferenceRegatta.load(version: 6), five = try ReferenceRegatta.load(version: 5)
         #expect(six.races.count == five.races.count)
         for (new, old) in zip(six.races, five.races) {

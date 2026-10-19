@@ -308,8 +308,11 @@ import RegattaCore
     /// so the rule has them planing from the first tick; for `PlaningCue.seatedSeconds` from the seating the frame
     /// says so (`TickFrame.isJustSeated`) and your tile stays as it was, VoiceOver's word with it. After that a boat
     /// still on the plane shows it. The race's own flags are untouched: the frames carry them as the race has them.
+    /// On the start row's rules, fleet-rules@7 (#477): the default's opening seats the fleet eased, off the plane.
     @Test func seatedFleetShowsNoPlane() throws {
-        let driver = PracticeDriver(config: RaceDriverTests.config)
+        var config = RaceDriverTests.config
+        config.files.rulesConfiguration = try RulesConfigFile.bundled(id: "fleet-rules", version: 7).ref
+        let driver = PracticeDriver(config: config)
         let me = driver.myBoatIndex
         func hud(_ frame: TickFrame) -> HUDState {
             HUDState(world: RenderWorld(course: driver.course, boatClass: driver.boatClass, myBoatIndex: me,

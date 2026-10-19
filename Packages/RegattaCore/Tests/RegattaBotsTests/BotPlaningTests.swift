@@ -117,7 +117,8 @@ import Testing
     /// and is back on her groove up to speed without dropping off again. Her handling is how soon: the top draw in 4.6
     /// to 10.5 s (the class's own time from a standstill start off the plane: 4.5 s at 10 kn, 6.4 s at 14), Club's
     /// centre in 7.1 to 11.7 s, the floor of Club's band in 8.6 to 13.5 s.
-    @Test func fallenBotHeadsUpAndPlanesAgain() throws {
+    // fleet-rules@7 (#477): the scene was fitted to the start row's race area and pre-gun ease; the opening's moves it.
+    @Test(.onSevenRules) func fallenBotHeadsUpAndPlanesAgain() throws {
         var means: [Double] = []
         for (handling, within) in [(1.0, 12.0), (0.55, 13.5), (0.3, 15.5)] {
             var total = 0.0
@@ -196,7 +197,8 @@ import Testing
     /// wander takes her), her apparent wind 0.4 kn over what the class drops her off at, she luffs from
     /// where she is, 6° a decision, steering whatever her hand holds, and stays on the plane. In her groove she sails
     /// on.
-    @Test func softKiteLuffsHerFromWhereSheIs() throws {
+    // fleet-rules@7 (#477): the scene was fitted to the start row's race area and pre-gun ease; the opening's moves it.
+    @Test(.onSevenRules) func softKiteLuffsHerFromWhereSheIs() throws {
         for seed in UInt64(1)...6 {
             // How deep leaves her that: read off this water's wind.
             var deep = 0.0
@@ -271,7 +273,8 @@ import Testing
     /// `PlaningTable.handMargin` of her wander running deeper than her aim she still has the apparent wind the class
     /// planes on and half a knot. It is
     /// the same angle when her hand has carried her deep of it. On skiff@8 she sails as asked.
-    @Test func sheAimsInsideHerOwnHand() throws {
+    // fleet-rules@7 (#477): the scene was fitted to the start row's race area and pre-gun ease; the opening's moves it.
+    @Test(.onSevenRules) func sheAimsInsideHerOwnHand() throws {
         for seed in UInt64(1)...6 {
             var hotter: [Double] = []
             for handling in [1.0, 0.8, 0.55, 0.35] {
@@ -310,7 +313,8 @@ import Testing
 
     /// And sailed: a Club helm (handling 0.45), her hand wandering as a Club hand does, runs 20 s on the plane (to
     /// where she turns for her mark) without leaving it.
-    @Test func clubHandStaysOnThePlaneDownTheRun() throws {
+    // fleet-rules@7 (#477): the scene was fitted to the start row's race area and pre-gun ease; the opening's moves it.
+    @Test(.onSevenRules) func clubHandStaysOnThePlaneDownTheRun() throws {
         var total = 0.0
         for seed in UInt64(1)...6 {
             var (race, hand, _) = try Self.runner(seed: seed, planing: true, handling: 0.45)
@@ -334,7 +338,8 @@ import Testing
     /// groove, in five waters of six (before the caution round: never more than 40° above what she was asked, 137°,
     /// where she fell; in the sixth, 14 kn, she has the speed to plane dead downwind); sailed on, she comes down to
     /// her groove without leaving the plane.
-    @Test func slowSheComesDownAsSheGathersSpeed() throws {
+    // fleet-rules@7 (#477): the scene was fitted to the start row's race area and pre-gun ease; the opening's moves it.
+    @Test(.onSevenRules) func slowSheComesDownAsSheGathersSpeed() throws {
         var held = 0
         for seed in UInt64(1)...6 {
             var (race, hand, _) = try Self.runner(seed: seed, planing: true, speed: 0.55, deep: deg2rad(-30), handling: 0.55)
@@ -590,7 +595,8 @@ import Testing
     /// "Her own angle, held": running 5° above her groove on skiff@9, inside the downwind groove's snap, the angle
     /// her hand takes when she lets the rudder go is that angle and she stays there; before, and on skiff@8 still, her
     /// hand took the groove and sailed her down to it. A groove aim is the groove's on both.
-    @Test func herHandHoldsHerOwnAngleNotTheGroove() throws {
+    // fleet-rules@7 (#477): the scene was fitted to the start row's race area and pre-gun ease; the opening's moves it.
+    @Test(.onSevenRules) func herHandHoldsHerOwnAngleNotTheGroove() throws {
         for seed in UInt64(1)...4 {
             for boatClass in [Self.skiffNine, BotHandTackTests.skiffEight] {
                 var (race, hand, _) = try Self.runner(seed: seed, planing: true, deep: deg2rad(-5), handling: 1, boatClass: boatClass) {

@@ -46,6 +46,7 @@
         "ticks": 900,
         "venue": "dev-venue@7",
         "conditions": "classic-oscillating@7",
-        "note": "#105, #92: sixteen boats still on the start row at a 10 s gun, timed through the start where the umpire's escape simulations run most. Seeds probed 2026-10-04 over race seeds 1-50 (wind seed 101x), start sequences of 150 and 300 ticks, counting incidents to 30 s after the gun: race seed 46 at 300 ticks opened 11 (the next best 4, the median 1)."
+        "rules": "fleet-rules@7",
+        "note": "#105, #92: sixteen boats still on the start row at a 10 s gun, timed through the start where the umpire's escape simulations run most. Seeds probed 2026-10-04 over race seeds 1-50 (wind seed 101x), start sequences of 150 and 300 ticks, counting incidents to 30 s after the gun: race seed 46 at 300 ticks opened 11 (the next best 4, the median 1). Pinned to fleet-rules@7 (#477): its start row is the scene the seed was probed for; the default's opening seats the fleet 5-9 L down and slow, where the escape simulations run least."
     }
 ]

@@ -46,5 +46,11 @@
         "seats": 8, "laps": 1, "startSequenceTicks": 1800,
         "venue": "dev-venue@2", "conditions": "classic-oscillating@2", "rulesConfiguration": "fleet-rules@4",
         "maxTick": 12000, "yourScript": "runDeeper", "scriptSeconds": 8
+    },
+    {
+        "log": "prestart.racelog.json",
+        "seats": 8, "laps": 2, "startSequenceTicks": 1800,
+        "venue": "dev-venue@2", "conditions": "classic-oscillating@2", "rulesConfiguration": "fleet-rules@8",
+        "maxTick": 0
     }
 ]

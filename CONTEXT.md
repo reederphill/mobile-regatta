@@ -18,6 +18,10 @@ _Avoid_: tournament, event
 The countdown before the gun, during which boats manoeuvre below the start line.
 _Avoid_: pre-race, lobby countdown
 
+**Opening**:
+Where the start sequence seats the fleet (fleet-rules@8, the default since [#477](https://github.com/reederphill/mobile-regatta/issues/477)): two rows well below the line, starboard tack the shallower and port the deeper, every boat reaching towards the line eased (before the gun an ease sails half her speed); the player stays eased until her first touch. It replaced the start row, one row just below the line, sheeted in (fleet-rules@7 and older).
+_Avoid_: start row (the old seating), grid
+
 **Committee sounds**:
 The start sequence's horns (60 s and 30 s), beeps (5 to 1) and gun, played from the race clock the player sees, never from a server event.
 _Avoid_: alarms, countdown sounds

@@ -281,7 +281,8 @@ import RegattaCore
     /// `luffSpareSeconds` fit in the time to the gun, breaks off as soon as they don't (still well before her ease,
     /// `startLuffUntil`), and starts on time.
     // skiff@7 until #455: on skiff@8 she breaks off her luff 8.5 s before she is out of time, not on the decision before it.
-    @Test(.onSkiffSeven) func combativeBreaksOffHerLuffInTimeToStart() throws {
+    // fleet-rules@7 (#477): the scene was fitted to the start row's race area and pre-gun ease; the opening's moves it.
+    @Test(.onSkiffSeven, .onSevenRules) func combativeBreaksOffHerLuffInTimeToStart() throws {
         let sailed = try Self.luffingOut(seed: 36, toGun: 50, below: 5)
         let outOfTime = try #require(sailed.outOfTime, "her time ran out before the gun")
         #expect(-outOfTime > sailed.until + 10, "out of time \(-outOfTime) s before the gun, her ease \(sailed.until) s")

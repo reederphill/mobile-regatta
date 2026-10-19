@@ -99,7 +99,7 @@ import Testing
         }
         // The original row sails the race it always did: the default files.
         let fleet = try #require(scenarios["fleet-16-bots"])
-        #expect(fleet.venue == nil && fleet.conditions == nil)
+        #expect(fleet.venue == nil && fleet.conditions == nil && fleet.rules == nil)
         #expect(try fleet.setup().venue == RaceFiles.defaults.venue.ref)
 
         let puffs = try #require(scenarios["keyed-wind-puffs"]).race()
@@ -111,6 +111,9 @@ import Testing
         #expect(estuary.tideStateAtGun != nil, "a venue with a current draws a tide state at the gun")
 
         let escape = try #require(scenarios["escape-worst-case"])
+        // #477: pinned to the start row's rules, the scene its seed was probed for; the default's opening isn't it.
+        #expect(escape.rules == "fleet-rules@7")
+        #expect(try escape.race().files.rulesConfiguration.content.raceFormat.startRow != nil)
         #expect(escape.startSequenceTicks < RaceSetup.defaultStartSequenceTicks, "the fleet still on the start row at the gun")
         #expect(escape.warmupTicks < escape.startSequenceTicks && escape.ticks > escape.startSequenceTicks,
                 "timed through the gun")

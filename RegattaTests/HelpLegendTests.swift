@@ -61,6 +61,8 @@ import UIKit
     /// a race that can't pause (online) keeps running.
     @Test func openingHelpReleasesTheControls() throws {
         let session = GameSession(config: RaceConfig(opponents: 1, seed: 1, windSeed: 1))
+        // The default rules' opening seats her eased, and Help keeps that (#477): her first touch ends it.
+        session.endSeatedEase()
         session.setEase(true)
         session.setGestureEase(true)
         // A finger on the tiller, slid hard over.

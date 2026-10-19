@@ -492,13 +492,13 @@ import Testing
     }
 
     /// fleet-rules@7 (schema 7, #517) is @6 with the look-back towards a boat taking a penalty: 8 s, a builder value;
-    /// every other value the same. It is the default (#517). The umpire records the boats long enough to hold it, with the tick
+    /// every other value the same. It was the default from #517 to #477. The umpire records the boats long enough to hold it, with the tick
     /// before its first; every other call is still judged on the last 62 ticks. @1 to @6 still parse with none.
     @Test func fleetRulesSevenParsesThePenaltyLookBack() throws {
         let v6 = try RulesConfigFile.bundled(id: "fleet-rules", version: 6)
         let v7 = try RulesConfigFile.bundled(id: "fleet-rules", version: 7)
         #expect(v7.header.schemaVersion == 7)
-        #expect(v7.ref == RaceFiles.defaults.rulesConfiguration.ref && v7.ref == Race.defaultRulesConfiguration.ref)
+        #expect(v7.ref != RaceFiles.defaults.rulesConfiguration.ref)
         #expect(v7.content.incidents.escape.penaltyLookBack == 8)
         #expect(v7.content.incidents.escape.windowTicks == 62 && v7.content.incidents.escape.recordedTicks == 242)
         for version in 1...6 {
@@ -553,12 +553,12 @@ import Testing
     }
 
     /// fleet-rules@8 (schema 8, #477) is @7 with the opening in place of the start row and the race area's least depth
-    /// below the line, 15 L; every other value the same. Not the default. @1 to @7 still parse with no opening.
+    /// below the line, 15 L; every other value the same. The default since #477 (PR 4). @1 to @7 still parse with no opening.
     @Test func fleetRulesEightParsesTheOpening() throws {
         let v7 = try RulesConfigFile.bundled(id: "fleet-rules", version: 7)
         let v8 = try RulesConfigFile.bundled(id: "fleet-rules", version: 8)
         #expect(v8.header.schemaVersion == 8)
-        #expect(v8.ref != RaceFiles.defaults.rulesConfiguration.ref)
+        #expect(v8.ref == RaceFiles.defaults.rulesConfiguration.ref && v8.ref == Race.defaultRulesConfiguration.ref)
         let opening = try #require(v8.content.raceFormat.opening)
         #expect(opening == .init(rowDepths: [HullLengths(5.5), HullLengths(8.5)], spreadLineLengths: 1.5,
                                  trueWindAngle: deg2rad(80), easeSpeedFraction: 0.5, minimumSpacing: HullLengths(3),
