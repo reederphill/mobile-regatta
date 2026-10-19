@@ -229,8 +229,7 @@ final class GameSession {
         self.sound = RaceSound(output: sound)
         self.controls = controls
         let me = driver.myBoatIndex
-        let seated = driver.currentFrame.heldInputs
-        isSeatedEasing = !driver.isFrozen && seated.indices.contains(me) && seated[me].ease
+        isSeatedEasing = Self.seatsHerEased(driver)
         presenter = RaceEventPresenter(me: me, seen: rulesSeen, penaltyTurn: driver.currentFrame.penalty?.turn ?? .fullCircle) {
             rosterSource.current().label(of: $0, playerSeat: me)
         }
@@ -284,10 +283,29 @@ final class GameSession {
     }
 
     /// Her first touch sheets her in from the opening's seated ease (#477): from here Ease is the gesture's or
-    /// VoiceOver's alone.
+    /// VoiceOver's alone. The start-sequence hint, if it is up or waiting, takes its scheme's words in place.
     func endSeatedEase() {
         guard isSeatedEasing else { return }
         updateEase { isSeatedEasing = false }
+        if let shown = hints?.scheduler.tracked, shown.id == .startSequence {
+            noticeSlot.retext(shown.noticeID, to: HintCatalogue.hint(.startSequence).text.text(for: controls.steering))
+            let current = noticeSlot.current(at: now())
+            if current != notice { notice = current }
+        }
+    }
+
+    /// Whether the race seats her in the opening's seated ease (#477): the race holds her seat eased, before the gun,
+    /// and she sails it herself. Not in a render fixture, with a bot on her boat (`-demo`), or online when she joins a
+    /// race under way: its first frame is the setup's, predicted before the resync, not where she is.
+    static func seatsHerEased(_ driver: any RaceDriver) -> Bool {
+        let frame = driver.currentFrame
+        let me = driver.myBoatIndex
+        guard !driver.isFrozen, frame.time < 0, frame.heldInputs.indices.contains(me), frame.heldInputs[me].ease else {
+            return false
+        }
+        if let practice = driver as? PracticeDriver, !practice.youSailYourBoat { return false }
+        if let online = driver as? OnlineDriver, online.joinedUnderway { return false }
+        return true
     }
 
     /// The steering gesture's ease (#453), from the scene as it changes: a light haptic tick on and off for the

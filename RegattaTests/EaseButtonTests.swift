@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 import Testing
 import RegattaCore
 @testable import Regatta
@@ -125,6 +126,48 @@ import RegattaCore
         #expect(!session.isSeatedEasing && !session.isEasing)
         session.toggleEase()
         #expect(session.isVoiceOverEasing)
+    }
+
+    /// Her finish lets go of the seated ease, as of any Ease.
+    @Test func finishingEndsTheSeatedEase() {
+        let session = GameSession(config: Self.openingConfig)
+        #expect(session.isSeatedEasing)
+        session.consume([RaceEvent(tick: 1, kind: .finished(seat: session.driver.myBoatIndex, place: 1))])
+        #expect(!session.isSeatedEasing && !session.isEasing)
+    }
+
+    /// With a bot on her boat (`-demo`) there is no seated ease: the bot sails it, and the hint says nothing of it.
+    @Test func noSeatedEaseWhenABotSailsHerBoat() {
+        var config = Self.openingConfig
+        config.botSailsYourBoat = true
+        let session = GameSession(config: config)
+        #expect(!session.isSeatedEasing && !session.isEasing)
+    }
+
+    /// The start-sequence hint posted while the seated ease holds her reads "Eased. Steer to sail."; her first touch
+    /// gives it the scheme's words in place, while it is still up.
+    @Test func firstTouchRetextsTheStartSequenceHint() throws {
+        // A later race: the steering hint has shown and is learned, so the start-sequence hint is the first due.
+        let progress = HintProgressStore()
+        progress.markShown(.raceStart)
+        progress.markLearned(.raceStart)
+        let session = GameSession(config: Self.openingConfig, hints: HintEngine(progress: progress))
+        let text = HintCatalogue.hint(.startSequence).text
+        var time = Date.now
+        session.now = { time }
+        session.sceneStarted()
+        while session.notice?.text != text.seatedEasing, session.driver.currentFrame.time < -50 {
+            time += Race.dt
+            Self.sail(session, to: session.driver.currentFrame.time + Race.dt)
+            session.refreshHUD()
+        }
+        let posted = try #require(session.notice)
+        #expect(posted.kind == .hint && posted.text == "Eased. Steer to sail.")
+        session.scene.touchBegan(1, at: CGPoint(x: 350, y: 400), midX: 200)
+        #expect(session.notice?.id == posted.id, "the same notice, still up")
+        #expect(session.notice?.text == text.text(for: session.controls.steering))
+        session.refreshHUD()
+        #expect(session.notice?.text == text.text(for: session.controls.steering))
     }
 
     /// A race that seats her sheeted in (fleet-rules@7 and older, the default) has no seated ease: the first frame

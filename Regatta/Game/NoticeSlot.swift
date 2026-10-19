@@ -122,6 +122,12 @@ struct NoticeSlot: Equatable {
         waiting.removeAll { $0.id == id }
     }
 
+    /// Gives notice `id`, showing or waiting, `text` in place: its time and place in the slot are as they were.
+    mutating func retext(_ id: Int, to text: String) {
+        if let shown = showing, shown.id == id { showing = shown.withText(text) }
+        if let i = waiting.firstIndex(where: { $0.id == id }) { waiting[i] = waiting[i].withText(text) }
+    }
+
     /// Shows `notice` as it is, expiry included: a render fixture's, which never expires.
     mutating func show(_ notice: Notice) {
         showing = notice

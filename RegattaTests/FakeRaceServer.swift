@@ -63,11 +63,13 @@ nonisolated final class FakeRaceServer {
     /// nobody helms, set on a collision course (`setCollisionCourse`); with `markRoomAt`, seat 1 is a human seat
     /// nobody helms, set by the mark with the client's (`setMarkRoom`).
     init(seats: Int = 10, seed: UInt64, startSequenceTicks: Int = 300, collisionCourse: Bool = false,
-         markRoomAt: Int? = nil, transport: RaceTransport, clock: VirtualClock) throws {
+         markRoomAt: Int? = nil, rulesConfiguration: FileRef = RaceFiles.defaults.rulesConfiguration.ref,
+         transport: RaceTransport, clock: VirtualClock) throws {
         let kinds: [SeatKind] = (0..<seats).map {
             $0 == 0 || (collisionCourse && $0 <= 2) || (markRoomAt != nil && $0 == 1) ? .human : .bot
         }
-        let setup = try RaceSetup(raceSeed: RaceSeed(seed), seats: kinds, laps: 1, startSequenceTicks: startSequenceTicks)
+        let setup = try RaceSetup(raceSeed: RaceSeed(seed), seats: kinds, laps: 1, startSequenceTicks: startSequenceTicks,
+                                  rulesConfiguration: rulesConfiguration)
         let race = Race(setup: setup, windSeed: WindSeed(seed &* 7))
         if collisionCourse { try Self.setCollisionCourse(race) }
         self.race = race
