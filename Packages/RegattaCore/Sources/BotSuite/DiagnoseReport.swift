@@ -33,6 +33,35 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
     /// Before the gun, the bots' avoidance of a boat not keeping clear (#541, report-only), by tier; nil in a report from
     /// before it.
     public var preGunAvoidance: [PreGunAvoidanceRow]?
+    /// Before the gun, where the fleet waits and how it turns (#477, report-only), by tier; nil in a report from before it.
+    public var startPlan: [StartPlanRow]?
+
+    /// `tier`'s boats before the gun (#477, `StartPlanObservation`; the held-off rows from `SeatMetrics`, bot seats only).
+    public struct StartPlanRow: Codable, Hashable, Sendable {
+        public var tier: String
+        public var boats: Int
+        /// Of the boat-seconds of the last 30 s: 2–5 hull lengths below the line (the band), and on starboard; of the
+        /// band's, on starboard, with those boats' depth (hull lengths), speed (m/s) and share of target speed.
+        public var bandShare: Double
+        public var starboardShare: Double
+        public var bandStarboardShare: Double
+        public var bandStarboardDepth: Spread?
+        public var bandStarboardSpeed: Spread?
+        public var bandStarboardPolarShare: Spread?
+        /// Of the starboard boat-seconds 2–8 hull lengths down in the last 40 s, the share eased.
+        public var deepStarboardEasedShare: Double
+        /// Tacks from port onto starboard in the last 60 s: count, depth (hull lengths), and the share with a starboard
+        /// boat within 3 lengths ahead or abeam to windward.
+        public var portTacks: Int
+        public var portTackDepth: Spread?
+        public var portTackCrowdedShare: Double
+        /// Rule 10 calls before the gun on a bot held off her tack onto starboard, and her seconds held off a race.
+        public var heldOffTackCalls: Int
+        public var heldOffTackSecondsPerRace: Double
+        /// Turns from starboard onto port before the gun (the pin end of a lap), a boat-race and the most.
+        public var pinEndTurnsPerBoat: Double
+        public var pinEndTurnsMax: Int
+    }
 
     /// `tier`'s bot seats' avoidance before the gun (#541, `SeatMetrics.preGunAvoidLuffs` …): the seat-races with any
     /// (a luff, a bear-away or a centred hold), the decisions of each kind a seat-race, and how the avoiding seats
@@ -446,6 +475,27 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
                 avoidingNeverStarted: avoiding.filter { $0.startSeconds == nil }.count,
                 ocsWithin6sOfAvoidance: avoiding.filter { $0.ocsCount > 0 && ($0.preGunLastAvoidSeconds ?? -.infinity) > -6 }.count)
         }
+        startPlan = groups.map { group in
+            let plans = group.boats.map(\.plan)
+            func total(_ value: KeyPath<StartPlanObservation, Int>) -> Int { plans.reduce(0) { $0 + $1[keyPath: value] } }
+            let bots = seats.filter { $0.preGunHeldOffTackCalls != nil && (group.name == Self.all || $0.tier.rawValue == group.name) }
+            let portTacks = plans.flatMap(\.portTackDepths)
+            return StartPlanRow(
+                tier: group.name, boats: plans.count,
+                bandShare: share(total(\.bandSeconds), of: total(\.lastThirtySeconds)),
+                starboardShare: share(total(\.starboardSeconds), of: total(\.lastThirtySeconds)),
+                bandStarboardShare: share(total(\.bandStarboardSeconds), of: total(\.bandSeconds)),
+                bandStarboardDepth: Spread(plans.flatMap(\.bandStarboardDepths)),
+                bandStarboardSpeed: Spread(plans.flatMap(\.bandStarboardSpeeds)),
+                bandStarboardPolarShare: Spread(plans.flatMap(\.bandStarboardPolarShares)),
+                deepStarboardEasedShare: share(total(\.deepStarboardEasedSeconds), of: total(\.deepStarboardSeconds)),
+                portTacks: portTacks.count, portTackDepth: Spread(portTacks),
+                portTackCrowdedShare: share(total(\.portTacksCrowded), of: portTacks.count),
+                heldOffTackCalls: bots.reduce(0) { $0 + ($1.preGunHeldOffTackCalls ?? 0) },
+                heldOffTackSecondsPerRace: bots.reduce(0) { $0 + ($1.preGunHeldOffTackSeconds ?? 0) } / Double(max(bots.count, 1)),
+                pinEndTurnsPerBoat: Double(total(\.pinEndTurns)) / Double(max(plans.count, 1)),
+                pinEndTurnsMax: plans.map(\.pinEndTurns).max() ?? 0)
+        }
         let wide = RoundingObservation.wideMetres
         roundings = boats.allSatisfy(\.roundings.isEmpty) ? [] : groups.flatMap { group in
             let seen = group.boats.flatMap(\.roundings)
@@ -558,6 +608,23 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
                      "\(text($0.avoidingMeanStartSeconds, 2)) / \(text($0.restMeanStartSeconds, 2))",
                      "\($0.avoidingOCS) / \($0.restOCS)", text($0.latestStartAfterAvoidance, 1), "\($0.avoidingNeverStarted)",
                      "\($0.ocsWithin6sOfAvoidance)"]
+                })
+        }
+        if let plan = startPlan {
+            lines.append("start plan (#477): of the last 30 s, the share of boat-seconds 2-5 L below the line (band) and on "
+                + "starboard; of the band's, on starboard, with depth L / speed m/s / share of target (median); eased share of "
+                + "starboard boat-seconds 2-8 L down in the last 40 s; port-to-starboard tacks in the last 60 s: count, depth L "
+                + "(median / p90), share with a starboard boat within 3 L ahead or abeam to windward; rule 10 calls on a bot held "
+                + "off her tack onto starboard, and seconds held off a bot-race; starboard-to-port turns a boat (mean / max)")
+            lines += table([["tier", "boats", "band", "stbd", "band stbd", "depth / speed / of target", "eased 2-8 L",
+                             "port tacks", "depth med / p90", "crowded", "held-off 10s", "held-off s", "pin turns"]]
+                + printed(plan, \.tier).map {
+                    [$0.tier, "\($0.boats)", fixed($0.bandShare, 3), fixed($0.starboardShare, 3), fixed($0.bandStarboardShare, 3),
+                     "\(text($0.bandStarboardDepth?.median, 2)) / \(text($0.bandStarboardSpeed?.median, 2)) / \(text($0.bandStarboardPolarShare?.median, 2))",
+                     fixed($0.deepStarboardEasedShare, 3), "\($0.portTacks)",
+                     "\(text($0.portTackDepth?.median, 2)) / \(text($0.portTackDepth?.p90, 2))", fixed($0.portTackCrowdedShare, 3),
+                     "\($0.heldOffTackCalls)", fixed($0.heldOffTackSecondsPerRace, 2),
+                     "\(fixed($0.pinEndTurnsPerBoat, 2)) / \($0.pinEndTurnsMax)"]
                 })
         }
         lines.append("non-finishers by cause: per 1000 boats (boats; median metres to go)")
