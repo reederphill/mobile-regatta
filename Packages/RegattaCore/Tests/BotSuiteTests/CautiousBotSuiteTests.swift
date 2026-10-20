@@ -36,10 +36,9 @@ import Testing
         let cautious = mean(cautiousPlaces), club = mean(clubPlaces)
         print("CautiousBotSuiteTests over \(Self.seeds) Club fleets of \(Self.fleetSize): cautious mean place \(cautious), "
               + "club \(club); cautious fouls as offender in \(fouls.count) races")
-        // Known until #455 (owner waiver on #437): on skiff@7 the cautious bot steers by hand and fouls on seed 9.
-        withKnownIssue("#455: the cautious bot fouls under hand steering", isIntermittent: true) {
-            #expect(fouls.isEmpty, "\(fouls.joined(separator: "\n"))")
-        }
+        // The owner's #437 waiver (on skiff@7 the cautious bot steered by hand and fouled on seed 9) is spent: on the
+        // default class she fouls in none of the races.
+        #expect(fouls.isEmpty, "\(fouls.joined(separator: "\n"))")
         #expect(cautious >= club, "cautious \(cautious), club \(club): dropping helped")
     }
 }

@@ -55,7 +55,8 @@ import RegattaCore
     @Test(arguments: [false, true])
     func aBotTakingOverBeforeTheGunStarts(cautious: Bool) throws {
         for seed: UInt64 in 1...12 {
-            // skiff@6 until #455: the taken-over bot is over the line at the gun under hand steering.
+            // skiff@6 until #553: the taken-over bot is over the line at the gun under hand steering (seeds 4, 6 and 11
+            // on skiff@9); #553 owns the takeover-start cell.
             let race = Self.startRace(seats: [.human] + Array(repeating: .bot, count: 9), seed: seed,
                                       boatClass: try BotHelmTests.autohelmOn().ref)
             // The takeover alone: the fleet around her sails without weaknesses, as the scenario was written for
@@ -127,21 +128,15 @@ import RegattaCore
             }
             #expect(events.contains(.ocsNotice(recipient: seat)), "seed \(seed): no OCS notice")
             #expect(events.contains(.cleared(seat: seat)), "seed \(seed): she never cleared")
-            // Seed 7 since #545 (the hand helm nudging through the dead band sails the minute before the gun
-            // differently): she returns into seat 1 starting under her, is called under rule 11 at 15.9 s, serves her
-            // turn and starts 61 s after the gun, a second outside. A returning boat's conduct in an encounter is #455's.
-            withKnownIssue("#455: seed 7's returning boat doesn't keep clear of a starter", isIntermittent: true) {
-                #expect(events.contains(.started(seat: seat)), "seed \(seed): she never started")
-            } when: { seed == 7 }
+            // Seeds 7 (#545: called under rule 11 returning, she started 61 s after the gun) and 1 (#471's step C: called
+            // under rule 21.1 returning) start inside the minute, uncalled, on the default class. A rule-11 call on a
+            // returning boat is her conduct, not the rules' precedence: rule 21 has her only while she sails towards the
+            // pre-start side (`CourseLayout.isReturning`).
+            #expect(events.contains(.started(seat: seat)), "seed \(seed): she never started")
             let returning = events.filter {
                 if case .ruleCall(let call) = $0 { call.offender == seat && call.rule == .returningToStart } else { false }
             }
-            // Seed 1 since #471's step C (the fleet sails the minute before the gun differently; nobody owes a turn at
-            // the gun): a boat starting 5 s late comes up under her as she dips back below the line, and she is called.
-            // A returning boat's conduct in an encounter is #455's.
-            withKnownIssue("#455: seed 1's returning boat doesn't keep clear of a late starter", isIntermittent: true) {
-                #expect(returning.isEmpty, "seed \(seed): called under rule 21.1 returning")
-            } when: { seed == 1 }
+            #expect(returning.isEmpty, "seed \(seed): called under rule 21.1 returning")
         }
     }
 
@@ -285,7 +280,8 @@ import RegattaCore
     /// line: the combative leeward boat luffs the windward one while her approach to her own spot and
     /// `luffSpareSeconds` fit in the time to the gun, breaks off as soon as they don't (still well before her ease,
     /// `startLuffUntil`), and starts on time.
-    // skiff@7 until #455: on skiff@8 she breaks off her luff 8.5 s before she is out of time, not on the decision before it.
+    // skiff@7 until #553's pre-gun re-probe: on skiff@8 she breaks off her luff 8.5 s before she is out of time, not on the
+    // decision before it.
     // fleet-rules@7 (#477): the scene was fitted to the start row's race area and pre-gun ease; the opening's moves it.
     @Test(.onSkiffSeven, .onSevenRules) func combativeBreaksOffHerLuffInTimeToStart() throws {
         let sailed = try Self.luffingOut(seed: 36, toGun: 50, below: 5)
