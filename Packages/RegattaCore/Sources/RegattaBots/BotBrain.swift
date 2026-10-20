@@ -190,6 +190,13 @@ struct BotBrain: Sendable {
     var planingAimed = (asked: 0.0, sailed: 0.0, time: -Double.infinity)
     /// Since when she has wanted a gybe she is building speed for (`buildsSpeedToGybe`, #462); nil when she wants none.
     var gybeWantedSince: Double?
+    /// Since when the look before a tack by hand has held off a tack or gybe her plan wants (#455, `lookHolds`); nil
+    /// once it passes or the plan drops the turn. Past `HandTackTable.lookHoldSeconds` the look yields
+    /// (`handTurnsAtKeepClearBoat`).
+    var lookHeldSince: Double?
+    /// When she last found the look holding; more than a second without a look (her penalty, a turn under way) between
+    /// two that held starts `lookHeldSince` over.
+    var lookLastHeld = -Double.infinity
     /// Whether her last course to a mark was within `PlaningTable.markRange` of it (`navigate`).
     var isNearHerMark = false
     /// Whether that course was to her point through a gate from within `PlaningTable.gateRange` of it (`navigate`).
@@ -421,6 +428,13 @@ struct BotBrain: Sendable {
             } else {
                 scored = .some(decided)
             }
+        }
+        // The look before a tack by hand (#455), timed while the plan wants the turn: its guard (`lookHoldSeconds`).
+        if byHand, aim.tack != boat.tack, lookHolds(boat, view) {
+            if lookHeldSince == nil || view.time - lookLastHeld > 1 { lookHeldSince = view.time }
+            lookLastHeld = view.time
+        } else {
+            lookHeldSince = nil
         }
         if let evasion = evasion(boat, view, desired: desired, scored: scored) {
             let ease = aim.ease && aim.tack == boat.tack || evasion.dropsAstern
@@ -1367,11 +1381,12 @@ struct BotBrain: Sendable {
     }
 
     /// Whether a tack or gybe begun now turns clear: no mark close enough for the turn to swing her onto, clear of
-    /// every boat (`tapIsClear`, #101), for the suite's hunter not at a boat keeping clear of her, and not with a boat
+    /// every boat (`tapIsClear`, #101), for the suite's hunter not at a boat keeping clear of her, by hand not swinging
+    /// at one (`handTurnsAtKeepClearBoat`, #455: a tack she makes to keep clear herself too), and not with a boat
     /// clearly not keeping clear of her inside the horizon (`tapMeetsBoatNotKeepingClear`, #537).
     func isClearToTurn(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
         isClearOfMarks(b, view, lengths: Self.tapMarkClearance) && tapIsClear(b, view) && !tapTurnsAtKeepClearBoat(b, view)
-            && !tapMeetsBoatNotKeepingClear(b, view)
+            && !handTurnsAtKeepClearBoat(b, view) && !tapMeetsBoatNotKeepingClear(b, view)
     }
 
     /// The held input that sails `aim` on her tack under the autohelm (ADR 0007). Once the autohelm holds

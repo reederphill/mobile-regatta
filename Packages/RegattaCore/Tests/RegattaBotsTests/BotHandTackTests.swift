@@ -80,11 +80,14 @@ import Testing
     /// - #542 PR 2 (the penalty way out on the shared scorer's prediction: turn-aware, boats rolled on what they are
     ///   doing, holding, the hard bear-away and the dodge's ease among the candidates): the long; with
     ///   `scoresPenaltyEscape` off it kept its digest. The short race holds no way out.
+    /// - #455 PR 2 (a tack or gybe by hand starts with no boat keeping clear of her in its swing, the reach rule, held
+    ///   10 s at most; the hunter squeezes only once her rudder has settled): both; the live bots' tacks held off for a
+    ///   boat keeping clear of them move their tracks (the hunter's change reaches no live bot).
     @Test(.onSixRules) func skiffEightBotsAreBitIdentical() throws {
         let short = try Self.digest(seed: 459, boatClass: Self.skiffEight)
         let long = try Self.digest(seed: 462, boatClass: Self.skiffEight, seconds: 700)
-        #expect(hex64(short) == "0x4f00590d705debff")
-        #expect(hex64(long) == "0xbf5a0cf301a33d34")
+        #expect(hex64(short) == "0x733d71a6d31a2b92")
+        #expect(hex64(long) == "0x897c257439047fda")
     }
 
     // MARK: - skiff@8: tacks and gybes by hand

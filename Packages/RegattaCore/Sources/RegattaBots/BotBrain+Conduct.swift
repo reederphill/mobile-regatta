@@ -251,20 +251,29 @@ extension BotBrain {
     /// when that boat is inside `roomDistance` hull lengths of her: any of `roomTurns` that way, both boats sailing on
     /// in straight lines in the same water, weighed every `roomStep` seconds.
     func turnsTowardsKeepClearBoat(_ b: SeatView.OwnBoat, _ view: SeatView, turn: Double) -> Bool {
+        view.others.contains { other in
+            !other.isGhost && other.rightOfWay?.keepClear == other.seat && turns(towards: other, b, view, turn: turn)
+        }
+    }
+
+    /// Whether turning her `turn` way (+1 to starboard) by any of `turns` radians, at her speed, brings `other`, sailing
+    /// on at its velocity, closer to her than holding her course would, at a moment within `lookahead` seconds
+    /// (`roomLookahead` if nil) when it is inside `roomLengths` hull lengths of her, weighed every `roomStep` seconds:
+    /// `turnsTowardsKeepClearBoat`'s reckoning for one boat, and the look before a tack by hand's
+    /// (`handTurnsAtKeepClearBoat`, #455).
+    func turns(towards other: SeatView.OtherBoat, _ b: SeatView.OwnBoat, _ view: SeatView, turn: Double,
+               turns: [Double] = Self.roomTurns, lookahead: Double? = nil) -> Bool {
         let clear = view.boatClass.hull.length * roomLengths
-        let lookahead = roomLookahead
-        let moments = Array(stride(from: Self.roomStep, through: lookahead, by: Self.roomStep))
-        let headings = Self.roomTurns.map { Vec2.heading(b.heading + turn * $0) * b.speed }
+        let lookahead = lookahead ?? roomLookahead
+        let offset = other.position - b.position
+        guard offset.length < clear + (b.speed + other.speed) * lookahead else { return false }
+        let headings = turns.map { Vec2.heading(b.heading + turn * $0) * b.speed }
         let holding = b.velocity
-        for other in view.others where !other.isGhost && other.rightOfWay?.keepClear == other.seat {
-            let offset = other.position - b.position
-            guard offset.length < clear + (b.speed + other.speed) * lookahead else { continue }
-            for t in moments {
-                let held = (offset + (other.velocity - holding) * t).length
-                for velocity in headings {
-                    let turned = (offset + (other.velocity - velocity) * t).length
-                    if turned < clear && turned < held { return true }
-                }
+        for t in stride(from: Self.roomStep, through: lookahead, by: Self.roomStep) {
+            let held = (offset + (other.velocity - holding) * t).length
+            for velocity in headings {
+                let turned = (offset + (other.velocity - velocity) * t).length
+                if turned < clear && turned < held { return true }
             }
         }
         return false
