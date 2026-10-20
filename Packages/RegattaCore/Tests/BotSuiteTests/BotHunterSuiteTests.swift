@@ -23,9 +23,12 @@ import Testing
     /// Of rule 16.1's course-change rate, the least she turns at on a hunting-turn tick, on average: she turns at
     /// `BotBrain.Hunter.rateShare` (0.8) of it or her held rudder's rate; 0.75 to 0.77 measured.
     static let minMeanRateShare = 0.4
-    /// Of her hunting-turn ticks, the share faster than rule 16.1's rate at most: 0.014 to 0.027 measured on skiff@8
-    /// (she carries the rate of a turn by hand into a hunting turn), each a turn rule 16.1 can be called on.
-    static let maxOverRateShare = 0.06
+    /// Of her hunting-turn ticks, the share faster than rule 16.1's rate at most, each a turn rule 16.1 can be called on:
+    /// 0.014 to 0.027 measured on skiff@8 and 0.018 on skiff@9 (61 of 3348, peak 39°/s; the fleet trace found each a
+    /// hunting turn begun while her rudder still slewed back from a bigger swing); none since she lets it settle first
+    /// (`BotBrain.hasSettled`: 0 of 4569, peak 9.4°/s; 0 of 2694, peak 9.4°/s, with the look before a tack by hand's
+    /// reach rule, #455).
+    static let maxOverRateShare = 0.01
 
     @Test func huntersDrawRule16Or17CallsOnlyWhenTheyOverdoIt() throws {
         let scan = try Self.scan(seeds: Self.seeds)
@@ -52,6 +55,8 @@ import Testing
         var onHunters = 0
         var hunterCalls: [String: Int] = [:]
         var overdone: [String] = []
+        /// The races with hunting-turn ticks faster than rule 16.1's rate: the cell and the count, most first.
+        var overRateRaces: [(race: String, ticks: Int)] = []
 
         /// Radians a second she turned at over her hunting-turn ticks.
         var meanRate: Double { turnTicks == 0 ? 0 : radians / Double(turnTicks) * Double(Race.tickRate) }
@@ -60,7 +65,8 @@ import Testing
             "\(races) races, \(racesTurning) with hunter turn ticks, \(turnTicks) in all at \(fixed(rad2deg(meanRate), 1)) deg/s "
                 + "(\(ticksOverRate) over rule 16.1's \(courseChangeRate.map { fixed(rad2deg($0), 1) } ?? "-"), peak "
                 + "\(fixed(rad2deg(peakRate), 1))); calls on hunters \(callsLine(hunterCalls)); under 16.1/17 \(overdone.count): "
-                + "\(overdone); calls on live bots with a hunter the victim \(onHunters)"
+                + "\(overdone); calls on live bots with a hunter the victim \(onHunters); over the rate in "
+                + (overRateRaces.isEmpty ? "no race" : overRateRaces.prefix(5).map { "\($0.race) (\($0.ticks))" }.joined(separator: ", "))
         }
     }
 
@@ -78,6 +84,10 @@ import Testing
             scan.ticksOverRate += turns.ticksOverCourseChangeRate
             scan.radians += turns.radians
             scan.peakRate = max(scan.peakRate, turns.peakRate)
+            if turns.ticksOverCourseChangeRate > 0 {
+                scan.overRateRaces.append(("seed \(cell.seed) \(cell.tierMix) \(cell.fleetSize)", turns.ticksOverCourseChangeRate))
+                scan.overRateRaces.sort { $0.ticks > $1.ticks }
+            }
             scan.courseChangeRate = turns.courseChangeRate
             let hunters = Set(result.seats.indices.filter { result.seats[$0].profile == .hunter })
             for call in try #require(result.ruleCalls) {

@@ -26,6 +26,11 @@ import RegattaCore
         var sailingAngles: [Double] = []
         var properCourseEdges: [Double?] = []
         var otherSailingAngles: [Double] = []
+        /// The ticks she started a hand tack or gybe (`Pilot.startedHandTurn`) with seat 1 keeping clear of her (not
+        /// taking a penalty, rule 21.2) inside `BotBrain.roomDistance` hull lengths on the side she turned to, not more
+        /// than a length astern of her, and not owing her mark-room in its zone: "look before you tack" has her never
+        /// do it.
+        var turnsStartedAtKeepClearBoat: [String] = []
         var calls: [String] { BotConductTests.calls(kinds) }
     }
 
@@ -41,6 +46,19 @@ import RegattaCore
         var sailed = Sailed()
         for _ in 0..<Int(encounter.seconds * Double(Race.tickRate)) where !race.isOver {
             for i in pilots.indices { _ = pilots[i].drive(race) }
+            // Seat 1's right of way as seat 0 sees it (rules 10–13 and 21).
+            if pilots[0].startedHandTurn, let turn = pilots[0].brain.handTurn, case let view = race.seatView(for: 0),
+               let right = view.others.first(where: { $0.seat == 1 })?.rightOfWay, right.keepClear == 1,
+               right.rule != .takingAPenalty {
+                let a = race.boats[0], offset = race.boats[1].position - a.position, length = race.boatClass.hull.length
+                let own = view.own
+                if offset.length <= length * BotBrain.roomDistance,
+                   !(own.zone?.isIn == true && own.markRoom.contains { $0.entitled == 0 && $0.owing == 1 }),
+                   turn.sign * offset.dot(Vec2.heading(a.heading).rightPerp) > 0,
+                   offset.dot(Vec2.heading(a.heading)) > -length {
+                    sailed.turnsStartedAtKeepClearBoat.append("tick \(race.tick), \(offset.length) m off")
+                }
+            }
             race.step()
             sailed.kinds += race.drainEvents().map(\.kind)
             let a = race.boats[0], b = race.boats[1]
@@ -59,7 +77,10 @@ import RegattaCore
     }
 
     /// Her turn rate never passes rule 16.1's course-change test on any tick she steers with a boat keeping clear of her
-    /// (`EscapeSimulation`'s own reading: |Δheading| × tick rate; her tacks on the tap aside), and no 16.1 call is on her.
+    /// (`EscapeSimulation`'s own reading: |Δheading| × tick rate), and no 16.1 call is on her. Her tacks and gybes, on
+    /// the tap or by hand, are rule 13's, not course changes she steers, so they are left out; that holds only while she
+    /// starts none towards the boat: none with it keeping clear of her inside `BotBrain.roomDistance` on the side she
+    /// turns to, short of clear astern of her ("look before you tack", `BotBrain.handTurnsAtKeepClearBoat`).
     static func checkWithinRule16(_ sailed: Sailed, _ name: String) throws {
         let race = try BotConductTests.Water(seed: 1).race
         let changesCourse = try #require(race.rules.incidents.escape.changesCourse)
@@ -78,6 +99,8 @@ import RegattaCore
             #expect(rate <= changesCourse, "\(name): turned \(rate * 180 / .pi)°/s at tick \(tick)")
         }
         #expect(!sailed.calls.contains("16.1 on 0"), "\(name): \(sailed.calls)")
+        #expect(sailed.turnsStartedAtKeepClearBoat.isEmpty,
+                "\(name): a hand turn started towards a boat keeping clear of her: \(sailed.turnsStartedAtKeepClearBoat)")
     }
 
     /// Ticks seat 0's rudder turned her towards seat 1 while seat 1 kept clear of her within her hunting range.
@@ -89,12 +112,8 @@ import RegattaCore
         }.count
     }
 
+    /// Both bots steer by hand between decisions (`Pilot`'s helm), as they ship on the default class.
     @Test func hunterAltersCourseTowardsAGiveWayBoatWithinRule16() throws {
-        // skiff@6 until #455: the hunter turns faster than rule 16 allows under hand steering.
-        try BotConductTests.$waterClass.withValue(BotHelmTests.autohelmOn().ref) { try Self.checkHunterAltersCourseWithinRule16() }
-    }
-
-    static func checkHunterAltersCourseWithinRule16() throws {
         // Running on starboard, overlapped, the live bot to windward and keeping clear (rule 11): holding her course the
         // hunter would leave her be; she turns at her gently instead, and the gap closes, with no 16.1 call on her.
         // Scenes whose tactician gybes away at once leave nothing to hunt, so each scene sails on the first seed whose
@@ -107,7 +126,7 @@ import RegattaCore
         }
         func holdsHerTack(_ abeam: Double, _ ahead: Double, after: UInt64 = 0) throws -> UInt64 {
             try firstSeed(in: after + 1...after + 12) { seed in
-                try !Self.sail(scene(seed, abeam, ahead), profile: .tactician).tapping[0]
+                try !Self.sail(scene(seed, abeam, ahead), profile: .tactician, helm: true).tapping[0]
             }
         }
         let first = try holdsHerTack(2.5, 0.5)
@@ -116,8 +135,8 @@ import RegattaCore
         var closer = 0
         for (seed, abeam, ahead) in scenes {
             let encounter = scene(seed, abeam, ahead)
-            let hunted = try Self.sail(encounter)
-            let held = try Self.sail(encounter, profile: .tactician)
+            let hunted = try Self.sail(encounter, helm: true)
+            let held = try Self.sail(encounter, profile: .tactician, helm: true)
             try Self.checkWithinRule16(hunted, encounter.name)
             let length = try BotConductTests.Water(seed: seed).length
             let ticks = Self.huntingTicks(hunted, length: length), heldTicks = Self.huntingTicks(held, length: length)
@@ -137,11 +156,13 @@ import RegattaCore
         return sailed.gaps.indices.prefix(end).filter { sailed.keepingClear[$0] }.map { sailed.gaps[$0] }.min() ?? .infinity
     }
 
-    // skiff@7 until #455: on skiff@8 the hunter turns at up to 29 deg/s, past rule 16's rate.
-    @Test(.onSkiffSeven) func hunterLuffsAWindwardBoat() throws {
+    /// Both bots steer by hand (`Pilot`'s helm). She tacks away by hand once the windward boat has gone: that luff to
+    /// head to wind is her tack, not a course change she steers at the boat, and she starts it only once the boat is no
+    /// longer keeping clear of her on the side she turns to ("look before you tack", `checkWithinRule16`).
+    @Test func hunterLuffsAWindwardBoat() throws {
         for seed: UInt64 in [1, 2, 3] {
             let encounter = BotConductTests.windwardLeeward(seed: seed, running: false, abeam: 2, ahead: 0, converging: 0)
-            let hunted = try Self.sail(encounter)
+            let hunted = try Self.sail(encounter, helm: true)
             try Self.checkWithinRule16(hunted, encounter.name)
             // She luffed: her sailing angle fell below where she started, the windward boat's with it.
             let start = hunted.sailingAngles[0], otherStart = hunted.otherSailingAngles[0]
@@ -184,7 +205,10 @@ import RegattaCore
         #expect(restricted > 0, "never restricted under rule 17: the scene tests nothing")
     }
 
-    // skiff@7 until #455: on skiff@8 the hunter turns at up to 29 deg/s, past rule 16's rate.
+    // skiff@7 until #455's "duck when the tack costs more": on skiff@9, both bots steering by hand, the hunter keeps
+    // within rule 16.1's rate, but the port boat seldom ducks her: the scorer's tack (`keepClearTack`, #531), costed
+    // below the duck, has her tack away about 7 s out. Of seeds 1–24 they meet on 5 and she ducks on one (seed 1), so
+    // the scene meets in 1 of 3.
     @Test(.onSkiffSeven) func hunterHoldsStarboardAndForcesTheDuck() throws {
         // On a collision course: the port boat must duck; the hunter never turns away from her, and draws no call.
         var met = 0

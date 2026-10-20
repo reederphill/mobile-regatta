@@ -20,10 +20,13 @@ import RegattaCore
 //   for away from the boat she holds off too, up to `Hunter.maxTurn` and a little, then makes it at the same rate; and
 //   with a boat that must keep clear of her in range but none to hunt (clear astern of her), she turns no faster. Nor
 //   does she let the autohelm turn her faster there (`gently`): a turn it makes is hers under 16.1 (#228).
+// - "Settle, then squeeze" (#455): she starts a turn at the boat only once her rudder has come back within her hunting
+//   rudder from a bigger swing (`hasSettled`); until then she holds, and the swing is her last manoeuvre's.
 // - With mark-room at a mark (rule 18, `OwnBoat.markRoom`), in its zone, she takes all of it: she rounds as a live bot
 //   does, which gives none of it up (`BotProfileTests.hunterTakesAllHerMarkRoom`), and hunts no one there.
 // - She tacks or gybes only with no boat that must keep clear of her in range on the side the tap turns her to
-//   (`tapTurnsAtKeepClearBoat`): the tap turns faster than rule 16.1's test.
+//   (`tapTurnsAtKeepClearBoat`): the tap turns faster than rule 16.1's test. By hand every bot looks so before she
+//   turns (`handTurnsAtKeepClearBoat`, #455).
 // - She keeps clear first: `evasion` (a boat she must keep clear of, marks, the edge) is steered before this is
 //   reached, and she never hunts a boat she owes mark-room, a ghost, or with a penalty to take; before her start she
 //   sails as a live bot does (pre-start fighting is #337's: a combative live bot's luff, `startLuffing`).
@@ -156,7 +159,8 @@ extension BotBrain {
     private func huntingInput(_ b: SeatView.OwnBoat, _ view: SeatView, _ input: BoatInput, desired: Double,
                               quarry: SeatView.OtherBoat, rule: RacingRule, most: Double) -> (BoatInput, Bool) {
         let off = wrapAngle(b.heading - desired)
-        if let toward = turn(towards: quarry, rule: rule, b, view), canTurn(toward, at: quarry, b, view, off: off) {
+        if let toward = turn(towards: quarry, rule: rule, b, view), hasSettled(b, view, most: most),
+           canTurn(toward, at: quarry, b, view, off: off) {
             return (BoatInput(rudder: toward * most, ease: input.ease), true)
         }
         let rudder = input.rudderValue
@@ -182,6 +186,16 @@ extension BotBrain {
         return view.others.contains { other in
             !other.isGhost && other.rightOfWay?.keepClear == other.seat && (other.position - b.position).length <= range
         }
+    }
+
+    /// "Settle, then squeeze" (#455): whether her rudder is back within `most`, her hunting rudder, or a tick's slew of
+    /// it (the class's `rudderSlew`), so a turn at a boat she starts now turns her no faster than she hunts. Out of a
+    /// bigger swing (a tack's or a keep-clear turn's rudder, her hand's correction) the rudder slews back over several
+    /// ticks, still turning her at that swing's rate; a squeeze begun on top of it turned her at the boat past rule
+    /// 16.1's rate (every over-rate tick of #455's fleet trace: −0.73 slewing down after a full −1 at 1.7 m/s, 25.8°/s).
+    /// So she lets it settle first, as a helm does before she leans on a boat: she holds meanwhile.
+    func hasSettled(_ b: SeatView.OwnBoat, _ view: SeatView, most: Double) -> Bool {
+        abs(b.rudder) <= most + view.boatClass.steering.rudderSlew * Self.tickStep
     }
 
     /// The most rudder she holds turning at a boat: `Hunter.rudder`, or less where her speed would turn her faster than

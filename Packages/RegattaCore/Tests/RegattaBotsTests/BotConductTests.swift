@@ -2303,6 +2303,12 @@ import RegattaCore
     /// off, never given up, and she waits on nothing else. With no circle there she tacks at once: seat 0 in the same
     /// water with her turn served, seat 0 turning beyond the circle's reach of her track, and a returning boat (rule
     /// 21.1), who sails a course and is weighed sailing on at her velocity as every boat was.
+    ///
+    /// The circle alone holds her here, not the look before a tack by hand (#455, `handTurnsAtKeepClearBoat`), which
+    /// leaves a boat taking a penalty to the circle: seat 0, 3.4 lengths off on the side she tacks to and sailing away,
+    /// is never reached by her swing, turning or served. With that exclusion flipped off once (#455 fix round 1) her
+    /// tack began at the same tick on every seed (3.37, 3.77, 3.57 s), as did `holdsAGybeThroughTheCircle…`'s gybe
+    /// (2.47 s), though there the swing reaches her: the circle held her longer.
     @Test func tacksOnceHerTrackClearsABoatTakingAPenalty() throws {
         for seed: UInt64 in [3, 9, 18] {
             let held = try Self.tackTowardsATurningBoat(seed: seed, along: 2.9, ahead: 1.8)
@@ -2321,11 +2327,15 @@ import RegattaCore
                     "seed \(seed): seat 0 still turning as she tacked, after \(began.seconds) s")
             #expect(Self.calls(sailed.kinds).isEmpty, "seed \(seed): \(Self.calls(sailed.kinds))")
 
-            // Her turn served: the same water, no circle.
+            // Her turn served: the same water, no circle. Seat 0 is then a port boat keeping clear of her (rule 10) on
+            // the side her tack swings her to, but sailing away out of its reach: the look before she tacks by hand
+            // (`handTurnsAtKeepClearBoat`) passes, and she tacks at once.
             let served = try Self.tackTowardsATurningBoat(seed: seed, along: 2.9, ahead: 1.8, turning: false)
             var look = try Self.lookBeforeHerTack(served)
             #expect(look.other.rightOfWay?.rule != .takingAPenalty, "seed \(seed)")
-            #expect(look.circle < need && look.isClear, "seed \(seed): turn served, clear")
+            #expect(look.circle < need && look.isClear && look.canTurn, "seed \(seed): turn served, clear")
+            let servedView = served.seatView(for: 1)
+            #expect(!brain.handTurnsAtKeepClearBoat(servedView.own, servedView), "seed \(seed): turn served, out of her swing")
             #expect((Self.sailToHerTack(served, seconds: 3).began?.seconds ?? .infinity) < 0.5, "seed \(seed): turn served")
 
             // Turning, beyond the circle's reach of her track.
@@ -2382,9 +2392,13 @@ import RegattaCore
                     "seed \(seed): slowed to \(sailed.leastSpeed) m/s, \(running.leastSpeed) m/s running on")
             #expect(sailed.mostOffCourse < deg2rad(8), "seed \(seed): \(rad2deg(sailed.mostOffCourse))° off her course")
 
-            // Her turn served: the same water, no circle.
-            let served = try Self.lookBeforeHerTack(scene(false))
-            #expect(served.need == nil && served.isClear && served.canTurn, "seed \(seed): turn served, clear")
+            // Her turn served: the same water, no circle. Seat 0, a port boat keeping clear of her 5.6 lengths off, is
+            // in the gybe's swing for a beat (`handTurnsAtKeepClearBoat`, #455): only that holds her, and not for long.
+            let servedRace = try scene(false), servedView = servedRace.seatView(for: 1)
+            let served = try Self.lookBeforeHerTack(servedRace)
+            #expect(served.need == nil && served.isClear, "seed \(seed): turn served, clear")
+            #expect(served.canTurn || BotBrain(style: Self.skill1).handTurnsAtKeepClearBoat(servedView.own, servedView),
+                    "seed \(seed): turn served, held by nothing but the look")
             #expect((Self.sailToHerTack(try scene(false), seconds: 3).began?.seconds ?? .infinity) < 0.5, "seed \(seed): turn served")
 
             // Beyond `tapRange`, her circle within reach of the gybe's track.

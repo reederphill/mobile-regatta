@@ -17,6 +17,10 @@ import RegattaCore
 //   stalls her in light air, so she under-steers only in a breeze.
 // - "Let go in irons": stalled short of head to wind she centres the rudder, truly, until the boat falls off and
 //   has steerage again (`centresStalled`): the class's irons recovery works only on a centred rudder (#458).
+// - "Look before you tack" (#455): racing, she starts no tack or gybe whose swing would reach a boat that must keep
+//   clear of her, bringing it inside `roomLengths` and closer than holding her course would within `tapLookahead`
+//   (`handTurnsAtKeepClearBoat`), or with one inside `roomLengths` on her turn side now; she sails on and turns a beat
+//   later. Held so `HandTackTable.lookHoldSeconds` on end (`lookHeldSince`), she looks only for the second.
 
 /// The hand turn's placeholder values (#459), one table for the owner to tune (#461), as `HandSteeringTable` is the
 /// hand steering's. Anchors, skiff@8 at 10 kn from full speed on the owner's ruling of 2026-10-09 (#458's harness,
@@ -127,6 +131,20 @@ public enum HandTackTable {
     /// (`BotBrain.handTurning`). Measured on the start suite's 160 races: always, on time 0.46 and 1038 pre-start
     /// fouls; inside 25 s, 0.46 and 812; inside 12 s, 0.41 and 598; never, 0.41 and 560.
     public static let startTurnsThroughSeconds = 25.0
+
+    /// "Look before you tack" (#455, `BotBrain.handTurnsAtKeepClearBoat`): the swings of her heading she reckons a boat
+    /// keeping clear of her against, radians, the way her tack or gybe by hand turns her. A hand tack's luff runs at
+    /// two or three times rule 16.1's course-change rate, so her first seconds of swing are tens of degrees, not
+    /// `BotBrain.roomTurns`' touch of the rudder holding her course.
+    public static let lookTurns = [deg2rad(15), deg2rad(30), deg2rad(45)]
+    /// Seconds on end she holds a tack or gybe the plan wants for that look before it yields (`BotBrain.lookHeldSince`),
+    /// a guard: after that she looks only for a boat inside `BotBrain.roomLengths` on the side she turns to now, short
+    /// of clear astern of her. A boat held off by a boat sailing on beside her outside that would otherwise sail on, out
+    /// of her plan, for as long as it stays. Measured on the 16-boat live fleet cell (`regatta-botsuite --profile-mix
+    /// live --tier-mix national --tier-mix club --fleet-size 16 --seeds 4`, 80 races), holds only the look made: over
+    /// 10 s 24 → 7, over 5 s 157 → 57, the longest 42.4 → 16.8 s (a windward boat closing to inside 2 lengths at 10 s,
+    /// held until it tacked away).
+    public static let lookHoldSeconds = 10.0
 
     /// `values.good` at `handling.good` or better, in a line to `values.poor` at `handling.poor` or worse.
     static func ramp(_ h: Double, _ values: (good: Double, poor: Double), _ handling: (good: Double, poor: Double)) -> Double {
@@ -521,14 +539,90 @@ extension BotBrain {
         view.boatClass.polar.bestUpwind(tws: b.polarWindSpeed).speed * b.speedShadow
     }
 
+    /// The way (+1 to starboard) a tack or gybe by hand begun now swings her bow: up into the wind for a tack, away
+    /// from it for a gybe. Turning to starboard luffs her with the wind over her starboard side.
+    func handTurnWay(_ b: SeatView.OwnBoat) -> Double {
+        let luff: Double = b.boomSide == .port ? 1 : -1
+        return abs(sailingAngle(b)) < .pi / 2 ? luff : -luff
+    }
+
+    /// "Look before you tack" (#455): whether a tack or gybe by hand begun now would swing her, racing, at a boat that
+    /// must keep clear of her (`lookedAt`): the reach rule. Her heading turned `handTurnWay` by each of
+    /// `HandTackTable.lookTurns` at her speed, that boat sailing on at its velocity, at any moment within `tapLookahead`
+    /// seconds (every `roomStep`) it comes inside `roomLengths` hull lengths of her and closer than holding her course
+    /// would (`turns(towards:)`, `turnsTowardsKeepClearBoat`'s reckoning with the tack's own swing). A tack's luff to
+    /// head to wind turns her at two or three times rule 16.1's course-change rate, and that boat has only the turn's
+    /// seconds to answer it (seed 19 of `rightOfWayBotNeverRuddersTowardAKeepClearBoat`: a hand tack luffed at a boat
+    /// keeping clear of her 1.75 lengths to windward). So she looks first, as a helm does over her shoulder, and sails
+    /// on until that boat has passed or is further off, then turns: no slowing, no easing, no keeping station ("no
+    /// orderly bots"). It moves with the boats, so a boat beside her sailing away from her swing holds her for no
+    /// longer than it is in the swing's way.
+    ///
+    /// Guards: a boat inside `roomLengths` on the side she turns to now, not clear astern of her by more than a length
+    /// (`isInTheSwing`), holds her whatever its motion: a port boat just crossed, opening from her at 1.99 lengths,
+    /// is still inside the swing's first seconds (the 16-boat fleet cell of `HandTackTable.lookHoldSeconds`: 67 hand
+    /// turns started so by the reach rule alone, 0 with the guard). And held so `HandTackTable.lookHoldSeconds` on end
+    /// (`lookHeldSince`), she yields to the reach rule, and only such a boat holds her. Not before her start (#553's),
+    /// nor on a class whose tap sails the turn (the suite's hunter holds that off for herself,
+    /// `tapTurnsAtKeepClearBoat`). Internal: nothing shows it.
+    func handTurnsAtKeepClearBoat(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+        let boats = lookedAt(b, view)
+        if boats.contains(where: { isInTheSwing($0, b, view) }) { return true }
+        guard let since = lookHeldSince, view.time - since > HandTackTable.lookHoldSeconds else {
+            return reaches(boats, b, view)
+        }
+        return false
+    }
+
+    /// `handTurnsAtKeepClearBoat` without its time bound: what `lookHeldSince` times.
+    func lookHolds(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+        let boats = lookedAt(b, view)
+        return boats.contains { isInTheSwing($0, b, view) } || reaches(boats, b, view)
+    }
+
+    /// The reach rule: whether her swing reaches any of `boats` (`turns(towards:)`).
+    private func reaches(_ boats: [SeatView.OtherBoat], _ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+        let way = handTurnWay(b)
+        return boats.contains {
+            turns(towards: $0, b, view, turn: way, turns: HandTackTable.lookTurns, lookahead: Self.tapLookahead)
+        }
+    }
+
+    /// The boats she looks at before a tack or gybe by hand, racing, on a class she turns by hand: each boat that must
+    /// keep clear of her (`OtherBoat.rightOfWay`: rules 10–13, and a boat returning to start, rule 21.1, who sails a
+    /// course), but not
+    /// - one more than a length astern of her (as the hunter's `quarry`): her bow swinging is no threat to it;
+    /// - one owing her mark-room while she is in the mark's zone (rule 18, `OwnBoat.markRoom`): she sails to the mark as
+    ///   it has her, and that boat gives her the room for it (#93);
+    /// - one taking a penalty (rule 21.2): her circle is `tapIsClear`'s (#517), which tacks her as soon as her track
+    ///   clears it.
+    func lookedAt(_ b: SeatView.OwnBoat, _ view: SeatView) -> [SeatView.OtherBoat] {
+        guard Self.turnsByHand(view), b.status == .racing else { return [] }
+        let length = view.boatClass.hull.length
+        let inZone = b.zone?.isIn == true
+        return view.others.filter { other in
+            guard !other.isGhost, let right = other.rightOfWay, right.keepClear == other.seat,
+                  right.rule != .takingAPenalty,
+                  !(inZone && b.markRoom.contains { $0.entitled == view.seat && $0.owing == other.seat })
+            else { return false }
+            return (other.position - b.position).dot(b.forward) > -length
+        }
+    }
+
+    /// Whether `other` is inside `roomLengths` hull lengths of her now on the side a tack or gybe by hand begun now
+    /// swings her bow to (`handTurnWay`): the look's guard, alone past `HandTackTable.lookHoldSeconds`.
+    func isInTheSwing(_ other: SeatView.OtherBoat, _ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+        let offset = other.position - b.position
+        return offset.length <= view.boatClass.hull.length * roomLengths
+            && offset.dot(b.forward.rightPerp * handTurnWay(b)) > 0
+    }
+
     /// Starts the tack or gybe onto `aim`'s tack by hand, from `b` (`canTap` held): her rudder and how she eases it
     /// from her handling, a flub drawn from her own stream, and in light air a bear-off first.
     mutating func startHandTurn(_ b: SeatView.OwnBoat, _ aim: Aim, _ view: SeatView, fleetPlay: Bool) {
         let h = turnHandling
         let isTack = abs(sailingAngle(b)) < .pi / 2
-        // Turning to starboard (+) luffs her with the wind over her starboard side.
-        let luff: Double = b.boomSide == .port ? 1 : -1
-        var turn = HandTurn(isTack: isTack, toTack: aim.tack, sign: isTack ? luff : -luff,
+        var turn = HandTurn(isTack: isTack, toTack: aim.tack, sign: handTurnWay(b),
                             fraction: isTack ? HandTackTable.tackFraction(handling: h) : HandTackTable.gybeFraction(handling: h),
                             ease: isTack ? HandTackTable.tackEase(handling: h) : 0, overSteer: 0, started: view.time)
         // Before her start a gybe is for getting round, not for the lengths it saves: more rudder (#461).
