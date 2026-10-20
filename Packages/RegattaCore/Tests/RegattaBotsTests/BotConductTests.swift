@@ -111,12 +111,21 @@ import RegattaCore
 
     /// A bot at the helm of `seat`, deciding at 10 Hz on its `SeatView` as `BotDriver` does, with the tack she means to
     /// sail set: at `skill` with its weaknesses (#103), or with `weaknesses` if given; her own draws from her seat.
+    /// `helm`: her hand steers between decisions through a `BotHelm`, as `BotDriver` has it, holding by hand the
+    /// angle her brain centred the rudder on where the class's autohelm doesn't. Without it a centred rudder sails
+    /// straight on there, which no shipped bot does. Off by default: a scene opts in where it has been sailed with it.
     struct Pilot {
         let seat: Int
         var brain: BotBrain
+        /// Her hand on the helm (`helm`); nil, her brain's input goes to the boat as it is.
+        var helm: BotHelm?
+        /// Whether her last decision started a hand turn (her brain's `handTurn` went from nil to set): on a class whose
+        /// tap sails nothing (#458), her tack or gybe.
+        private(set) var startedHandTurn = false
 
         init(seat: Int, plannedTack: Tack?, race: Race, skill: Double = 1, weaknesses: BotWeaknesses? = nil,
-             caution: BotBrain.Caution? = nil, profile: BotProfile? = nil, penaltyDirection: Double = 1) {
+             caution: BotBrain.Caution? = nil, profile: BotProfile? = nil, penaltyDirection: Double = 1,
+             helm: Bool = false) {
             self.seat = seat
             var style = BotConductTests.skill1
             style.skill = skill
@@ -131,12 +140,25 @@ import RegattaCore
                                         style: style, weaknesses: brain.weaknesses)
             }
             brain.plannedTack = plannedTack ?? race.boats[seat].tack
+            if helm { steerByHand() }
+        }
+
+        /// Puts her hand on the helm, drawn from her brain's weaknesses and her seat as `BotDriver` draws it.
+        mutating func steerByHand() {
+            helm = BotHelm(hand: HandSteering(brain.weaknesses, seed: UInt64(seat + 1)))
         }
 
         /// Decides on a decision tick; returns the decision sent.
         mutating func drive(_ race: Race) -> BotDecision? {
             guard (race.tick + seat).isMultiple(of: BotDriver.decisionInterval) else { return nil }
-            let decision = brain.decide(race.seatView(for: seat))
+            let view = race.seatView(for: seat)
+            let wasTurning = brain.handTurn != nil
+            var decision = brain.decide(helm?.view(view) ?? view)
+            startedHandTurn = !wasTurning && brain.handTurn != nil
+            if let input = helm?.input(decision.input, view, tapping: decision.tap != nil, centred: decision.centred,
+                                       holdsHerAngle: decision.holdsHerAngle) {
+                decision.input = input
+            }
             race.apply(decision.input, seat: seat, atTick: race.tick + 1)
             if let tap = decision.tap { race.tap(tap, seat: seat, atTick: race.tick + 1) }
             return decision
@@ -145,12 +167,14 @@ import RegattaCore
 
     /// Sails `race` with both seats' bots for `seconds`, at `skill` (skill 1 unless given) or with `weaknesses` (each
     /// seat's, if given), cautious with `caution` (#104) if given: every event, and `each` after every step.
-    /// `avoids` says whether each seat's bot avoids a boat clearly not keeping clear of her (#537, `avoidsContact`).
+    /// `avoids` says whether each seat's bot avoids a boat clearly not keeping clear of her (#537, `avoidsContact`);
+    /// `helm`, whether both steer by hand between decisions (`Pilot`'s).
     static func sail(_ race: Race, seconds: Double, planned: [Tack?] = [nil, nil], skill: Double = 1,
                      weaknesses: [BotWeaknesses?] = [nil, nil], caution: BotBrain.Caution? = nil,
-                     avoids: [Bool] = [true, true], each: (Race) -> Void = { _ in }) -> [RaceEvent.Kind] {
+                     avoids: [Bool] = [true, true], helm: Bool = false, each: (Race) -> Void = { _ in }) -> [RaceEvent.Kind] {
         var pilots = [0, 1].map {
-            Pilot(seat: $0, plannedTack: planned[$0], race: race, skill: skill, weaknesses: weaknesses[$0], caution: caution)
+            Pilot(seat: $0, plannedTack: planned[$0], race: race, skill: skill, weaknesses: weaknesses[$0], caution: caution,
+                  helm: helm)
         }
         for i in pilots.indices { pilots[i].brain.avoidsContact = avoids[i] }
         var kinds: [RaceEvent.Kind] = []
@@ -671,10 +695,10 @@ import RegattaCore
     /// Sails `race` for `seconds` with only `seat`'s bot at the helm, the other boat holding what her autohelm holds:
     /// every decision of the bot's, with the rule she keeps clear of the other boat under as she made it (nil: none),
     /// the metres between them, centre to centre, how far she is ahead of the other boat along its heading, and her
-    /// wind angle, and every event.
+    /// wind angle, and every event. `helm`: the bot steers by hand between decisions (`Pilot`'s).
     static func sailOne(_ race: Race, seat: Int, seconds: Double, skill: Double = 1, weaknesses: BotWeaknesses? = nil,
-                        planned: Tack? = nil) -> (decisions: [Sailed], kinds: [RaceEvent.Kind]) {
-        var pilot = Pilot(seat: seat, plannedTack: planned, race: race, skill: skill, weaknesses: weaknesses)
+                        planned: Tack? = nil, helm: Bool = false) -> (decisions: [Sailed], kinds: [RaceEvent.Kind]) {
+        var pilot = Pilot(seat: seat, plannedTack: planned, race: race, skill: skill, weaknesses: weaknesses, helm: helm)
         var decisions: [Sailed] = []
         var kinds: [RaceEvent.Kind] = []
         for _ in 0..<Int(seconds * Double(Race.tickRate)) where !race.isOver {
@@ -696,15 +720,17 @@ import RegattaCore
     /// the no-go zone) with a leeward boat converging on her keeps clear (rule 11): she luffs (rudder towards the wind),
     /// or, with no luff left, eases and drops astern; she never bears away towards her, and the rule 11 call never
     /// comes. #99's luff target sat inside `steer`'s no-go clamp, so she luffed by nothing.
-    // skiff@7 until #455: on skiff@8 the windward boat never luffs inside her hold (seeds 3 and 7).
+    /// On the default class she steers by hand between decisions (`Pilot`'s helm), as she ships. Pinned to skiff@7
+    /// until then: on skiff@8 she never luffed inside her hold (seeds 3 and 7).
     // fleet-rules@7 (#477): the scene was fitted to the start row's race area and pre-gun ease; the opening's moves it.
-    @Test(.onSkiffSeven, .onSevenRules) func windwardLuffHoldingNearCloseHauledLuffs() throws {
+    // #553 re-probes it on fleet-rules@8: there seed 3 (windward 40°, 1.2 abeam, 0.5 ahead) bears away keeping clear.
+    @Test(.onSevenRules) func windwardLuffHoldingNearCloseHauledLuffs() throws {
         var failures: [String] = []
         for seed: UInt64 in [3, 7, 13] {
             for (windward, abeam, ahead) in [(36.0, 1.1, 0.3), (33.0, 1.1, 0.3), (36.0, 0.9, 0.0), (40.0, 1.2, 0.5)] {
                 let race = try Self.prestartWindwardLeeward(seed: seed, leeward: deg2rad(32), windward: deg2rad(windward),
                                                             abeam: abeam, ahead: ahead)
-                let sailed = Self.sailOne(race, seat: 1, seconds: 15, planned: .starboard)
+                let sailed = Self.sailOne(race, seat: 1, seconds: 15, planned: .starboard, helm: true)
                 let calls = Self.calls(sailed.kinds)
                 let name = "seed \(seed) windward at \(windward)° abeam \(abeam) ahead \(ahead)"
                 if !calls.isEmpty { failures.append("\(name): \(calls)") }
@@ -806,17 +832,16 @@ import RegattaCore
     /// by hand, both her turn's sweeps cross it, #486) puts it off and sails on rather than turning it at once through
     /// her: she isn't 30° into it in the first 2 s, she isn't called 21.2 (before, a penalised boat turning in the pack
     /// collected 21.2 calls from boats that had nothing to do with her first foul), and she still serves it in time (no
-    /// missed-penalty disqualification).
-    // skiff@7 until #455: on skiff@8 seed 3 draws a rule 21.2 call on the turning boat (tried again after #471's step C:
-    // the same, the boat abeam to leeward).
-    @Test(.onFiveRules, .onSkiffSeven) func racingPenaltyInACrowdIsPutOffAndDoesNotCascade() throws {
+    /// missed-penalty disqualification). Both bots steer by hand between decisions (`Pilot`'s helm), as they ship
+    /// on the default class. Pinned to skiff@7 until then: on skiff@8 seed 3 drew a 21.2 call on the turning boat.
+    @Test(.onFiveRules) func racingPenaltyInACrowdIsPutOffAndDoesNotCascade() throws {
         var failures: [String] = []
         for seed: UInt64 in [3, 5, 7] {
             for pair in Self.racingPenalisedPairs {
                 let race = try Self.racingPenalised(seed: seed, ahead: pair.ahead, across: pair.across)
                 let early = race.tick + 2 * Race.tickRate
                 var startedEarly = false
-                let kinds = Self.sail(race, seconds: 45) { race in
+                let kinds = Self.sail(race, seconds: 45, helm: true) { race in
                     if race.tick <= early, abs(race.boats[0].penaltyProgress) >= deg2rad(30) { startedEarly = true }
                 }
                 let foul = Self.calls(kinds).filter { $0 == "21.2 on 0" }

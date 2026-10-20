@@ -18,7 +18,8 @@ import RegattaCore
         /// Whether seat 1 was to her starboard.
         var otherToStarboard: [Bool] = []
         var keepingClear: [Bool] = []
-        /// Her tack or gybe on the autohelm's tap (or tacking): a tack is rule 13's, not a course change she steers.
+        /// Her tack or gybe on the autohelm's tap or by hand (her `handTurn`: a hand tack's luff to head to wind, a
+        /// hand gybe's bear-away), or tacking: a tack is rule 13's, not a course change she steers.
         var tapping: [Bool] = []
         /// Whether she owed seat 1 mark-room (rule 18): she gives it as she would keep clear, at any rate.
         var owesMarkRoom: [Bool] = []
@@ -28,12 +29,14 @@ import RegattaCore
         var calls: [String] { BotConductTests.calls(kinds) }
     }
 
-    /// Sails `encounter` for its seconds: seat 0 the `profile` (the hunter unless given), seat 1 a live bot.
-    static func sail(_ encounter: BotConductTests.Encounter, profile: BotProfile? = .hunter) throws -> Sailed {
+    /// Sails `encounter` for its seconds: seat 0 the `profile` (the hunter unless given), seat 1 a live bot; `helm`, both
+    /// steering by hand between decisions (`Pilot`'s).
+    static func sail(_ encounter: BotConductTests.Encounter, profile: BotProfile? = .hunter,
+                     helm: Bool = false) throws -> Sailed {
         let race = try encounter.race()
         var pilots = [
-            BotConductTests.Pilot(seat: 0, plannedTack: encounter.planned[0], race: race, profile: profile),
-            BotConductTests.Pilot(seat: 1, plannedTack: encounter.planned[1], race: race),
+            BotConductTests.Pilot(seat: 0, plannedTack: encounter.planned[0], race: race, profile: profile, helm: helm),
+            BotConductTests.Pilot(seat: 1, plannedTack: encounter.planned[1], race: race, helm: helm),
         ]
         var sailed = Sailed()
         for _ in 0..<Int(encounter.seconds * Double(Race.tickRate)) where !race.isOver {
@@ -46,7 +49,7 @@ import RegattaCore
             sailed.gaps.append((b.position - a.position).length)
             sailed.otherToStarboard.append((b.position - a.position).dot(Vec2.heading(a.heading).rightPerp) > 0)
             sailed.keepingClear.append(race.rightOfWay(0, 1)?.keepClear == 1)
-            sailed.tapping.append(a.autohelm?.isTapping == true || a.isTacking)
+            sailed.tapping.append(a.autohelm?.isTapping == true || a.isTacking || pilots[0].brain.handTurn != nil)
             sailed.owesMarkRoom.append(race.seatView(for: 0).own.markRoom.contains { $0.owing == 0 })
             sailed.sailingAngles.append(a.sailingAngle)
             sailed.otherSailingAngles.append(b.sailingAngle)
@@ -240,11 +243,12 @@ import RegattaCore
         var calls: [String] = []
     }
 
-    static func round(_ encounter: BotConductTests.Encounter, mark: Vec2, profile: BotProfile) throws -> Rounding {
+    static func round(_ encounter: BotConductTests.Encounter, mark: Vec2, profile: BotProfile,
+                      helm: Bool = false) throws -> Rounding {
         let race = try encounter.race()
         var pilots = [
-            BotConductTests.Pilot(seat: 0, plannedTack: encounter.planned[0], race: race, profile: profile),
-            BotConductTests.Pilot(seat: 1, plannedTack: encounter.planned[1], race: race),
+            BotConductTests.Pilot(seat: 0, plannedTack: encounter.planned[0], race: race, profile: profile, helm: helm),
+            BotConductTests.Pilot(seat: 1, plannedTack: encounter.planned[1], race: race, helm: helm),
         ]
         let leg = race.boats[0].legIndex
         var rounding = Rounding()
@@ -273,10 +277,13 @@ import RegattaCore
     /// outside (`holdingCourse`) gives none of it up at the mark, and the hunter rounding with a hold no faster than she
     /// hunts, or hunting the outside boat there, rounded wider and later (#355's findings round: 1.2 to 5.2 m wider). So
     /// in the zone she rounds as the live bot does, and hunts no one: as near the mark as the tactician, no call on her.
-    // fleet-rules@7 (#477): the scene was fitted to the start row's race area and pre-gun ease; the opening's moves it.
-    @Test(.onSevenRules) func hunterTakesAllHerMarkRoom() throws {
-        // skiff@6 until #455: the hunter gives up mark-room under hand steering.
-        try BotConductTests.$waterClass.withValue(BotHelmTests.autohelmOn().ref) { try Self.checkHunterTakesAllHerMarkRoom() }
+    ///
+    /// Both bots steer by hand between decisions (`Pilot`'s helm), as they ship on the default class. Without it,
+    /// her centred rudder sailing straight on, the hunter rounded 6.1 m off the mark, past the 5.8 m the tactician's
+    /// rounding allowed, so the scene sailed the autohelm on (skiff@6) until then. With the helm it rounds as fitted on
+    /// the default rules too: the fleet-rules@7 pin (#477) is gone with it.
+    @Test func hunterTakesAllHerMarkRoom() throws {
+        try Self.checkHunterTakesAllHerMarkRoom()
     }
 
     static func checkHunterTakesAllHerMarkRoom() throws {
@@ -287,8 +294,8 @@ import RegattaCore
         for (encounter, offset) in scenes {
             let race = try encounter.race()
             let mark = race.course.elements[offset ? CourseLayout.offsetIndex : CourseLayout.windwardIndex].marks[0].position
-            let hunted = try Self.round(encounter, mark: mark, profile: .hunter)
-            let held = try Self.round(encounter, mark: mark, profile: .tactician)
+            let hunted = try Self.round(encounter, mark: mark, profile: .hunter, helm: true)
+            let held = try Self.round(encounter, mark: mark, profile: .tactician, helm: true)
             inZone += hunted.decisionsInZone
             #expect(hunted.huntedInZone == 0, "\(encounter.name): hunted \(hunted.huntedInZone) times with mark-room")
             #expect(hunted.roundedTick != nil, "\(encounter.name): never rounded")
