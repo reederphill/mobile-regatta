@@ -6,17 +6,24 @@
 #   scripts/pick-ui-seeds.sh           probe and rewrite the table
 #   scripts/pick-ui-seeds.sh --check   probe and report where the table differs, without rewriting (exit 1 if it does)
 #
-# The probe is `regatta-botsuite results-seed` (Packages/RegattaCore, release build, through scripts/heavy.sh).
-# Rows (only one today):
+# The probes are `regatta-botsuite results-seed` and `rounding-seed` (Packages/RegattaCore, release build, through
+# scripts/heavy.sh). Rows:
 #   resultsSheet  ResultsUITests.testSheetAppearsAbout3sAfterFinishWhileSceneRenders: `-demo -laps 1 -timescale 4`
 #                 (7 opponents, the launch race), your boat finishes >= 14 s of wall-clock time before the close:
 #                 the sim ticks at 30 Hz and -timescale 4 runs at most 120 ticks/s, so >= 1,680 ticks (#445: at
 #                 -timescale 8 the 3,360 ticks it needed were more than a one-lap fleet spreads).
+#   firstRounding RaceAssemblyUITests.testPracticeRaceOnTheNewCoreReachesTheGunAndAFirstRounding: `-demo -timescale 8`
+#                 (the launch race, 7 opponents, 2 laps), your boat starts within 2 s of the gun and rounds the
+#                 windward mark within 140 s of it with no rule call against her (#477: CI's simulator ran the race at
+#                 1.25-1.4x, so the test's 180 s budget reached 157-170 s after the gun).
 set -euo pipefail
 
 # The timescale ResultsUITests launches at, and the ticks that give it 14 s of wall-clock time after your finish.
 results_timescale=4
 results_min_gap_ticks=$((14 * 30 * results_timescale))
+# RaceAssemblyUITests' start and first rounding, in ticks after the gun: 2 s and 140 s.
+rounding_max_start_ticks=$((2 * 30))
+rounding_max_rounding_ticks=$((140 * 30))
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
@@ -25,7 +32,7 @@ check=false
 case "${1:-}" in
     "") ;;
     --check) check=true ;;
-    -h | --help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "usage: scripts/pick-ui-seeds.sh [--check]" >&2; exit 2 ;;
 esac
 
@@ -47,6 +54,10 @@ grep -E "warning: unre" "$build_log" || true
 found="$("$probe" results-seed --from 1 --to 400 --laps 1 --opponents 7 --min-gap-ticks "$results_min_gap_ticks")"
 echo "resultsSheet: $found"
 read -r _ seed _ finish _ close <<<"$found"
+found="$("$probe" rounding-seed --from 1 --to 400 --laps 2 --opponents 7 --max-start-ticks "$rounding_max_start_ticks" \
+    --max-rounding-ticks "$rounding_max_rounding_ticks")"
+echo "firstRounding: $found"
+read -r _ rounding_seed _ rounding_start _ rounding_tick <<<"$found"
 
 table=RegattaUITests/SeedTable.swift
 generated="$(mktemp)"
@@ -60,6 +71,10 @@ enum SeedTable {
     /// boat finishes at least $results_min_gap_ticks ticks (14 s at \`-timescale $results_timescale\`) before the close. Probed: she finishes at tick
     /// $finish, the race closes at $close.
     static let resultsSheet: UInt64 = $seed
+    /// \`RaceAssemblyUITests.testPracticeRaceOnTheNewCoreReachesTheGunAndAFirstRounding\`: the \`-demo\` launch race on which
+    /// your boat starts within $rounding_max_start_ticks ticks of the gun and rounds the windward mark within $rounding_max_rounding_ticks ticks of it, with no rule
+    /// call against her. Probed: she starts at tick $rounding_start and rounds at tick $rounding_tick.
+    static let firstRounding: UInt64 = $rounding_seed
 }
 SWIFT
 
