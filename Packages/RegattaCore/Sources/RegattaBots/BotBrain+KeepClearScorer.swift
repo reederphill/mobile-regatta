@@ -353,12 +353,18 @@ extension BotBrain {
 
     /// The headings on her own tack she weighs keeping clear (#529's reachable headings): `desired`, her heading held,
     /// and where she can be pointing in `keepClearReachSeconds` either way at `keepClearTurnRate`, each kept to her
-    /// tack's sailable angles (out of the no-go zone, never by the lee) and none within a degree of another.
+    /// tack's sailable angles (out of the no-go zone, never by the lee) and none within a degree of another. A turn
+    /// bearing her away past dead downwind stops there (#455): wrapped round the wind, it read as a luff to close-hauled,
+    /// and running fast down on a slow boat clear ahead she swung from bearing away to luffing and back every second,
+    /// keeping clear of neither side (`scriptedEncountersZeroFoulsAtSkill1`, clear astern running, seed 17).
     func keepClearHeadings(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double, extra: [Double] = []) -> [Double] {
         let side: Double = b.tack == .port ? 1 : -1
         let closest = BoatDynamics.noGoAngle(view.boatClass.polar) + deg2rad(5)
         func onHerTack(_ heading: Double) -> Double {
-            b.windDirection + side * (wrapAngle(heading - b.windDirection) * side).clamped(to: closest...Double.pi)
+            // Her sailing angle on her tack: by the lee is past π, not round the wind on the other side.
+            var angle = wrapAngle(heading - b.windDirection) * side
+            if angle < -.pi / 2 { angle += 2 * .pi }
+            return b.windDirection + side * angle.clamped(to: closest...Double.pi)
         }
         var headings: [Double] = []
         func add(_ heading: Double) {

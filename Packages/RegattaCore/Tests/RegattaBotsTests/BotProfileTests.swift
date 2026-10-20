@@ -37,7 +37,7 @@ import RegattaCore
     /// Sails `encounter` for its seconds: seat 0 the `profile` (the hunter unless given), seat 1 a live bot; `helm`, both
     /// steering by hand between decisions (`Pilot`'s).
     static func sail(_ encounter: BotConductTests.Encounter, profile: BotProfile? = .hunter,
-                     helm: Bool = false) throws -> Sailed {
+                     helm: Bool = true) throws -> Sailed {
         let race = try encounter.race()
         var pilots = [
             BotConductTests.Pilot(seat: 0, plannedTack: encounter.planned[0], race: race, profile: profile, helm: helm),
@@ -126,7 +126,7 @@ import RegattaCore
         }
         func holdsHerTack(_ abeam: Double, _ ahead: Double, after: UInt64 = 0) throws -> UInt64 {
             try firstSeed(in: after + 1...after + 12) { seed in
-                try !Self.sail(scene(seed, abeam, ahead), profile: .tactician, helm: true).tapping[0]
+                try !Self.sail(scene(seed, abeam, ahead), profile: .tactician).tapping[0]
             }
         }
         let first = try holdsHerTack(2.5, 0.5)
@@ -135,8 +135,8 @@ import RegattaCore
         var closer = 0
         for (seed, abeam, ahead) in scenes {
             let encounter = scene(seed, abeam, ahead)
-            let hunted = try Self.sail(encounter, helm: true)
-            let held = try Self.sail(encounter, profile: .tactician, helm: true)
+            let hunted = try Self.sail(encounter)
+            let held = try Self.sail(encounter, profile: .tactician)
             try Self.checkWithinRule16(hunted, encounter.name)
             let length = try BotConductTests.Water(seed: seed).length
             let ticks = Self.huntingTicks(hunted, length: length), heldTicks = Self.huntingTicks(held, length: length)
@@ -162,7 +162,7 @@ import RegattaCore
     @Test func hunterLuffsAWindwardBoat() throws {
         for seed: UInt64 in [1, 2, 3] {
             let encounter = BotConductTests.windwardLeeward(seed: seed, running: false, abeam: 2, ahead: 0, converging: 0)
-            let hunted = try Self.sail(encounter, helm: true)
+            let hunted = try Self.sail(encounter)
             try Self.checkWithinRule16(hunted, encounter.name)
             // She luffed: her sailing angle fell below where she started, the windward boat's with it.
             let start = hunted.sailingAngles[0], otherStart = hunted.otherSailingAngles[0]
@@ -208,13 +208,14 @@ import RegattaCore
     // skiff@7 until #455's "duck when the tack costs more": on skiff@9, both bots steering by hand, the hunter keeps
     // within rule 16.1's rate, but the port boat seldom ducks her: the scorer's tack (`keepClearTack`, #531), costed
     // below the duck, has her tack away about 7 s out. Of seeds 1–24 they meet on 5 and she ducks on one (seed 1), so
-    // the scene meets in 1 of 3.
+    // the scene meets in 1 of 3. No hand on the helm until then too: steering by hand on skiff@7 the hunter turns away
+    // 3.1° (seed 1).
     @Test(.onSkiffSeven) func hunterHoldsStarboardAndForcesTheDuck() throws {
         // On a collision course: the port boat must duck; the hunter never turns away from her, and draws no call.
         var met = 0
         for seed: UInt64 in [1, 2, 3] {
             let encounter = BotConductTests.portStarboard(seed: seed, early: 0, running: false)
-            let hunted = try Self.sail(encounter)
+            let hunted = try Self.sail(encounter, helm: false)
             try Self.checkWithinRule16(hunted, encounter.name)
             #expect(!hunted.calls.contains { $0.hasSuffix("on 0") }, "\(encounter.name): \(hunted.calls)")
             let race = try encounter.race()
@@ -268,7 +269,7 @@ import RegattaCore
     }
 
     static func round(_ encounter: BotConductTests.Encounter, mark: Vec2, profile: BotProfile,
-                      helm: Bool = false) throws -> Rounding {
+                      helm: Bool = true) throws -> Rounding {
         let race = try encounter.race()
         var pilots = [
             BotConductTests.Pilot(seat: 0, plannedTack: encounter.planned[0], race: race, profile: profile, helm: helm),
@@ -318,8 +319,8 @@ import RegattaCore
         for (encounter, offset) in scenes {
             let race = try encounter.race()
             let mark = race.course.elements[offset ? CourseLayout.offsetIndex : CourseLayout.windwardIndex].marks[0].position
-            let hunted = try Self.round(encounter, mark: mark, profile: .hunter, helm: true)
-            let held = try Self.round(encounter, mark: mark, profile: .tactician, helm: true)
+            let hunted = try Self.round(encounter, mark: mark, profile: .hunter)
+            let held = try Self.round(encounter, mark: mark, profile: .tactician)
             inZone += hunted.decisionsInZone
             #expect(hunted.huntedInZone == 0, "\(encounter.name): hunted \(hunted.huntedInZone) times with mark-room")
             #expect(hunted.roundedTick != nil, "\(encounter.name): never rounded")

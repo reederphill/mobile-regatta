@@ -23,6 +23,10 @@ import RegattaCore
 /// She steers by hand as well as her skill lets her (#435, `HandSteering`): she aims by the wind she last re-aimed to,
 /// not the wind at her, re-aiming only `shiftLag` seconds after a shift or puff reaches her, past the new angle by her
 /// `overshoot`, and she wanders slowly about her aim. At skill 1 she has none of these and sails exactly as above.
+///
+/// "Steady helm standing on" (#455, `BotBrain.standsOn`): while her brain stands on as the right-of-way boat with a boat
+/// that must keep clear of her near, her hand turns her no faster than `BotBrain.Hunter.rateShare` of rule 16.1's
+/// course-change rate (`steady`), whatever her correction: following a shift she comes round a little late.
 struct BotHelm: Sendable, Equatable {
     /// What she holds by hand: the autohelm the class's would be, engaged when her brain last centred the rudder; nil
     /// while her brain holds the rudder or she has never centred it.
@@ -49,8 +53,10 @@ struct BotHelm: Sendable, Equatable {
     /// the tack/gybe tap if `tapping`: then the rudder stays as her brain left it, centred, for the race's autohelm to
     /// sail the tap (a rudder held off centre would cancel it). `centred` (#459), her brain lets the rudder go in
     /// irons: it is sent truly centred and she holds nothing, so the class's irons recovery falls her off.
+    /// `holdsHerAngle`: engaging, she holds the angle she is at, not the groove within a snap of it. `standsOn`: her
+    /// hand's rudder is `steady`.
     mutating func input(_ input: BoatInput, _ view: SeatView, tapping: Bool = false, centred: Bool = false,
-                        holdsHerAngle: Bool = false) -> BoatInput {
+                        holdsHerAngle: Bool = false, standsOn: Bool = false) -> BoatInput {
         let boatClass = view.boatClass
         guard !boatClass.steering.autohelm.holdsWhenCentred, !tapping else {
             held = nil
@@ -83,14 +89,28 @@ struct BotHelm: Sendable, Equatable {
         guard !hand.isPerfect else {
             let rudder = helm.rudder(sailingAngle: angle, boomSide: own.boomSide, tws: own.polarWindSpeed,
                                      grooveTWS: own.grooveWindSpeed, boatClass: boatClass)
-            return BoatInput(rudder: Self.pulsed(rudder, boatClass, speed: own.speed), ease: input.ease)
+            return BoatInput(rudder: Self.pulsed(Self.steady(rudder, standsOn: standsOn, boatClass, speed: own.speed),
+                                                 boatClass, speed: own.speed), ease: input.ease)
         }
         // By hand: her angle read against the wind she steers by, not the wind at her.
         let wind = hand.steer(&steering, own: own, tick: view.tick, downwind: helm.target.isDownwind)
         let steeredAngle = own.boomSide.sailingAngle(relativeWind: wrapAngle(wind.direction - own.heading))
         let rudder = helm.rudder(sailingAngle: steeredAngle, boomSide: own.boomSide, tws: wind.tws,
                                  grooveTWS: wind.grooveTWS, boatClass: boatClass)
-        return BoatInput(rudder: Self.pulsed(rudder, boatClass, speed: own.speed), ease: input.ease)
+        return BoatInput(rudder: Self.pulsed(Self.steady(rudder, standsOn: standsOn, boatClass, speed: own.speed),
+                                             boatClass, speed: own.speed), ease: input.ease)
+    }
+
+    /// "Steady helm standing on" (#455, the owner's Q6 of 2026-10-20): her hand's `rudder` when she `standsOn`, held to
+    /// what turns `boatClass` at `BotBrain.Hunter.rateShare` of rule 16.1's course-change rate
+    /// (`BotBrain.Hunter.courseChangeRate`) at `speed`, the hunter's bound (`huntRudder`) without its `Hunter.rudder`
+    /// ceiling; as it is otherwise. Her wander, overshoot and late re-aims (#435) turned a right-of-way bot towards the boat keeping
+    /// clear of her at 12–19°/s, past 16.1's rate, a turn the other boat can't see coming.
+    static func steady(_ rudder: Double, standsOn: Bool, _ boatClass: BoatClass, speed: Double) -> Double {
+        guard standsOn else { return rudder }
+        let most = BotBrain.Hunter.rateShare * BotBrain.Hunter.courseChangeRate
+            / max(boatClass.steering.turnRate(speed: speed), 1e-9)
+        return rudder.clamped(to: -most...most)
     }
 
     /// The smallest rudder the race steers by (#545): `BoatInput`'s 7/127, since 6/127 is inside `Autohelm.deadBand`.

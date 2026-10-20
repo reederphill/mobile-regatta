@@ -246,6 +246,29 @@ extension BotBrain {
         return BoatInput(rudder: 0 as Int8, ease: input.ease)
     }
 
+    /// "Steady helm standing on" (#455, the owner's Q6 of 2026-10-20): whether she stands on, racing, as she holds her
+    /// course (`holdingCourse`), the right-of-way boat with a boat that must
+    /// keep clear of her (rules 10–13, or 21: `OtherBoat.rightOfWay`), not a ghost, near enough to come inside
+    /// `roomLengths` of her within `roomLookahead` (`turns(towards:)`'s reach); or clear astern of one, whose overlap,
+    /// made to leeward, gives her right of way on the tick it begins, mid-correction. Her hand then turns her no faster
+    /// than `Hunter.rateShare` of rule 16.1's course-change rate (`BotDecision.standsOn`, `BotHelm.steady`), and so do a
+    /// mark, the edge and an overtaking lane turning her towards a boat keeping clear of her (`sail`): following a shift
+    /// she comes round a little late rather than snapping to her groove, as a helm standing on does, and never surprises
+    /// the boat keeping clear of her. A turn her brain puts the rudder over for to keep clear herself, tack, gybe or take
+    /// a penalty is not steadied; her hand holding the angle her brain leaves her is, whatever that turn was. Not before
+    /// her start, where the cautious bot holds her course too: steadied there, she drew calls in the pre-start crowd
+    /// (`CautiousBotSuiteTests`, seeds 1 and 14). Not a slowdown or a give-way: she sails her angle, only steadier.
+    /// Internal.
+    func standsOn(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+        guard b.status == .racing else { return false }
+        let clear = view.boatClass.hull.length * roomLengths
+        return view.others.contains { other in
+            guard !other.isGhost, let right = other.rightOfWay,
+                  right.keepClear == other.seat || right.rule == .clearAstern else { return false }
+            return (other.position - b.position).length < clear + (b.speed + other.speed) * roomLookahead
+        }
+    }
+
     /// Whether turning her `turn` way (+1 to starboard) brings a boat that must keep clear of her (rules 10–13, or 21
     /// for a boat taking a penalty or returning: `OtherBoat.rightOfWay`) closer to her than holding her course would, at a moment within `roomLookahead` seconds
     /// when that boat is inside `roomDistance` hull lengths of her: any of `roomTurns` that way, both boats sailing on

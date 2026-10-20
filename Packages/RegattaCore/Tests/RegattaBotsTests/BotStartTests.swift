@@ -241,8 +241,9 @@ import RegattaCore
     /// hull lengths below the middle of the line `toGun` seconds before the gun, sailed out against a typical windward bot
     /// to `after` seconds past it: the times the combative leeward boat luffed, the first her approach to her own spot
     /// (`secondsToSpot`) and `luffSpareSeconds` no longer fit in the time to the gun, and when she started (nil: not by
-    /// then) and whether she was over at the gun; times from the gun.
-    static func luffingOut(seed: UInt64, toGun: Int, below: Double, after: Double = 30) throws
+    /// then) and whether she was over at the gun; times from the gun. `helm`: both steer by hand between decisions
+    /// (`Pilot`'s).
+    static func luffingOut(seed: UInt64, toGun: Int, below: Double, after: Double = 30, helm: Bool = true) throws
         -> (luffs: [Double], outOfTime: Double?, brokeOff: Double?, started: Double?, ocs: Bool, until: Double) {
         let water = BotConductTests.Water(seed: seed, toGun: toGun, below: below)
         let heading = water.heading(.starboard, deg2rad(45))
@@ -252,8 +253,8 @@ import RegattaCore
             BotConductTests.Placement(position: water.centre + forward.rightPerp * water.length * 1.5, heading: heading,
                                       speed: 2, status: .prestart),
         ])
-        var luffer = BotTacticsTests.pilot(seat: 0, race, engagement: 1, planned: .starboard)
-        var windward = BotTacticsTests.pilot(seat: 1, race, engagement: 0.5, planned: .starboard)
+        var luffer = BotTacticsTests.pilot(seat: 0, race, engagement: 1, planned: .starboard, helm: helm)
+        var windward = BotTacticsTests.pilot(seat: 1, race, engagement: 0.5, planned: .starboard, helm: helm)
         let until = try #require(luffer.brain.tactics.startLuffUntil)
         var luffs: [Double] = [], outOfTime: Double?, brokeOff: Double?, started: Double?, ocs = false
         while race.seatView(for: 0).time < after, !race.isOver, started == nil {
@@ -283,8 +284,9 @@ import RegattaCore
     // skiff@7 until #553's pre-gun re-probe: on skiff@8 she breaks off her luff 8.5 s before she is out of time, not on the
     // decision before it.
     // fleet-rules@7 (#477): the scene was fitted to the start row's race area and pre-gun ease; the opening's moves it.
+    // No hand on the helm until #553 too: steering by hand on skiff@7 her last luff is 8.1 s before she is out of time.
     @Test(.onSkiffSeven, .onSevenRules) func combativeBreaksOffHerLuffInTimeToStart() throws {
-        let sailed = try Self.luffingOut(seed: 36, toGun: 50, below: 5)
+        let sailed = try Self.luffingOut(seed: 36, toGun: 50, below: 5, helm: false)
         let outOfTime = try #require(sailed.outOfTime, "her time ran out before the gun")
         #expect(-outOfTime > sailed.until + 10, "out of time \(-outOfTime) s before the gun, her ease \(sailed.until) s")
         #expect(sailed.luffs.contains { $0 < outOfTime - 10 }, "she luffed with time to spare")

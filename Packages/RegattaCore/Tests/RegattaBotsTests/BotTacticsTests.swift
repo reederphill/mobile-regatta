@@ -159,8 +159,8 @@ import Testing
     /// A live bot at the helm of `seat`, at `skill`, with `engagement`, meaning to sail `planned`; `helm`, steering by
     /// hand between decisions (`Pilot`'s).
     static func pilot(seat: Int, _ race: Race, skill: Double = 0.9, engagement: Double = 1, planned: Tack,
-                      helm: Bool = false) -> BotConductTests.Pilot {
-        var pilot = BotConductTests.Pilot(seat: seat, plannedTack: planned, race: race, skill: skill)
+                      helm: Bool = true) -> BotConductTests.Pilot {
+        var pilot = BotConductTests.Pilot(seat: seat, plannedTack: planned, race: race, skill: skill, helm: false)
         var style = BotConductTests.skill1
         style.skill = skill
         style.engagement = engagement
@@ -219,7 +219,7 @@ import Testing
 
     /// Seat 1 beating on starboard, a National bot sailing her own race (engagement 0): she keeps clear as the rules
     /// have her, and plays no boat. `helm`: she steers by hand between decisions (`Pilot`'s).
-    static func victim(_ race: Race, helm: Bool = false) -> BotConductTests.Pilot {
+    static func victim(_ race: Race, helm: Bool = true) -> BotConductTests.Pilot {
         Self.pilot(seat: 1, race, engagement: 0, planned: .starboard, helm: helm)
     }
 
@@ -245,7 +245,7 @@ import Testing
                 try scene.place([scene.beating(.starboard, at: scene.centre), scene.beating(.starboard, at: behind)])
                 var tackedAt: Int?
                 let sailed = Self.sail(scene.race, Self.pilot(seat: 0, scene.race, skill: skill, engagement: engagement,
-                                                             planned: .starboard, helm: true),
+                                                             planned: .starboard),
                                        seconds: 10, taps: [(1, 0.5)]) { race in
                     if tackedAt == nil && race.boats[1].tack == .port { tackedAt = race.tick }
                 }
@@ -281,7 +281,7 @@ import Testing
     /// `justTacked`: she tacked onto port `tackedAgo` seconds ago, well inside her tack interval (`Tactics.tackInterval`).
     static func portMeetsStarboard(seed: UInt64, ahead: Double, leeward: Double = 3.5, engagement: Double = 1,
                                    seconds: Double = 12, justTacked: Bool = false, tackedAgo: Double = 1,
-                                   boatClass: FileRef = BotConductTests.waterClass, helm: Bool = false) throws
+                                   boatClass: FileRef = BotConductTests.waterClass, helm: Bool = true) throws
         -> (tapped: Int?, play: BotBrain.FleetPlay.Kind?, kinds: [RaceEvent.Kind], race: Race, closest: Double,
             backwinded: Bool, tacked: (ahead: Double, leeward: Double)?, gates: LeeBowGates, from: Int) {
         let scene = Scene(seed: seed, boatClass: boatClass)
@@ -386,8 +386,7 @@ import Testing
         let separation = BotBrain.FleetTactics.leeBowMinSeparation
         for seed in Self.fleetSeeds {
             // #337: a combative bot, her last tack `leeBowMinSeparation` ago, inside her interval.
-            let lee = try Self.portMeetsStarboard(seed: seed, ahead: 5.5, seconds: 8, justTacked: true, tackedAgo: separation,
-                                                  helm: true)
+            let lee = try Self.portMeetsStarboard(seed: seed, ahead: 5.5, seconds: 8, justTacked: true, tackedAgo: separation)
             #expect(BotConductTests.calls(lee.kinds).isEmpty, "seed \(seed): \(BotConductTests.calls(lee.kinds))")
             #expect(lee.tapped != nil, "seed \(seed): she didn't lee-bow inside her tack interval")
             #expect(lee.play == .leeBow, "seed \(seed): she tacked for \(String(describing: lee.play))")
@@ -396,9 +395,9 @@ import Testing
 
             // Her tack on a boat's wind is hers to choose: it waits for the interval. The same scene a second after a
             // tack, she holds port past the chance; outside her interval she takes it (the positive control, #338).
-            let onWind = try Self.crossingAhead(seed: seed, together: true, seconds: 8, justTacked: true, helm: true)
+            let onWind = try Self.crossingAhead(seed: seed, together: true, seconds: 8, justTacked: true)
             #expect(onWind.tapped == nil, "seed \(seed): she tacked on her wind inside her tack interval")
-            let free = try Self.crossingAhead(seed: seed, together: true, seconds: 8, helm: true)
+            let free = try Self.crossingAhead(seed: seed, together: true, seconds: 8)
             #expect(free.tapped != nil, "seed \(seed): outside her interval she tacks on her wind")
             #expect(free.play == .tackOnWind, "seed \(seed): she tacked for \(String(describing: free.play))")
         }
@@ -413,19 +412,17 @@ import Testing
     @Test func leeBowsInsideTheIntervalOnlyCombative() throws {
         let separation = BotBrain.FleetTactics.leeBowMinSeparation
         for seed in Self.fleetSeeds {
-            let combative = try Self.portMeetsStarboard(seed: seed, ahead: 5.5, seconds: 8, justTacked: true, tackedAgo: separation,
-                                                        helm: true)
+            let combative = try Self.portMeetsStarboard(seed: seed, ahead: 5.5, seconds: 8, justTacked: true, tackedAgo: separation)
             #expect(combative.tapped != nil, "seed \(seed): combative, she lee-bows inside her interval")
             #expect(combative.play == .leeBow, "seed \(seed): she tacked for \(String(describing: combative.play))")
             let floor = try Self.portMeetsStarboard(seed: seed, ahead: 5.5, engagement: BotBrain.FleetTactics.leeBowEngagement,
-                                                   seconds: 8, justTacked: true, tackedAgo: separation, helm: true)
+                                                   seconds: 8, justTacked: true, tackedAgo: separation)
             #expect(floor.tapped == nil, "seed \(seed): at the floor, she waits out her interval")
             // Outside her interval the floor bot lee-bows the same crossing (the positive control).
-            let free = try Self.portMeetsStarboard(seed: seed, ahead: 5.5, engagement: BotBrain.FleetTactics.leeBowEngagement,
-                                                  helm: true)
+            let free = try Self.portMeetsStarboard(seed: seed, ahead: 5.5, engagement: BotBrain.FleetTactics.leeBowEngagement)
             #expect(free.tapped != nil, "seed \(seed): at the floor, outside her interval, she lee-bows")
             #expect(free.play == .leeBow, "seed \(seed): she tacked for \(String(describing: free.play))")
-            let back = try Self.portMeetsStarboard(seed: seed, ahead: 5.5, seconds: 8, justTacked: true, tackedAgo: 1, helm: true)
+            let back = try Self.portMeetsStarboard(seed: seed, ahead: 5.5, seconds: 8, justTacked: true, tackedAgo: 1)
             let early = back.tapped.map { Double($0 - back.from) / Double(Race.tickRate) < separation - 1 } ?? false
             #expect(!early, "seed \(seed): a second after a tack, she tacked again inside the separation")
         }
@@ -439,7 +436,7 @@ import Testing
     /// (#329's `FleetTactics.shadowCost`: plan neutral, it pays only in light air). `justTacked`: she tacked onto port a
     /// second ago, well inside her tack interval.
     static func crossingAhead(seed: UInt64, together: Bool, seconds: Double = 16, veer: Double = deg2rad(2),
-                              justTacked: Bool = false, helm: Bool = false) throws
+                              justTacked: Bool = false, helm: Bool = true) throws
         -> (tapped: Int?, play: BotBrain.FleetPlay.Kind?, kinds: [RaceEvent.Kind], madeGood: Double, shadowed: Bool,
             closest: Double, length: Double) {
         let scene = Scene(seed: seed, veer: veer)
@@ -470,7 +467,7 @@ import Testing
     /// tapping nothing: her tack is the hand turn she starts, and the play she starts it for (`sail`).
     @Test func tackOnWindCompletesClear() throws {
         for seed in Self.fleetSeeds {
-            let sailed = try Self.crossingAhead(seed: seed, together: true, helm: true)
+            let sailed = try Self.crossingAhead(seed: seed, together: true)
             #expect(sailed.tapped != nil, "seed \(seed): she didn't tack on her wind")
             #expect(sailed.play == .tackOnWind, "seed \(seed): she tacked for \(String(describing: sailed.play))")
             #expect(sailed.shadowed, "seed \(seed): the starboard boat never sat in her shadow")
@@ -486,8 +483,8 @@ import Testing
     /// tapping nothing: her tack is the hand turn she starts, and the play she starts it for (`sail`).
     @Test func tackOnWindCostsTheVictimAtLeastHalfAHullLength() throws {
         for seed in Self.fleetSeeds {
-            let victim = try Self.crossingAhead(seed: seed, together: true, helm: true)
-            let twin = try Self.crossingAhead(seed: seed, together: false, helm: true)
+            let victim = try Self.crossingAhead(seed: seed, together: true)
+            let twin = try Self.crossingAhead(seed: seed, together: false)
             #expect(victim.tapped != nil, "seed \(seed): she didn't tack on her wind")
             #expect(victim.play == .tackOnWind, "seed \(seed): she tacked for \(String(describing: victim.play))")
             let lost = (twin.madeGood - victim.madeGood) / victim.length

@@ -113,7 +113,8 @@ import RegattaCore
     /// sail set: at `skill` with its weaknesses (#103), or with `weaknesses` if given; her own draws from her seat.
     /// `helm`: her hand steers between decisions through a `BotHelm`, as `BotDriver` has it, holding by hand the
     /// angle her brain centred the rudder on where the class's autohelm doesn't. Without it a centred rudder sails
-    /// straight on there, which no shipped bot does. Off by default: a scene opts in where it has been sailed with it.
+    /// straight on there, which no shipped bot does. On by default: a scene sails with `helm: false` only while the
+    /// ticket it names hasn't yet made her sail it by hand.
     struct Pilot {
         let seat: Int
         var brain: BotBrain
@@ -125,7 +126,7 @@ import RegattaCore
 
         init(seat: Int, plannedTack: Tack?, race: Race, skill: Double = 1, weaknesses: BotWeaknesses? = nil,
              caution: BotBrain.Caution? = nil, profile: BotProfile? = nil, penaltyDirection: Double = 1,
-             helm: Bool = false) {
+             helm: Bool = true) {
             self.seat = seat
             var style = BotConductTests.skill1
             style.skill = skill
@@ -156,7 +157,7 @@ import RegattaCore
             var decision = brain.decide(helm?.view(view) ?? view)
             startedHandTurn = !wasTurning && brain.handTurn != nil
             if let input = helm?.input(decision.input, view, tapping: decision.tap != nil, centred: decision.centred,
-                                       holdsHerAngle: decision.holdsHerAngle) {
+                                       holdsHerAngle: decision.holdsHerAngle, standsOn: decision.standsOn) {
                 decision.input = input
             }
             race.apply(decision.input, seat: seat, atTick: race.tick + 1)
@@ -171,7 +172,7 @@ import RegattaCore
     /// `helm`, whether both steer by hand between decisions (`Pilot`'s).
     static func sail(_ race: Race, seconds: Double, planned: [Tack?] = [nil, nil], skill: Double = 1,
                      weaknesses: [BotWeaknesses?] = [nil, nil], caution: BotBrain.Caution? = nil,
-                     avoids: [Bool] = [true, true], helm: Bool = false, each: (Race) -> Void = { _ in }) -> [RaceEvent.Kind] {
+                     avoids: [Bool] = [true, true], helm: Bool = true, each: (Race) -> Void = { _ in }) -> [RaceEvent.Kind] {
         var pilots = [0, 1].map {
             Pilot(seat: $0, plannedTack: planned[$0], race: race, skill: skill, weaknesses: weaknesses[$0], caution: caution,
                   helm: helm)
@@ -368,10 +369,10 @@ import RegattaCore
     /// #101 acceptance: two skill-1 bots meet in every relation the rules give them (port and starboard, overlapped
     /// to windward and leeward, clear astern, a tack into another boat's water, mark-room inside and outside, a
     /// boat turning a penalty and one returning OCS), each in several variations, and no rule call is made on
-    /// either: each keeps clear when she must and holds her course when she needn't. Neither ever protests.
+    /// either: each keeps clear when she must and holds her course when she needn't. Neither ever protests. On the
+    /// default class both steer by hand between decisions (`Pilot`'s helm), holding by hand the heading they gave way on.
     @Test func scriptedEncountersZeroFoulsAtSkill1() throws {
-        // skiff@6 until #455: the scripted encounters' bots miss each other or draw calls under hand steering.
-        try Self.$waterClass.withValue(BotHelmTests.autohelmOn().ref) { try Self.checkScriptedEncountersZeroFouls() }
+        try Self.checkScriptedEncountersZeroFouls()
     }
 
     static func checkScriptedEncountersZeroFouls() throws {
@@ -446,13 +447,11 @@ import RegattaCore
     /// entitled to from the other (rule 18.2: the room the other must give her, #93), or for a bot owing a penalty turn,
     /// who keeps clear of every boat as she turns it (rule 21.2, #100). At every skill (#103): both bots sail with their
     /// skill's weaknesses, misjudging encounters as it has them, and still neither ever turns towards a boat that must
-    /// keep clear of her.
+    /// keep clear of her. On the default class both steer by hand between decisions (`Pilot`'s helm): her hand's
+    /// wander, overshoot and late re-aims stand on (`BotHelm.steady`), as do her turns off a mark or along a lane.
     @Test(arguments: BotConductTests.everySkill)
     func rightOfWayBotNeverRuddersTowardAKeepClearBoat(skill: Double) throws {
-        // skiff@6 until #455: right-of-way bots turn towards a keep-clear boat under hand steering.
-        try Self.$waterClass.withValue(BotHelmTests.autohelmOn().ref) {
-            try Self.checkRightOfWayNeverRuddersTowardAKeepClearBoat(skill: skill)
-        }
+        try Self.checkRightOfWayNeverRuddersTowardAKeepClearBoat(skill: skill)
     }
 
     /// #104: the cautious bot holds to #101's invariant too: both bots cautious, at her skill and with her weaknesses.
@@ -493,8 +492,10 @@ import RegattaCore
                     snapshot.seats[0].boat.penaltyClockTick = snapshot.tick
                 }
                 let skill = BotBrain.Caution.skill
+                // Her brain's input as it is, no hand on the helm, until #455's PR 4 (penalty turns by hand): steering
+                // by hand she draws 21.2 and 11 calls here.
                 var pilot = Pilot(seat: 0, plannedTack: nil, race: race, skill: skill,
-                                  weaknesses: BotBrain.Caution.weaknesses(skill: skill), caution: .standard)
+                                  weaknesses: BotBrain.Caution.weaknesses(skill: skill), caution: .standard, helm: false)
                 var kinds: [RaceEvent.Kind] = []
                 for _ in 0..<(30 * Race.tickRate) where !race.isOver {
                     _ = pilot.drive(race)
@@ -557,7 +558,7 @@ import RegattaCore
         }
         #expect(checked > 1_000, "right of way held in the encounters")
         #expect(courseChanges > 0, "the right-of-way bots changed course by the rudder somewhere")
-        #expect(violations.isEmpty, "\(violations.prefix(20).joined(separator: "\n"))")
+        #expect(violations.isEmpty, "\(violations.count) violations:\n\(violations.prefix(20).joined(separator: "\n"))")
     }
 
     // MARK: - Misjudging (#103)
@@ -697,7 +698,7 @@ import RegattaCore
     /// the metres between them, centre to centre, how far she is ahead of the other boat along its heading, and her
     /// wind angle, and every event. `helm`: the bot steers by hand between decisions (`Pilot`'s).
     static func sailOne(_ race: Race, seat: Int, seconds: Double, skill: Double = 1, weaknesses: BotWeaknesses? = nil,
-                        planned: Tack? = nil, helm: Bool = false) -> (decisions: [Sailed], kinds: [RaceEvent.Kind]) {
+                        planned: Tack? = nil, helm: Bool = true) -> (decisions: [Sailed], kinds: [RaceEvent.Kind]) {
         var pilot = Pilot(seat: seat, plannedTack: planned, race: race, skill: skill, weaknesses: weaknesses, helm: helm)
         var decisions: [Sailed] = []
         var kinds: [RaceEvent.Kind] = []
@@ -730,7 +731,7 @@ import RegattaCore
             for (windward, abeam, ahead) in [(36.0, 1.1, 0.3), (33.0, 1.1, 0.3), (36.0, 0.9, 0.0), (40.0, 1.2, 0.5)] {
                 let race = try Self.prestartWindwardLeeward(seed: seed, leeward: deg2rad(32), windward: deg2rad(windward),
                                                             abeam: abeam, ahead: ahead)
-                let sailed = Self.sailOne(race, seat: 1, seconds: 15, planned: .starboard, helm: true)
+                let sailed = Self.sailOne(race, seat: 1, seconds: 15, planned: .starboard)
                 let calls = Self.calls(sailed.kinds)
                 let name = "seed \(seed) windward at \(windward)° abeam \(abeam) ahead \(ahead)"
                 if !calls.isEmpty { failures.append("\(name): \(calls)") }
@@ -841,7 +842,7 @@ import RegattaCore
                 let race = try Self.racingPenalised(seed: seed, ahead: pair.ahead, across: pair.across)
                 let early = race.tick + 2 * Race.tickRate
                 var startedEarly = false
-                let kinds = Self.sail(race, seconds: 45, helm: true) { race in
+                let kinds = Self.sail(race, seconds: 45) { race in
                     if race.tick <= early, abs(race.boats[0].penaltyProgress) >= deg2rad(30) { startedEarly = true }
                 }
                 let foul = Self.calls(kinds).filter { $0 == "21.2 on 0" }
@@ -2928,7 +2929,8 @@ extension BotConductTests {
                 Placement(position: water.centre, heading: heading, speed: speed, status: .prestart),
                 Placement(position: meet, heading: water.wind + deg2rad(10), speed: 0.1, status: .prestart),
             ]) { $0.seats[1].boat.autohelm = nil }
-            var pilot = Pilot(seat: 0, plannedTack: nil, race: race)
+            // Her brain's input as it is, no hand on the helm, until #553: steering by hand she bears back 7.7° against 5°.
+            var pilot = Pilot(seat: 0, plannedTack: nil, race: race, helm: false)
             pilot.brain.commitsAvoidance = commits
             var luffed = false, contact = false, committed = 0
             var closest = Double.infinity, back = 0.0, gap = Double.infinity
