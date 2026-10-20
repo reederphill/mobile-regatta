@@ -68,12 +68,9 @@ import Testing
             + "(mean start \(fixed(summary.meanStartSeconds)) s), pre-gun irons \(fixed(summary.meanPreGunIronsSeconds, 3)) s/boat "
             + "(max \(fixed(summary.maxPreGunIronsSeconds)))")
         #expect(summary.races == 200 && summary.seats == 2_000)
-        // Known until #494 (owner, 2026-10-12): on fleet-rules@6 boats called in the last seconds before the gun go over
-        // early (OCS 0.052 on Linux; main on @5 0.043); the limit itself is unchanged.
-        let maxOCSShare = try #require(limits.maxOCSShare)
-        withKnownIssue("#494: fleet-rules@6 penalty turns before the gun push bots over the line early", isIntermittent: true) {
-            #expect(summary.ocsShare <= maxOCSShare, "OCS \(summary.ocsShare)")
-        }
+        // #494: on fleet-rules@6 boats called in the last seconds before the gun went over early (OCS 0.052); from the
+        // opening (fleet-rules@8) the run reads 0.021 (macOS, -O), under the limit.
+        #expect(summary.ocsShare <= (try #require(limits.maxOCSShare)), "OCS \(summary.ocsShare)")
         // Known until #553 (owner, #461, #471 and #477): on skiff@8 bots started late from the start row (on time 0.46, mean start 10.3 s).
         // On fleet-rules@8, the default since #477 PR 4 (its PR 2, the bots' tackable wait, parked): on time 0.542, mean start
         // 5.74 s (macOS, -O).
