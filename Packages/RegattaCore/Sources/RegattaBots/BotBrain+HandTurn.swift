@@ -82,6 +82,11 @@ public enum HandTackTable {
     /// to spare before she puts a turn off or gives one up. On the wind (inside `luffFirstAngle`) with `luffFirstSpeed`
     /// of her close-hauled speed she luffs first.
     public static let penaltyTurn = (speed: 0.4, crawl: 9.0, margin: 3.0, luffFirstAngle: deg2rad(90), luffFirstSpeed: 0.6)
+    /// "Hold the way when slow" (#494): inside this many radians of the wind, luffing a penalty turn up to its tack with
+    /// `stall.steerage` of her close-hauled speed, the tack is nearly made, and she carries on through it rather than
+    /// bear away the other way (`BotBrain.carriesOnThroughTheTack`). Traced (#494 c5): flipped away at 10° and 0.58 of
+    /// close-hauled, a second before the tack, she sailed the whole turn the long way and missed its deadline.
+    public static let penaltyCarryOnAngle = deg2rad(30)
     /// "Start first, then turn" (`BotBrain.startsBeforeHerTurn`, #471): at least `turnIn` seconds for the rules' 30°
     /// once she is over the line (the rudder's slew, the 30° at the turn's rudder, a second to spare; more when slow),
     /// reckoned at `speed` of her close-hauled speed while her crossing is further off than that; `spare` seconds over
@@ -495,6 +500,22 @@ extension BotBrain {
         let table = HandTackTable.penaltyTurn
         guard b.twa < table.luffFirstAngle, isSlowForPenaltyTurn(b, view) else { return nil }
         return b.relativeWind > 0 ? -1 : 1
+    }
+
+    /// "Hold the way when slow" (#494): a sailor crawling through a tack never throws the helm back. Whether turning
+    /// her penalty turn `way`'s way (+1 to starboard) luffs her (it isn't the way that bears her away, as
+    /// `penaltyBearAwayFirst` reckons it) while she is under `HandTackTable.penaltyTurn.luffFirstSpeed` of her
+    /// close-hauled speed: from there the luff back across the wind is a crawl that stalls her head to wind, each
+    /// fall-back a recross that turns the turn round (#494's trace: c2 at 0.19, n2 at 0.27-0.60 of close-hauled).
+    func luffsTooSlow(_ b: SeatView.OwnBoat, _ view: SeatView, way: Double) -> Bool {
+        b.speed < closeHauledSpeed(b, view) * HandTackTable.penaltyTurn.luffFirstSpeed && way != (b.relativeWind > 0 ? -1 : 1)
+    }
+
+    /// "Hold the way when slow" (#494): whether her penalty turn's tack is nearly made, inside
+    /// `HandTackTable.penaltyCarryOnAngle` of the wind with `stall.steerage` of her close-hauled speed: she carries on
+    /// through it rather than bear away the other way (`penaltyBearAwayFirst`).
+    func carriesOnThroughTheTack(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+        b.twa < HandTackTable.penaltyCarryOnAngle && b.speed >= closeHauledSpeed(b, view) * HandTackTable.stall.steerage
     }
 
     /// Whether, on a class she turns by hand, she is too slow to turn a penalty turn up through the wind, or to give

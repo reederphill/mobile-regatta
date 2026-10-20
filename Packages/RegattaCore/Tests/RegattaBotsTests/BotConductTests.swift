@@ -1226,6 +1226,41 @@ import RegattaCore
         #expect(!crossed.contact, "seed \(seed): contact")
     }
 
+    /// #494 PR 2 (fleet-rules@8), "hold the way when slow": the scene above, but crawling at 0.3 of her close-hauled
+    /// speed. Slow, she never throws the helm back: the luff back across the wind is the crawl that stalls her head to
+    /// wind (#494's trace c2, n2). She steers off the boat or turns on, the turn's own way: her turn's way
+    /// (`penaltyTurn`) changes sign at most once, the race never resets her turn, and she serves it in time.
+    @Test func slowTurningBotNeverFlipsBackAcrossTheWind() throws {
+        let others: [(ahead: Double, across: Double, running: Bool)] = [(0, 2.0, false)]
+        let lookahead = BotWeaknesses(skill: 1).keepClearLookahead
+        // A seed whose boat is in what is left of her turn inside her lookahead, the other way clear: the dodge's pressure.
+        let seed = try firstSeed(in: 1...20) { seed in
+            let (race, way) = try Self.midTurnScene(seed: seed, speed: 0.3, others)
+            let sweeps = try Self.sweepsLeft(race)
+            guard let own = sweeps[way] ?? nil else { return false }
+            return own < lookahead && (sweeps[-way] ?? nil) == nil
+        }
+        let (race, way) = try Self.midTurnScene(seed: seed, speed: 0.3, others)
+        var pilot = Pilot(seat: 0, plannedTack: nil, race: race, skill: 1, weaknesses: BotWeaknesses(skill: 1))
+        let deadline = try #require(race.seatView(for: 0).own.penalty).completeDeadlineTick
+        var signs: [Double] = []
+        var kinds: [RaceEvent.Kind] = []
+        var servedTick: Int?
+        for _ in 0..<(40 * Race.tickRate) where !race.isOver && servedTick == nil {
+            _ = pilot.drive(race)
+            if let turn = pilot.brain.penaltyTurn, turn.sign != signs.last?.sign { signs.append(turn) }
+            race.step()
+            let drained = race.drainEvents().map(\.kind)
+            kinds += drained
+            if drained.contains(.penaltyServed(seat: 0)) { servedTick = race.tick }
+        }
+        let resets = kinds.filter { if case .penaltyReset(seat: 0) = $0 { true } else { false } }.count
+        #expect(signs.count <= 2, "seed \(seed): her turn's way flipped back \(signs)")
+        #expect(resets == 0, "seed \(seed): \(resets) resets")
+        let served = try #require(servedTick, "seed \(seed): not served")
+        #expect(served <= deadline, "seed \(seed): served at tick \(served), deadline \(deadline)")
+    }
+
     // MARK: - Past her latest start (#528)
 
     /// Seconds to seat 0's latest start (`BotBrain.latestStartSeconds`) in `race` as it stands.

@@ -684,6 +684,9 @@ struct BotBrain: Sendable {
             }
         }
         let locked = owed.isDirectionLocked && owed.direction != 0
+        // "Hold the way when slow" (#494): a crossing made, and the other way a luff back across the wind under
+        // `luffFirstSpeed` of her close-hauled speed, she turns on her crossing's way as if it were locked.
+        let pinned = locked || owed.direction != 0 && luffsTooSlow(b, view, way: -Double(owed.direction))
         let keepClear = owed.isStarted ? penaltyKeepClear(b, view) : nil
         // Rounding: a crossing where she is rounding a mark counts for nothing, and rounding voids a half-made turn
         // (#487). She sails her rounding and out of it (keeping clear under 21.2) whatever her time, and turns once
@@ -715,11 +718,11 @@ struct BotBrain: Sendable {
         // The way she turns, if its crossings left fall clear of a rounding; else the other, if hers to turn; else none.
         func clearOfRounding(_ way: Double) -> Double? {
             guard penaltyCrossingRounds(b, owed, view, direction: way) else { return way }
-            return locked || penaltyCrossingRounds(b, owed, view, direction: -way) ? nil : -way
+            return pinned || penaltyCrossingRounds(b, owed, view, direction: -way) ? nil : -way
         }
         if penaltyTurn == nil, let markAhead {
             var sweeps = PenaltySweeps()
-            if locked { sweeps.only = Double(owed.direction) }
+            if pinned { sweeps.only = Double(owed.direction) }
             let way = penaltyWay(b, view, owed, sweeps, markAway: nearestMark(b, view).map { Self.away(from: $0.offset, b) })
             guard let turn = clearOfRounding(way) else { return holdOff(markAhead.mark) }
             penaltyTurn = turn
@@ -727,7 +730,7 @@ struct BotBrain: Sendable {
         }
         guard let turn = penaltyTurn else {
             var sweeps = PenaltySweeps()
-            if locked {
+            if pinned {
                 let way = Double(owed.direction)
                 sweeps.only = way
                 let conflict = turnSweep(b, view, direction: way, angle: penaltyTurnLeft(b, owed, view, direction: way))
@@ -766,14 +769,20 @@ struct BotBrain: Sendable {
         }
         var way = turn
         // By hand, luffing slow into the wind before the turn's first crossing: she turns it the other way (#461), if
-        // that way's sweep is clear (#486).
+        // that way's sweep is clear (#486); not with the tack nearly made, which she carries on through (#494).
         if !locked, !owed.isStarted, nearestMark(b, view) == nil, let away = penaltyBearAwayFirst(b, view), away != way,
+           !carriesOnThroughTheTack(b, view),
            turnSweep(b, view, direction: away, angle: penaltyTurnLeft(b, owed, view, direction: away)) == nil {
             way = away
             penaltyTurn = away
             releaseEscape()
         }
-        guard let clear = clearOfRounding(way) else { return markAhead.map { holdOff($0.mark) } ?? sailOn() }
+        // Slow, her way's crossings falling in a mark's zone, she doesn't luff back across the wind to turn it the other
+        // way (#494, "hold the way when slow"; traced c2: flipped at 0.19 of close-hauled just past the tack, she stalled
+        // head to wind and recrossed): she sails on, or holds the rounding off, until they fall clear of it.
+        guard let clear = clearOfRounding(way), clear == way || !luffsTooSlow(b, view, way: clear) else {
+            return markAhead.map { holdOff($0.mark) } ?? sailOn()
+        }
         if clear != way {
             way = clear
             penaltyTurn = clear
@@ -861,10 +870,12 @@ struct BotBrain: Sendable {
         }
         let soon = conflict.flatMap { $0.seconds < lookahead ? $0 : nil }
         guard soon != nil || towards != nil, latest > -Self.penaltyLateDodgeSeconds else { return .onward }
-        // The other way, if it is clear and hers to turn, with time for all it has left.
+        // The other way, if it is clear and hers to turn, with time for all it has left; slow, never a luff back across
+        // the wind (#494, "hold the way when slow"): she steers off instead, or turns on.
         let other = -way
         let left = Double(owed.completeDeadlineTick - view.tick) * Self.tickStep
-        if latest > 0, !locked, left > penaltyTurnSeconds(b, view, owed, direction: other) + HandTackTable.penaltyTurn.margin,
+        if latest > 0, !locked, !luffsTooSlow(b, view, way: other),
+           left > penaltyTurnSeconds(b, view, owed, direction: other) + HandTackTable.penaltyTurn.margin,
            turnSweep(b, view, direction: other, angle: penaltyTurnLeft(b, owed, view, direction: other)) == nil,
            towards.map({ $0.away == other }) ?? true {
             penaltyTurn = other
