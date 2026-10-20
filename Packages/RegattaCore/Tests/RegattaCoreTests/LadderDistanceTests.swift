@@ -255,7 +255,8 @@ import Testing
         let course = CourseLayout(
             axis: 0, beat: base.beat, startLine: line, finishLine: line, elements: base.elements,
             legs: [.round(0), .round(1), .finish], raceArea: base.raceArea, land: [],
-            edgeSpeedRetention: base.edgeSpeedRetention, placement: base.placement, zoneRadius: base.zoneRadius)
+            edgeSpeedRetention: base.edgeSpeedRetention, placement: base.startRow, opening: base.opening,
+            zoneRadius: base.zoneRadius)
         #expect(course.upwind == Vec2(0, 1) && course.right == Vec2(1, 0))
 
         for (across, isReach) in [(40.0, false), (40.0.nextUp, true)] {

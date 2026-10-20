@@ -4,6 +4,10 @@
 enum SeedTable {
     /// `ResultsUITests.testSheetAppearsAbout3sAfterFinishWhileSceneRenders`: the `-demo -laps 1` race on which your
     /// boat finishes at least 1680 ticks (14 s at `-timescale 4`) before the close. Probed: she finishes at tick
-    /// 6895, the race closes at 9229.
+    /// 6856, the race closes at 8818.
     static let resultsSheet: UInt64 = 7
+    /// `RaceAssemblyUITests.testPracticeRaceOnTheNewCoreReachesTheGunAndAFirstRounding`: the `-demo` launch race on which
+    /// your boat starts within 60 ticks of the gun and rounds the windward mark within 4200 ticks of it, with no rule
+    /// call against her. Probed: she starts at tick 3 and rounds at tick 4137.
+    static let firstRounding: UInt64 = 18
 }

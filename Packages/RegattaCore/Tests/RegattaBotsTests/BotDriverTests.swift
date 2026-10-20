@@ -48,6 +48,10 @@ extension Trait where Self == RulesPin {
     /// (20 s) and completed by its complete deadline (40 s). A test of the bots' full-circle turns names it: races
     /// naming @5 or older still sail them (replays, the reference regattas).
     static var onFiveRules: Self { RulesPin(version: 5) }
+    /// fleet-rules@7, the default from #517 to #477: the start row, every seat sheeted in half a line length below the
+    /// line, an ease 0.3 of her target before the gun as after, and one line length of race area below the line. A scene
+    /// placed on the water and fitted to those (its wind, its pre-gun speeds) names it: the opening moves both.
+    static var onSevenRules: Self { RulesPin(version: 7) }
 }
 
 extension Trait where Self == SkiffPin {

@@ -74,5 +74,9 @@
                      "planing-edge-tritanopia", "planing-edge-washout"],
         "log": "planing.racelog.json", "camera": "race", "clear": [210, 110, 20],
         "leg": 2, "racing": true, "planeMargin": [0.03, 0.2], "planingSeconds": 8
+    },
+    {
+        "fixtures": [],
+        "log": "prestart.racelog.json"
     }
 ]

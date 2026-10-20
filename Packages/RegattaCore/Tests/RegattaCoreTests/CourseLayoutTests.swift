@@ -4,7 +4,9 @@ import Testing
 
 /// Course derivation (#80): the windward–leeward course with an offset mark and a leeward gate.
 @Suite struct CourseLayoutTests {
-    static let rules = Race.defaultRulesConfiguration.content
+    /// The start row's rules, fleet-rules@7: the default since #477, fleet-rules@8, seats the opening in its place (its
+    /// race area: `raceAreaReachesFifteenHullLengthsBelowTheLineOnFleetRules8`; its slots: `OpeningTests`).
+    static let rules = try! RulesConfigFile.bundled(id: "fleet-rules", version: 7).content
     static let boatClass = Race.defaultBoatClass
     static let hull = boatClass.hull.length
     static let conditionsIDs = ["classic-oscillating", "sea-breeze", "gusty-offshore", "light-and-patchy"]

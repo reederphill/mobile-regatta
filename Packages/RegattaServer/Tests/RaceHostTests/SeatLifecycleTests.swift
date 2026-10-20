@@ -30,7 +30,8 @@ struct SeatLifecycleTests {
 
     /// Checks the dropped-boat path for seat 0 with its hold starting at `hold`: nothing from the seat in
     /// between, a neutral held input at exactly `hold + holdTicks`, and the dropped-boat bot from that tick on.
-    /// `helmCentred`: the seat never moved the helm, so releasing it changes nothing and logs nothing.
+    /// `helmCentred`: the seat never moved the helm, so releasing it logs nothing, unless she was seated eased (the
+    /// opening, fleet-rules@8, #477): then the release sheets her in, a neutral input at the drop.
     private func expectDrop(_ rig: Rig, holdFrom hold: Int, holdTicks: Int = 15, helmCentred: Bool = false) async {
         let drop = hold + holdTicks
         await rig.run(to: drop - 1)
@@ -43,7 +44,7 @@ struct SeatLifecycleTests {
         let log = await rig.host.log
         let records = heldInputs(log)
         #expect(!records.contains { $0.tick > hold && $0.tick < drop })
-        if helmCentred {
+        if helmCentred, Race(setup: rig.setup, windSeed: rig.windSeed).heldInputs[0] == .neutral {
             #expect(!records.contains { $0.tick <= drop })
         } else {
             #expect(records.contains { $0.tick == drop && $0.input == .neutral })

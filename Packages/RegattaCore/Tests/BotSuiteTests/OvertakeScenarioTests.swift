@@ -193,9 +193,11 @@ import Testing
     /// a full rules participant: the bot's seat view gives her right of way as the race's rules relation does, every
     /// tick, and never a ghost. Seed 11, National, her stalled on port before the gun: a bot meets her there,
     /// and she is called. (Seed 1 until #537: there the bot now turns away from her, stalled, and nothing is called.)
+    /// On fleet-rules@7 (#477): the seed was probed on the start row's race area and pre-gun ease; the opening's moves it.
     @Test func herPenaltiesAreWaivedAndTheBotsSeeHerRights() throws {
         let cell = OvertakeCell(seed: 11, layout: OvertakeLayout(phase: .prestart, tack: .port, current: false, astern: 4,
-                                                                across: 1, fleetSize: 2, control: false), tierMix: .national)
+                                                                across: 1, fleetSize: 2, control: false), tierMix: .national,
+                                rules: "fleet-rules@7")
         var ticks = 0, mismatches = 0, ghosts = 0, herKeepsClear = 0
         let result = try OvertakeScenario.sail(cell) { race, _ in
             ticks += 1

@@ -273,7 +273,8 @@ import RegattaCore
     /// outside (`holdingCourse`) gives none of it up at the mark, and the hunter rounding with a hold no faster than she
     /// hunts, or hunting the outside boat there, rounded wider and later (#355's findings round: 1.2 to 5.2 m wider). So
     /// in the zone she rounds as the live bot does, and hunts no one: as near the mark as the tactician, no call on her.
-    @Test func hunterTakesAllHerMarkRoom() throws {
+    // fleet-rules@7 (#477): the scene was fitted to the start row's race area and pre-gun ease; the opening's moves it.
+    @Test(.onSevenRules) func hunterTakesAllHerMarkRoom() throws {
         // skiff@6 until #455: the hunter gives up mark-room under hand steering.
         try BotConductTests.$waterClass.withValue(BotHelmTests.autohelmOn().ref) { try Self.checkHunterTakesAllHerMarkRoom() }
     }

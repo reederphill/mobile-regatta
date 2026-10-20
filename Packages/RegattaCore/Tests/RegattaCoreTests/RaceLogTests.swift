@@ -8,13 +8,20 @@ let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
 /// A race for tests: by default seat 0 is human and `opponents` bot seats follow. Nothing sails the
 /// bot seats here (RegattaBotsTests does): every seat only answers to the inputs a test sends. The boats
 /// sail `boatClass`, by default `RaceFiles.defaults`' (skiff@4).
+/// The start row's rules, fleet-rules@7 (#35, #85): every seat seated sheeted in, half a line length below the line,
+/// one line length of race area below it. Since #477 the default (fleet-rules@8) seats the opening, every seat eased
+/// and well below the line, with the race area reaching 15 L below it (which moves the puffs); a test whose scene is
+/// set from the start row's seating, or whose wind is recorded from a race, pins this.
+let startRowRules = try! RulesConfigFile.bundled(id: "fleet-rules", version: 7)
+
 func testRace(
     opponents: Int = 7, seats: [SeatKind]? = nil, laps: Int = 2, prestartSeconds: Int = 60, seed: UInt64,
-    boatClass: FileRef = RaceFiles.defaults.boatClass.ref
+    boatClass: FileRef = RaceFiles.defaults.boatClass.ref, rules: FileRef = RaceFiles.defaults.rulesConfiguration.ref
 ) -> Race {
     let seats = seats ?? [.human] + Array(repeating: .bot, count: opponents)
     let setup = try! RaceSetup(raceSeed: RaceSeed(seed), seats: seats, laps: laps,
-                               startSequenceTicks: prestartSeconds * Race.tickRate, boatClass: boatClass)
+                               startSequenceTicks: prestartSeconds * Race.tickRate, boatClass: boatClass,
+                               rulesConfiguration: rules)
     return Race(setup: setup, windSeed: WindSeed(seed &* 0x9E37_79B9_7F4A_7C15 &+ 1))
 }
 
@@ -226,7 +233,7 @@ enum ScriptedLog {
     }
 
     @Test func heldInputStampedTAppliesFromTickT() throws {
-        let race = testRace(seats: [.human, .human], seed: 5)
+        let race = testRace(seats: [.human, .human], seed: 5, rules: startRowRules.ref)
         let t = race.tick + 10
         let input = BoatInput(rudder: Int8(127), ease: true)
         #expect(race.apply(input, seat: 0, atTick: t) == t)
@@ -303,8 +310,9 @@ enum ScriptedLog {
     }
 
     @Test func easeSlowsTheBoat() {
-        let eased = testRace(seats: [.human, .human], seed: 8)
-        let sailing = testRace(seats: [.human, .human], seed: 8)
+        // Seated sheeted in (the start row's rules): the opening would seat both eased.
+        let eased = testRace(seats: [.human, .human], seed: 8, rules: startRowRules.ref)
+        let sailing = testRace(seats: [.human, .human], seed: 8, rules: startRowRules.ref)
         eased.apply(BoatInput(rudder: Int8(0), ease: true), seat: 0, atTick: eased.tick + 1)
         for _ in 0..<(Race.tickRate * 10) {
             eased.step()

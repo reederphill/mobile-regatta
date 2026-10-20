@@ -195,7 +195,7 @@ enum OpeningRig {
         #expect(Self.rules.easeSpeedFraction(boatClass: boatClass, beforeGun: true) == 0.5)
         #expect(Self.rules.easeSpeedFraction(boatClass: boatClass, beforeGun: false) == boatClass.ease.speedFraction)
         #expect(boatClass.ease.speedFraction == 0.3)
-        let seven = Race.defaultRulesConfiguration.content
+        let seven = try RulesConfigFile.bundled(id: "fleet-rules", version: 7).content
         #expect(seven.raceFormat.opening == nil)
         #expect(seven.easeSpeedFraction(boatClass: boatClass, beforeGun: true) == boatClass.ease.speedFraction)
 

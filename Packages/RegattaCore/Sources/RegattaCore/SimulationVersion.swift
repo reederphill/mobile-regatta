@@ -286,7 +286,10 @@ import Glibc
 ///    line the greater of its line lengths and that many hull lengths, which moves the puffs and the pressure. Races
 ///    still sail fleet-rules@7 by default; a race naming fleet-rules@7 or older sails as on 41, bit for bit, and the
 ///    golden digest is 41's.
-public let simulationRevision = 42
+/// 43: races sail fleet-rules@8 by default (#477), on 42: every default race opens in two rows below the line,
+///    reaching eased, every seat's ease held until the gun. A race naming fleet-rules@7 or older sails as on 42, bit
+///    for bit, and the golden digest is 42's.
+public let simulationRevision = 43
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

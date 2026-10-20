@@ -96,8 +96,8 @@ import RegattaCore
         let sliders = model.groups.flatMap(\.sliders)
         // The pressure field's sliders name numbers only in schema-3 to -5 conditions (`pressureFieldIsTunable`).
         // The roll tack's sliders name numbers only in a class with a roll tack (`rollTackIsTunableOnAnOlderClass`).
-        // The opening's name numbers only in fleet-rules@8 and later (`openingIsTunableOnFleetRulesEight`).
-        for slider in sliders where !Self.isPressureField(slider) && !Self.isRollTack(slider) && !Self.isOpening(slider) {
+        // The start row's name a number only in fleet-rules@7 and older (`openingIsTunableOnFleetRulesEight`).
+        for slider in sliders where !Self.isPressureField(slider) && !Self.isRollTack(slider) && !Self.isStartRow(slider) {
             let file = model.fileValue(slider)
             #expect(file != nil, "\(slider.id) names nothing in its file")
             if let file { #expect(slider.range.contains(file), "\(slider.id)'s file value \(file) is off its slider") }
@@ -127,9 +127,10 @@ import RegattaCore
 
     private static func isRollTack(_ slider: TuningSlider) -> Bool { slider.id.hasPrefix("boatClass:/rollTack/") }
 
-    /// #477: the opening's keys have sliders in the Race format group, after the start row's. They are "not in this
-    /// file" on the default rules (fleet-rules@7, the start row); on fleet-rules@8, bundled and pickable, each names its
-    /// number and the start row's is "not in this file". Set there, the next practice race's rules sail the value.
+    /// #477: the opening's keys have sliders in the Race format group, after the start row's. On the default rules
+    /// (fleet-rules@8, the opening, since #477 PR 4) each names its number and the start row's is "not in this file";
+    /// on fleet-rules@7, bundled and pickable, the opening's are "not in this file" and the start row's names its
+    /// number. Set on the default, the next practice race's rules sail the value.
     @Test func openingIsTunableOnFleetRulesEight() throws {
         let (model, root) = model()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -140,17 +141,14 @@ import RegattaCore
             "easeSpeedFraction", "minimumSpacingHullLengths", "jitterHullLengths",
         ].map { "rulesConfiguration:/raceFormat/opening/\($0)" })
         let startRow = try slider("rulesConfiguration:/raceFormat/startRow/spreadLineLengths", in: model)
-        #expect(opening.allSatisfy { model.fileValue($0) == nil }, "the default rules have no opening")
-        #expect(model.fileValue(startRow) != nil)
-
         let key = DataFileKey(id: "fleet-rules", version: 8)
-        #expect(model.options(.rulesConfiguration).contains(key))
-        model.setBase(.rulesConfiguration, key)
+        #expect(RaceFiles.defaults.rulesConfiguration.ref.key == key)
         #expect(model.fileValue(startRow) == nil, "fleet-rules@8 has no start row")
         for slider in opening {
             let file = try #require(model.fileValue(slider), "\(slider.id) names nothing in \(key)")
             #expect(slider.range.contains(file), "\(slider.id)'s file value \(file) is off its slider")
         }
+
         let trim = try slider("rulesConfiguration:/raceFormat/opening/easeSpeedFraction", in: model)
         #expect(model.fileValue(trim) == 0.5)
         model.set(trim, to: 0.6)
@@ -160,10 +158,20 @@ import RegattaCore
         #expect(config.files.rulesConfiguration.key == key && config.files.rulesConfiguration.tune != nil)
         let files = try RaceFiles(resolving: config.setup, from: config.files.catalog)
         #expect(files.rulesConfiguration.content.raceFormat.opening?.easeSpeedFraction == 0.6)
+
+        let seven = DataFileKey(id: "fleet-rules", version: 7)
+        #expect(model.options(.rulesConfiguration).contains(seven))
+        model.setBase(.rulesConfiguration, seven)
+        #expect(opening.allSatisfy { model.fileValue($0) == nil }, "fleet-rules@7 has no opening")
+        #expect(model.fileValue(startRow) != nil)
     }
 
     private static func isOpening(_ slider: TuningSlider) -> Bool {
         slider.id.hasPrefix("rulesConfiguration:/raceFormat/opening/")
+    }
+
+    private static func isStartRow(_ slider: TuningSlider) -> Bool {
+        slider.id.hasPrefix("rulesConfiguration:/raceFormat/startRow/")
     }
 
     /// #462: the planing rule's stay-on speed share and apparent wind have sliders: on the default class, skiff@9,
@@ -436,7 +444,7 @@ import RegattaCore
         let (model, root) = model()
         defer { try? FileManager.default.removeItem(at: root) }
         let snap = try slider("boatClass:/steering/autohelm/upwindSnapDegrees", in: model)
-        let spread = try slider("rulesConfiguration:/raceFormat/startRow/spreadLineLengths", in: model)
+        let spread = try slider("rulesConfiguration:/raceFormat/opening/spreadLineLengths", in: model)
         model.set(snap, to: 4.5)
         model.set(spread, to: 2)
         model.save(as: "wide start")
@@ -455,7 +463,7 @@ import RegattaCore
         #expect(skiff.version == boatClass.version + 1 && skiff.content.steering.autohelm.upwindSnap == deg2rad(4.5))
         #expect(skiff.header.placeholders.last == "/steering/autohelm/upwindSnapDegrees")
         let rules = try RulesConfigFile(data: Data(contentsOf: urls[1]))
-        #expect(rules.version == rulesFile.version + 1 && rules.header.placeholders.contains("/raceFormat/startRow/spreadLineLengths"))
+        #expect(rules.version == rulesFile.version + 1 && rules.header.placeholders.contains("/raceFormat/opening/spreadLineLengths"))
         let exported = try JSONDecoder().decode(Tuning.self, from: Data(contentsOf: urls[2]))
         #expect(exported.boatClassValues == ["/steering/autohelm/upwindSnapDegrees": 4.5])
         model.delete(saved)

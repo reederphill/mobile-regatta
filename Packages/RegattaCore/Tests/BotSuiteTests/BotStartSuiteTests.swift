@@ -74,9 +74,11 @@ import Testing
         withKnownIssue("#494: fleet-rules@6 penalty turns before the gun push bots over the line early", isIntermittent: true) {
             #expect(summary.ocsShare <= maxOCSShare, "OCS \(summary.ocsShare)")
         }
-        // Known until #477 (owner, #461 and #471): on skiff@8 bots start late (on time 0.46, mean start 10.3 s); the cause is the start row.
+        // Known until #553 (owner, #461, #471 and #477): on skiff@8 bots started late from the start row (on time 0.46, mean start 10.3 s).
+        // On fleet-rules@8, the default since #477 PR 4 (its PR 2, the bots' tackable wait, parked): on time 0.542, mean start
+        // 5.74 s (macOS, -O).
         let minOnTimeShare = try #require(limits.minOnTimeShare)
-        withKnownIssue("#477: the start row jams a hand-steered fleet, so bots start late on skiff@8", isIntermittent: true) {
+        withKnownIssue("#553: bots start late from the opening (#477 PR 2, the tackable wait, parked)", isIntermittent: true) {
             #expect(summary.onTimeShare >= minOnTimeShare, "on time \(summary.onTimeShare)")
         }
         #expect(summary.meanPreGunIronsSeconds <= (try #require(limits.maxMeanPreGunIronsSeconds)),

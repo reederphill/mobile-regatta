@@ -32,6 +32,9 @@ func placeOverLine(_ boat: inout Boat, by over: Double, in race: Race) {
 /// 1.5 line lengths, in an order the race seed shuffles, on starboard reaching towards the pin at polar
 /// speed; her rudder centred, so the autohelm holds the reach (#219).
 @Suite struct StartRowTests {
+    /// The start row's rules, fleet-rules@7: the default since #477 (fleet-rules@8) seats the opening (`OpeningTests`).
+    static let rowRules = startRowRules.ref
+
     /// `boat`'s slot in the start row, 0 at the pin end, from how far along the line she is.
     static func rowSlot(_ boat: Boat, in race: Race) -> Int {
         let span = race.course.placement.spreadLineLengths * race.course.startLine.length
@@ -40,7 +43,7 @@ func placeOverLine(_ boat: inout Boat, by over: Double, in race: Race) {
     }
 
     @Test func rowPlacementMatchesFormula() {
-        let race = testRace(opponents: 9, seed: 7)
+        let race = testRace(opponents: 9, seed: 7, rules: Self.rowRules)
         let n = race.boats.count, line = race.course.startLine, row = race.course.placement
         #expect(n == 10)
         #expect(race.time == -60)
@@ -66,7 +69,7 @@ func placeOverLine(_ boat: inout Boat, by over: Double, in race: Race) {
 
     @Test func orderIsSeeded() {
         func order(_ seed: UInt64) -> [Int] {
-            let race = testRace(opponents: 9, seed: seed)
+            let race = testRace(opponents: 9, seed: seed, rules: Self.rowRules)
             return race.boats.map { Self.rowSlot($0, in: race) }
         }
         #expect(order(11) == order(11))
@@ -87,7 +90,7 @@ func placeOverLine(_ boat: inout Boat, by over: Double, in race: Race) {
         let dinghy = try BoatClassFile.bundled(id: Fixtures.classID, version: Fixtures.version).ref
         for boatClass in [RaceFiles.defaults.boatClass.ref, dinghy] {
             for n in RaceSetup.fleetSizes {
-                let race = testRace(opponents: n - 1, seed: UInt64(n), boatClass: boatClass)
+                let race = testRace(opponents: n - 1, seed: UInt64(n), boatClass: boatClass, rules: Self.rowRules)
                 #expect(race.time == -60)
                 let hull = race.boatClass.hull
                 for a in 0..<n {
@@ -132,7 +135,7 @@ func placeOverLine(_ boat: inout Boat, by over: Double, in race: Race) {
             return ((slots[1] - slots[0]).length, (unsqueezed[1] - unsqueezed[0]).length)
         }
 
-        let v2 = Race.defaultRulesConfiguration.content
+        let v2 = try RulesConfigFile.bundled(id: "fleet-rules", version: 7).content
         #expect(v2.raceFormat.startRow.minimumSpacing == HullLengths(1.25))
         let floored = squeezed(v2)
         #expect(floored.unsqueezed > 1.25 * hull)
@@ -154,7 +157,8 @@ func placeOverLine(_ boat: inout Boat, by over: Double, in race: Race) {
     /// heading, the row's. In a steady wind from the mean direction and still water, her wind angle stays the
     /// placement's.
     @Test func centredRudderHoldsThePlacementWindAngle() throws {
-        let setup = try RaceSetup(raceSeed: RaceSeed(7), seats: [.human] + Array(repeating: .bot, count: 9))
+        let setup = try RaceSetup(raceSeed: RaceSeed(7), seats: [.human] + Array(repeating: .bot, count: 9),
+                                  rulesConfiguration: Self.rowRules)
         let files = try RaceFiles(resolving: setup)
         let drawn = WindSetup(conditions: files.conditions, pairing: files.pairing, raceSeed: setup.raceSeed)
         let steady = GroundWind(direction: drawn.meanDirection, speed: drawn.baseStrength)

@@ -92,7 +92,8 @@ import Testing
         // no inputs, so her autohelm reaches her on below the line, out of the way; seat 0 luffs from her slot
         // to close-hauled on starboard and sails up over the line before the gun (20 s: the skiff crosses
         // the row's depth in well under half that).
-        let race = testRace(seats: [.human, .human], prestartSeconds: 20, seed: 1)
+        // The start row's rules (#477): the opening seats them deeper, eased.
+        let race = testRace(seats: [.human, .human], prestartSeconds: 20, seed: 1, rules: startRowRules.ref)
         let early = sail(race, heading: race.course.axis - deg2rad(45), seconds: 21)
         #expect(early.contains(.ocsNotice(recipient: 0)))
         #expect(!early.contains(.ocsNotice(recipient: 1)))
@@ -126,7 +127,7 @@ import Testing
     }
 
     @Test func tapTakesTheBoatOntoTheOtherTack() {
-        let race = testRace(seats: [.human, .human], seed: 3)
+        let race = testRace(seats: [.human, .human], seed: 3, rules: startRowRules.ref)
         let before = race.boats[0]
         race.tap(.tackGybe, seat: 0, atTick: race.tick + 1)
         for _ in 0..<(Race.tickRate * 5) { race.step() }

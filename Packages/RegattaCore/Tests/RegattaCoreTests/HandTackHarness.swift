@@ -375,8 +375,10 @@ final class WindBook: @unchecked Sendable {
     static func record(_ seed: Int) throws -> Series {
         let conditions = try ConditionsFile.bundled(id: "gusty-offshore", version: 7)
         let venue = try VenueFile.bundled(id: "dev-venue", version: 7)
+        // The start row's rules: the opening's deeper race area moves the puffs these series were pinned on (#477).
         let setup = try RaceSetup(raceSeed: RaceSeed(UInt64(seed)), seats: [.human, .human], laps: 1,
-                                  startSequenceTicks: 1, venue: venue.ref, conditions: conditions.ref)
+                                  startSequenceTicks: 1, venue: venue.ref, conditions: conditions.ref,
+                                  rulesConfiguration: startRowRules.ref)
         let race = try Race(setup: setup, files: try RaceFiles(resolving: setup),
                             mode: .authoritative(windSeed: WindSeed(UInt64(seed) &* 0x9E37_79B9_7F4A_7C15 &+ 1)))
         race.step()
