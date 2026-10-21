@@ -332,7 +332,7 @@ struct BotBrain: Sendable {
         // put in the turn's place would centre the rudder, or hold it, inside the no-go zone, and leave her in irons.
         if caution != nil {
             if decision.tap == nil, !decision.centred, handTurn?.isTurning != true,
-               let input = guarded(view, decision.input) {
+               let input = guarded(view, decision.input, holdsHerAngle: decision.holdsHerAngle) {
                 // Her look replacing the avoidance's helm, it is no longer an avoidance (#538 review).
                 if input != decision.input {
                     decision.avoidsContact = false
