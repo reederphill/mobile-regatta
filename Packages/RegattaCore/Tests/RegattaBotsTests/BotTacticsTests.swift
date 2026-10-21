@@ -343,7 +343,8 @@ import Testing
     /// and 20) 12 starts land crossable lee-bows, about 2.4 L ahead and 0.7 L to leeward once tacked, never closer than
     /// 1.7 L, no rule call; the same 12 with the zone a fan (renders review 2) and a wedge from a point at her mast (review 3). skiff@5's trapezoid (`trapezoidClass`, `FleetTactics.leeBowAstern`) lee-bows from 5.8 L as
     /// before.
-    // skiff@7 until #455: on skiff@8's hand tack she lands her lee-bow without backwinding the other boat.
+    // skiff@7 until #567: on skiff@9, from 4.5 L and from 3.5 / 2 L, the scorer's tack by hand is cheaper than any duck
+    // that clears once it fires (#455 PR 5's trace); a duck started earlier is #567's.
     @Test(.onSkiffSeven) func leeBowsInsteadOfDuckingWhenPossible() throws {
         for seed in Self.fleetSeeds {
             let trapezoid = try Self.portMeetsStarboard(seed: seed, ahead: 5.8, boatClass: Self.trapezoidClass)

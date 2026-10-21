@@ -789,9 +789,10 @@ import RegattaCore
     /// as she does racing (#100), rather than turning on into the boats around her: the turn doesn't collect further
     /// 21.2 calls, and she never owes more than the one. Before, #99 held the turn hard over whoever was near, and one
     /// boat went from one turn owed to four in 2 s.
-    // skiff@7 until #455 PR 4b: on skiff@8 and later seeds 5 and 7 draw a rule 15 call on the penalised boat (tried
-    // again after #471's step C: the same two, a second turn owed). Given a berth before the gun (`startKeepClear`), the
-    // other bot swings wide across the circle and back into her when she gives the turn up; PR 4b holds the berth.
+    // skiff@7 until #566: on skiff@8 and later seeds 5 and 7 draw a rule 15 call on the penalised boat (tried again
+    // after #471's step C: the same two, a second turn owed). Given a berth before the gun (`startKeepClear`), the other
+    // bot bears off for it; the turning boat gives her turn up (#100) and they touch about 0.5 s later, before any swing
+    // back (#455 PR 4b, parked on build/455-little-room: holding the berth heading didn't move it).
     @Test(.onFiveRules, .onSkiffSeven) func prestartPenaltyDoesNotCascade() throws {
         var failures: [String] = []
         for seed: UInt64 in [3, 5, 7] {
