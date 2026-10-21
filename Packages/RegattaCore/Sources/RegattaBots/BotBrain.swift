@@ -89,6 +89,10 @@ public struct BotDecision: Hashable, Sendable {
     /// own, above the groove by what her hand wanders (`BotBrain.ownRunAngle`), and snapped to the groove 8° from it
     /// she sailed the groove after all.
     var holdsHerAngle = false
+    /// Whether she stands on (#455, `BotBrain.standsOn`): the right-of-way boat with a boat that must keep clear of her
+    /// near, her hand on the helm turns her no faster than `Hunter.rateShare` of rule 16.1's course-change rate
+    /// (`BotHelm.input`).
+    var standsOn = false
 
     public init(input: BoatInput, tap: BoatTap? = nil) {
         self.input = input
@@ -331,6 +335,8 @@ struct BotBrain: Sendable {
             }
             see(view)
         }
+        // Whatever she decided, her hand holding the angle it leaves her stands on near a boat keeping clear of her (#455).
+        decision.standsOn = standsOn(view.own, view)
         glimpse(view)
         noteStartLuff(view, decision)
         if decision.input.ease, view.own.twa < BoatDynamics.noGoAngle(view.boatClass.polar) {
@@ -439,7 +445,19 @@ struct BotBrain: Sendable {
         if let evasion = evasion(boat, view, desired: desired, scored: scored) {
             let ease = aim.ease && aim.tack == boat.tack || evasion.dropsAstern
                 || easesKeepingClear(boat, view, heading: evasion.heading)
-            let input = steer(boat, toHeading: evasion.heading, view, closest: evasion.closest)
+            var input = steer(boat, toHeading: evasion.heading, view, closest: evasion.closest)
+            // "Steady helm standing on" (#455): a mark, the edge or a lane past a boat she owes nothing turning her
+            // towards a boat keeping clear of her while she stands on, she turns no faster than her hand would there
+            // (`BotHelm.steady`). Shooting the windward mark, a leeward bot luffed at the windward boat no longer owed
+            // mark-room at 13–19°/s, past rule 16.1's rate; overtaking to leeward, a Club bot's lane turned her at the
+            // windward boat at 26°/s. Rule 16.1 concerns only a course change that affects that boat: turning away
+            // from her, or keeping clear herself (`Evasion.givesWay`, kept when a mark or the edge reshapes it), she
+            // turns as the evasion asks.
+            if !evasion.givesWay, input.rudderValue != 0, standsOn(boat, view),
+               turnsTowardsKeepClearBoat(boat, view, turn: input.rudderValue > 0 ? 1 : -1) {
+                input = BoatInput(rudder: BotHelm.steady(input.rudderValue, standsOn: true, view.boatClass, speed: boat.speed),
+                                  ease: input.ease)
+            }
             return BotDecision(input: clearingQuarter(boat, view, input.eased(ease)))
         }
         if aim.tack == boat.tack { gybeWantedSince = nil }
@@ -1702,22 +1720,37 @@ struct BotBrain: Sendable {
         var heading: Double
         var closest: Double? = nil
         var dropsAstern = false
+        /// Whether it is her keeping clear of a boat (`keepClear`) she must keep clear of, also when a mark or the race
+        /// area's edge reshapes that heading: not a mark or the edge turning her by themselves, nor the racing scorer's
+        /// lane past a boat ahead she owes nothing (#531's overtake).
+        var givesWay = false
     }
 
     /// `evasiveHeading`, with how she steers it (`Evasion`): only her keep-clear heading, when neither a mark nor the
-    /// edge turns her off it, carries more than the heading.
+    /// edge turns her off it, carries `closest` and `dropsAstern`; reshaped by either, it still `givesWay` (#455).
     /// Racing on the shared scorer (#531), `scored` is its decision when `sail` has made it already this decision.
     func evasion(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double,
                  scored: RacingKeepClear?? = nil) -> Evasion? {
-        let keepingClear = keepClear(b, view, desired: desired, scored: scored)
-        var evasive = keepingClear.map { kept in avoidMarks(b, view, desired: kept.heading).map { Evasion(heading: $0) } ?? kept }
+        let keepingClear = keepClear(b, view, desired: desired, scored: scored).map { kept in
+            var kept = kept
+            // The scorer's lane alone, past a boat she owes nothing, is a course of her own choosing.
+            kept.givesWay = !usesKeepClearScorer(b) || view.others.contains { other in
+                !other.isGhost && (other.position - b.position).length < Self.keepClearRange
+                    && keepClearRule(b, view, other) != nil
+            }
+            return kept
+        }
+        var evasive = keepingClear.map { kept in
+            avoidMarks(b, view, desired: kept.heading).map { Evasion(heading: $0, givesWay: kept.givesWay) } ?? kept
+        }
             ?? avoidMarks(b, view, desired: desired).map { Evasion(heading: $0) }
         if keepingClear == nil, b.status == .racing, let off = evasive?.heading,
            turnsTowardsKeepClearBoat(b, view, turn: wrapAngle(off - b.heading) > 0 ? 1 : -1),
            avoidMarks(b, view, desired: b.heading) == nil {
             evasive = Evasion(heading: b.heading)
         }
-        return avoidEdges(b, view, desired: evasive?.heading ?? desired).map { Evasion(heading: $0) } ?? evasive
+        return avoidEdges(b, view, desired: evasive?.heading ?? desired)
+            .map { Evasion(heading: $0, givesWay: evasive?.givesWay ?? false) } ?? evasive
     }
 
     /// `evasion` for a mark or the race area's edge alone, not for a boat: what ends a turn by hand close to the gun

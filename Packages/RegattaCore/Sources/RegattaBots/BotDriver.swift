@@ -173,7 +173,7 @@ public struct BotDriver: Sendable {
         if brain.humanSeats != humans { brain.humanSeats = humans }
         var decision = brain.decide(helm.view(view))
         decision.input = helm.input(decision.input, view, tapping: decision.tap != nil, centred: decision.centred,
-                                    holdsHerAngle: decision.holdsHerAngle)
+                                    holdsHerAngle: decision.holdsHerAngle, standsOn: decision.standsOn)
         decisions += 1
         isHuntingTurn = decision.hunt == .turn
         // A play is her tap's, or on a class she turns by hand (#459) the decision she puts the rudder over on.

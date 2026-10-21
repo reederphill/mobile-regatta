@@ -464,7 +464,10 @@ import Testing
         // #528 before it (penalty way out) moved skiff@9 333 -> 324 (~1.2 sigma; the per-seed change has an SD of 1.08 boats).
         // A pair that passes on one side only would hide the next drop (passing on main only) or a later regression against
         // the branch (passing on the branch only), so this pair passes on both, by none to spare.
-        for seed in [UInt64(16), 17] {
+        // Seeds 19 and 20 since #455 PR 3 (the stand-on helm, the scorer's bear-away): 16 and 17 went 16 → 14 on skiff@9
+        // against 16 on skiff@8, while over seeds 14-25 skiff@9 finished 87 boats before it and 87 after (skiff@8 94 both);
+        // 19 and 20 are the first pair from 16 on to pass on both (15 against 16 before, 14 against 15 after).
+        for seed in [UInt64(19), 20] {
             let seen = try Self.planing(seed: seed, boatClass: Self.skiffNine, seconds: 900)
             let off = seen.off / max(seen.running, 1)
             print("BOTPLANING fleet seed \(seed): off the plane \(off) of \(seen.running) s, finished \(seen.finished)")

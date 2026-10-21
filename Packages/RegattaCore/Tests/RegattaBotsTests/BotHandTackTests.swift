@@ -30,12 +30,14 @@ import Testing
     /// onto an early course: with that pre-gun change off it kept its digest; and skiff@7 alone on #542, whose avoidance
     /// before the gun costs an early course, commits to the way she turned and holds her own angle: skiff@6 kept its
     /// digest; with `commitsAvoidance`, `costsEarlyAvoidance` and `holdsPreGunAvoidanceAngle` off skiff@7 kept its
-    /// digest too).
+    /// digest too; and both on #455 PR 3, whose scorer no longer reads a bear-away past dead downwind as a luff, and
+    /// whose right-of-way bot turns off a mark or along an overtaking lane towards a boat keeping clear of her no faster
+    /// than she stands on, her keeping clear reshaped by a mark or the edge never capped: every class's).
     @Test(.onFiveRules) func skiffSevenBotsAreBitIdentical() throws {
         let seven = try Self.digest(seed: 459, boatClass: BoatClassFile.bundled(id: "skiff", version: 7))
         let six = try Self.digest(seed: 459, boatClass: BoatClassFile.bundled(id: "skiff", version: 6))
-        #expect(hex64(seven) == "0xf5f9d3e1d8a4444e")
-        #expect(hex64(six) == "0x5ec2a2c31f6556c4")
+        #expect(hex64(seven) == "0xbf6f3a9f26e6834b")
+        #expect(hex64(six) == "0x8c914301639d2724")
     }
 
     /// And skiff@8, the default class until #462's switch, sails exactly as before #462's bots layer (every change there
@@ -83,11 +85,14 @@ import Testing
     /// - #455 PR 2 (a tack or gybe by hand starts with no boat keeping clear of her in its swing, the reach rule, held
     ///   10 s at most; the hunter squeezes only once her rudder has settled): both; the live bots' tacks held off for a
     ///   boat keeping clear of them move their tracks (the hunter's change reaches no live bot).
+    /// - #455 PR 3 (a steady helm standing on, and steady off a mark or along a lane towards a boat keeping clear of
+    ///   her, her keeping clear reshaped by a mark or the edge never capped; the scorer's bear-away past dead downwind
+    ///   kept a bear-away): both.
     @Test(.onSixRules) func skiffEightBotsAreBitIdentical() throws {
         let short = try Self.digest(seed: 459, boatClass: Self.skiffEight)
         let long = try Self.digest(seed: 462, boatClass: Self.skiffEight, seconds: 700)
-        #expect(hex64(short) == "0x733d71a6d31a2b92")
-        #expect(hex64(long) == "0x897c257439047fda")
+        #expect(hex64(short) == "0x0ebe49c09e219dc6")
+        #expect(hex64(long) == "0xccc060adafe27241")
     }
 
     // MARK: - skiff@8: tacks and gybes by hand
@@ -233,7 +238,7 @@ import Testing
             let view = race.seatView(for: seat)
             var decision = brain.decide(helm.view(view))
             decision.input = helm.input(decision.input, view, tapping: decision.tap != nil, centred: decision.centred,
-                                        holdsHerAngle: decision.holdsHerAngle)
+                                        holdsHerAngle: decision.holdsHerAngle, standsOn: decision.standsOn)
             race.apply(decision.input, seat: seat, atTick: race.tick + 1)
             if let tap = decision.tap { race.tap(tap, seat: seat, atTick: race.tick + 1) }
             return decision
