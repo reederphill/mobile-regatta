@@ -67,6 +67,9 @@ import Testing
         print("BOTSTART ocs \(fixed(summary.ocsShare, 3)), on time \(fixed(summary.onTimeShare, 3)) "
             + "(mean start \(fixed(summary.meanStartSeconds)) s), pre-gun irons \(fixed(summary.meanPreGunIronsSeconds, 3)) s/boat "
             + "(max \(fixed(summary.maxPreGunIronsSeconds)))")
+        // #276: the start-strategy rows, for the log (report-only; the #276 brief's BOTSTART numbers).
+        let strategies = try #require(StartStrategySummary(try Self.races.get()))
+        print(strategies.lines.map { "BOTSTART \($0)" }.joined(separator: "\n"))
         #expect(summary.races == 200 && summary.seats == 2_000)
         // #494: on fleet-rules@6 boats called in the last seconds before the gun went over early (OCS 0.052); from the
         // opening (fleet-rules@8) the run reads 0.021 (macOS, -O), under the limit.

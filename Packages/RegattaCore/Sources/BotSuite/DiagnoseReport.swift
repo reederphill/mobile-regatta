@@ -35,6 +35,9 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
     public var preGunAvoidance: [PreGunAvoidanceRow]?
     /// Before the gun, where the fleet waits and how it turns (#477, report-only), by tier; nil in a report from before it.
     public var startPlan: [StartPlanRow]?
+    /// The start-strategy rows (#276, report-only), over the run's races; nil in a report from before them. Set by
+    /// `BotSuite.run`, which has the races.
+    public var startStrategies: StartStrategySummary? = nil
 
     /// `tier`'s boats before the gun (#477, `StartPlanObservation`; the held-off rows from `SeatMetrics`, bot seats only).
     public struct StartPlanRow: Codable, Hashable, Sendable {
@@ -627,6 +630,7 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
                      "\(fixed($0.pinEndTurnsPerBoat, 2)) / \($0.pinEndTurnsMax)"]
                 })
         }
+        if let startStrategies { lines += startStrategies.lines }
         lines.append("non-finishers by cause: per 1000 boats (boats; median metres to go)")
         var finishRows: [[String]] = [["cause"] + tiers]
         for (key, label) in NonFinishCause.allCases.map({ ($0.rawValue, $0.label) }) + [(Self.all, Self.all)] {
@@ -740,7 +744,7 @@ private func mean(_ values: [Double]) -> Double? {
 private func text(_ value: Double?, _ places: Int) -> String { value.map { fixed($0, places) } ?? "-" }
 
 /// `rows` as lines of aligned columns, the first row the header: the first column left-aligned, the rest right.
-private func table(_ rows: [[String]]) -> [String] {
+func table(_ rows: [[String]]) -> [String] {
     let widths = (0..<(rows.map(\.count).max() ?? 0)).map { column in
         rows.map { column < $0.count ? $0[column].count : 0 }.max() ?? 0
     }

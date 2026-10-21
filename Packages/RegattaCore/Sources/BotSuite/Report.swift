@@ -129,6 +129,14 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
     /// rule 10 calls on her while so held off her tack (`BotDriver.heldOffTack`). Report-only; nil for a seat no bot sailed.
     public var preGunHeldOffTackSeconds: Double? = nil
     public var preGunHeldOffTackCalls: Int? = nil
+    /// Her start, read off her track by the harness (#276, `StartStrategyTally`, report-only): her approach from her
+    /// samples once a second over the last 60 s before the gun (nil unless sampled at T−59, T−10 and T−5); at the
+    /// gun, her speed over her close-hauled polar speed in her wind, and whether she was over the line; and the rule
+    /// calls on her up to and including the gun's tick. Nil in a race the harness didn't watch.
+    public var approachKind: ApproachKind? = nil
+    public var speedAtGunShare: Double? = nil
+    public var overLineAtGun: Bool? = nil
+    public var preGunCalls: Int? = nil
 
     public static let metricKeys = [
         "finished", "place", "ironsSeconds", "markContacts", "boatContacts", "contactsEndingInFouls",
@@ -154,6 +162,7 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         case preGunAvoidLargestTurnUpDegrees, preGunAvoidTurnsUpOver10, preGunPreferredLuffDegrees, preGunLastAvoidSeconds
         case preGunRefusedHoldsTurned, preGunHeldEarly, preGunLastHeldEarlySeconds, preGunEarlyLuffs
         case preGunAvoidCommitted, preGunAvoidEarly, preGunHeldOffTackSeconds, preGunHeldOffTackCalls
+        case approachKind, speedAtGunShare, overLineAtGun, preGunCalls
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -225,6 +234,10 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         try c.encodeIfPresent(preGunAvoidEarly, forKey: .preGunAvoidEarly)
         try c.encodeIfPresent(preGunHeldOffTackSeconds, forKey: .preGunHeldOffTackSeconds)
         try c.encodeIfPresent(preGunHeldOffTackCalls, forKey: .preGunHeldOffTackCalls)
+        try c.encodeIfPresent(approachKind, forKey: .approachKind)
+        try c.encodeIfPresent(speedAtGunShare, forKey: .speedAtGunShare)
+        try c.encodeIfPresent(overLineAtGun, forKey: .overLineAtGun)
+        try c.encodeIfPresent(preGunCalls, forKey: .preGunCalls)
     }
 
     static func name(_ status: BoatStatus) -> String {
@@ -401,6 +414,14 @@ public struct RaceResult: Codable, Hashable, Sendable {
     public var handling: RaceHandling? = nil
     /// Its two seats' profiles against each other (#484), in a two-boat race of the parity mix; nil otherwise.
     public var parity: RaceParity? = nil
+    /// The start line's bias (#276, `StartStrategyTally`, report-only), degrees off square to the ground wind at its
+    /// midpoint, positive when the committee end is favoured: at the gun, and each whole second before it from the
+    /// gun's back (index 0 the gun's) as far as 60 s (to T−59 in a 60 s sequence, whose first tick sampled is after its
+    /// first step); and where along the line (a share of it from the pin) each rule call's offender was, the calls up to
+    /// and including the gun's tick. Nil in a race the harness didn't watch.
+    public var lineBiasAtGunDegrees: Double? = nil
+    public var lineBiasBeforeGunDegrees: [Double]? = nil
+    public var preGunCallSpots: [Double]? = nil
 
     /// `ranks`: each seat's place in the race's order at the end (`Race.place(of:)`), finished or not.
     init(cell: BotRaceCell, finalTick: Int, capped: Bool, tideStateAtGun: Double?, seats: [SeatMetrics],
