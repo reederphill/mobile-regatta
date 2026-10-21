@@ -205,7 +205,7 @@ import RegattaCore
         #expect(restricted > 0, "never restricted under rule 17: the scene tests nothing")
     }
 
-    // skiff@7 until #455's "duck when the tack costs more": on skiff@9, both bots steering by hand, the hunter keeps
+    // skiff@7 until #567 ("see her coming"; #455 PR 5 found the tack cheaper once the scorer fires): on skiff@9, both bots steering by hand, the hunter keeps
     // within rule 16.1's rate, but the port boat seldom ducks her: the scorer's tack (`keepClearTack`, #531), costed
     // below the duck, has her tack away about 7 s out. Of seeds 1–24 they meet on 5 and she ducks on one (seed 1), so
     // the scene meets in 1 of 3. No hand on the helm until then too: steering by hand on skiff@7 the hunter turns away

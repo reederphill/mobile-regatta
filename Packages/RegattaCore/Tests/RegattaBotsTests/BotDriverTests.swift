@@ -57,7 +57,7 @@ extension Trait where Self == RulesPin {
 extension Trait where Self == SkiffPin {
     /// skiff@7, the default class from #437 to #461: every boat steers by hand, the autohelm sails the tack/gybe tap,
     /// the rudder's drag is linear and there is a roll tack. A scene fitted to the tap's turn, or one whose bots don't
-    /// yet sail it on skiff@8's hand tacks, names it ("until #455": that ticket un-pins it).
+    /// yet sail it on skiff@8's hand tacks, names the ticket that un-pins it ("until #…").
     static var onSkiffSeven: Self { SkiffPin(version: 7) }
     /// skiff@8, the default class from #461 to #462: nothing but a slow boat or a high angle takes her off the plane,
     /// and the bots sail it with the planing tactics of #263 (`downwindAim` without `planingAim`). A test of those
