@@ -27,20 +27,22 @@ public enum BotProfile: String, Codable, CaseIterable, Hashable, Sendable {
     /// Execution without tactics (#222, #105, #426): the baseline's tactics with perfect handling: the top handling
     /// draw (`BotBrain.turnHandling` 1: the best hand tack and gybe, never flubbed, #459) and no hand-steering error,
     /// with no angle noise (`BotWeaknesses.none`). On a class with a roll tack (legacy) she rolls every tack and hits
-    /// every roll. A measuring profile for the suite only: the "execution never beats tactics" check races her against
-    /// `tacticianClubExecution`.
+    /// every roll; on a class without one she sails as `baseline`. A measuring profile for the suite only: the parity mix
+    /// races her, the 2×2's handler, against `tacticianClubSteering` (#426 Q1, #484).
     case executor
-    /// The tactician at Club-level execution (#222, #105): her tactics, but she turns her tacks and gybes by hand as
-    /// the centre of Club's handling band does (#459, `BotBrain.turnHandling`); on a class with a roll tack (legacy)
-    /// half her rolls miss instead (`clubExecutionRollHitRate`; rolls only, the orchestrator's ruling on #105). A
-    /// measuring profile for the suite only.
+    /// The tactician at Club-level execution (#222, #105), Club on her turns only: her tactics, but she turns her tacks
+    /// and gybes by hand as the centre of Club's handling band does (#459, `BotBrain.turnHandling`), her legs steered
+    /// perfectly; on a class with a roll tack (legacy) half her rolls miss instead (`clubExecutionRollHitRate`; rolls only,
+    /// the orchestrator's ruling on #105). A measuring profile for the suite only: the legacy execution mix's, ungated
+    /// (#484).
     case tacticianClubExecution
     /// The baseline steering by hand at Club level (#435): her tactics and no weaknesses, but Club's shift lag, wander
     /// and overshoot (`BotWeaknesses.clubHandSteering`), felt only in a class whose autohelm doesn't hold a centred
     /// rudder. A measuring profile for the suite only: the handling mix races her against the baseline.
     case clubSteering
     /// The tactician steering by hand at Club level (#435), as `clubSteering` is the baseline. A measuring profile for
-    /// the suite only: the handling mix races her against the tactician.
+    /// the suite only: the handling mix races her against the tactician, and the parity mix, the 2×2's tactician with
+    /// weak handling, against the executor (#484).
     case tacticianClubSteering
 }
 

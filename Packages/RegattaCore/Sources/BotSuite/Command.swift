@@ -64,7 +64,9 @@ public struct BotSuiteOptions: Hashable, Sendable {
           --fleet-size <n>       sail only this fleet size (repeatable)
           --tier-mix <mix>       sail only this tier mix: club, regional, national, mixed (repeatable)
           --profile-mix <mix>    sail only this profile mix: live, skillGap, funPass, hunters, execution,
-                                 cautious, rivals, rankStability, handling (repeatable)
+                                 cautious, rivals, rankStability, handling, parity (repeatable). Read parity
+                                 (handling against tactics, #426 Q1) in two-boat races: --profile-mix parity
+                                 --fleet-size 2 --seeds 384 (a multiple of 12, so every seat order sails as often)
           --autohelm <on|off>    off: sail each race on a copy of its class with the autohelm off a centred
                                  rudder, so the bots steer by hand (default: the matrix's, the class as bundled)
           --boat-class <id@v>    sail every race on that bundled class (e.g. skiff@8) instead of the default
