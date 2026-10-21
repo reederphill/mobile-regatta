@@ -146,6 +146,8 @@ public enum BotRaceHarness {
                                       baselines: profiles.indices.filter { profiles[$0] == .baseline })
         // #477: rule 10 calls before the gun on a bot held off her tack onto starboard at the call (report-only).
         var heldOffTackCalls = Array(repeating: 0, count: tiers.count)
+        // #276: the start-strategy rows' samples, once a second before the gun (report-only).
+        var startStrategy = StartStrategyTally(race: race)
         let lastTick = cell.capSecondsAfterGun * Race.tickRate
         var tickMs: [Double] = []
         tickMs.reserveCapacity(setup.startSequenceTicks + lastTick)
@@ -161,6 +163,7 @@ public enum BotRaceHarness {
             tally.record(race, events: drained)
             hunts?.record(race, events: drained, controllers: controllers)
             crosses?.record(race)
+            startStrategy.record(race, events: drained)
             for event in drained {
                 guard case .ruleCall(let call) = event.kind, call.turnsOwed > 0, call.rule == .portStarboard, race.tick < 0,
                       controllers[call.offender].driver?.heldOffTack == true else { continue }
@@ -199,6 +202,7 @@ public enum BotRaceHarness {
                 if profiles[seat] == nil, !cautiousSeats.contains(seat) { metrics.engagement = driver.style.engagement }
                 metrics.handling = driver.handling
             }
+            startStrategy.fill(&metrics, seat: seat)
             return metrics
         }
         var result = RaceResult(cell: cell, finalTick: race.tick, capped: !race.isOver,
@@ -212,6 +216,10 @@ public enum BotRaceHarness {
                         courseChangeRate: $0.courseChangeRate)
         }
         result.rule161 = tally.rule161
+        let biasBeforeGun = startStrategy.biasBeforeGun
+        result.lineBiasAtGunDegrees = biasBeforeGun.first
+        result.lineBiasBeforeGunDegrees = biasBeforeGun.isEmpty ? nil : biasBeforeGun
+        result.preGunCallSpots = startStrategy.callSpots
         result.skillGap?.startGainLengths = crosses?.meanLead
         return result
     }

@@ -277,6 +277,7 @@ public enum BotSuite {
         let sailed = try inParallel(matrix.cells, jobs: jobs, BotRaceHarness.runDiagnosed)
         var report = BotSuiteReport(matrix: matrix, thresholds: thresholds, races: sailed.map(\.result))
         report.diagnose = DiagnoseSummary(sailed.map(\.diagnosis), seats: report.races.flatMap(\.seats))
+        report.diagnose?.startStrategies = StartStrategySummary(report.races)
         return report
     }
 
