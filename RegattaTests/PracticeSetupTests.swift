@@ -286,5 +286,38 @@ extension PracticeSetupTests {
     /// The ticks `PracticeUITests.testFifteenBotRaceRunsFullLength` sizes its watch for, the start sequence included:
     /// at the slowest pace CI has run the race at, 28 ticks a second, they take 254 s of its 330 s watch.
     static let sixteenBoatTickBudget = 7100
+
+    /// The race `ResultsUITests`' Change setup and Last race tests sail to its close (#572): the setup's default ten
+    /// boats on seed 1, one lap from a 10 s start on a 120 m beat, nobody touching the screen, so the 120 s finish
+    /// window after the first finish runs in full: it closes 6,759 ticks in on skiff@9 (the first finish at 3,159).
+    /// Their watch is sized for `tenBoatTickBudget`, as
+    /// `sixteenBoatUITestRaceClosesInsideItsTickBudget` holds `PracticeUITests`' (a 200 s watch ran out on main's
+    /// scheduled CI, 79baafcb, with the race still sailing).
+    @Test func tenBoatUITestRaceClosesInsideItsTickBudget() throws {
+        let model = AppModel(launchOptions: options("-uitesting", "-seed", "1", "-laps", "1", "-startSeconds", "10",
+                                                    "-beatMetres", "120"))
+        model.beginPractice()
+        model.finishBriefing()
+        defer { model.leaveRace() }
+        let driver = try #require(model.session?.driver as? PracticeDriver)
+        #expect(driver.course.beat == 120)
+        #expect(driver.currentFrame.boats.count == 10)
+        var ticks = 0
+        var firstFinish: Int?
+        while !driver.currentFrame.isOver {
+            let frames = driver.tick(1)
+            try #require(!frames.isEmpty, "the race stopped before its close")
+            for frame in frames {
+                ticks += 1
+                if firstFinish == nil, frame.boats.contains(where: { $0.status == .finished }) { firstFinish = ticks }
+            }
+        }
+        #expect(try #require(firstFinish) + 120 * Race.tickRate == ticks, "the finish window ran in full")
+        #expect(ticks <= Self.tenBoatTickBudget, "the race took \(ticks) ticks: ResultsUITests' watch is sized for \(Self.tenBoatTickBudget)")
+    }
+
+    /// The ticks `ResultsUITests` sizes its watch to the close for, the start sequence included: at 28 ticks a second
+    /// they take 254 s of its 330 s watch.
+    static let tenBoatTickBudget = 7100
     #endif
 }

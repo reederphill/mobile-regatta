@@ -69,6 +69,24 @@ import RegattaCore
         #expect(session.easeReleases.knots == knots(metresPerSecond: boat.speed))
     }
 
+    /// The race seconds an Ease is held (#572): live while it is on, and the release's once it is let go. UI tests hold
+    /// Ease by them (`race-ease-held`), as a slow simulator sails less race time than a wall-clock wait.
+    @Test func easeHeldSecondsCountRaceTime() {
+        let session = GameSession(config: Self.config)
+        #expect(session.easeHeldSeconds == nil)
+        session.setEase(true)
+        let on = session.driver.currentFrame.time
+        session.driver.tick(2)
+        let held = session.driver.currentFrame.time - on
+        #expect(held > 1.9)
+        #expect(session.easeHeldSeconds == held)
+        session.driver.tick(1)
+        session.setEase(false)
+        #expect(session.easeHeldSeconds == nil)
+        #expect(session.easeReleases.heldSeconds == session.driver.currentFrame.time - on)
+        #expect(session.easeReleases.heldSeconds > held)
+    }
+
     // MARK: The opening's seated ease (#477)
 
     /// A practice race on fleet-rules@8 (the default since #477), whose opening seats every boat eased: 60 s to the

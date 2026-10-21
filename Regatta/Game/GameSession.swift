@@ -54,6 +54,13 @@ final class GameSession {
     @ObservationIgnored private var servedTurns: [Int: Int] = [:]
     /// When your finish horn sounded, wall-clock, until the results show.
     @ObservationIgnored private var finishedAt: Date?
+    /// Your finish horn, in wall-clock and race time (#572): what `resultsDelayShown` counts from.
+    @ObservationIgnored private var finishMoment: (wall: Date, raceTime: Double)?
+    /// How long after your finish horn the results slid up, in wall-clock seconds and race seconds (#572); nil until
+    /// they have, or with no finish of yours (a DSQ, a close before it). UI tests read it (`race-results-delay`): a slow
+    /// simulator runs the race slower than its `-timescale`, and a test's own looks at the screen can take seconds, so
+    /// the app measures the delay itself, in both clocks.
+    @ObservationIgnored private(set) var resultsDelayShown: (wallSeconds: Double, raceSeconds: Double)?
     /// The tick `results` was built at, so they're rebuilt once a tick, not every display frame.
     @ObservationIgnored private var resultsTick: Int?
     /// Told once with the final results as the race closes (#132): the home screen's Last race.
@@ -245,6 +252,8 @@ final class GameSession {
         // The minimap's first pressure sample (up to ~170 ms on first use, #310) waits for the scene's first HUD
         // refresh, off the race's construction; a frozen fixture takes it here, as its render holds still.
         // The first refresh posts the steering hint at once (#129); a frozen fixture shows only the notice it names.
+        // The seated ease is on from the start: a release's held seconds count from here (#572).
+        if isSeatedEasing { easeOnAt = driver.currentFrame.time }
         refreshHUD(samplesPressure: driver.isFrozen)
     }
 
@@ -320,9 +329,13 @@ final class GameSession {
     private func updateEase(_ change: () -> Void) {
         let was = isEasing
         change()
+        let time = driver.currentFrame.time
+        if !was && isEasing { easeOnAt = time }
         if was && !isEasing {
             easeReleases.count += 1
             easeReleases.knots = knots(metresPerSecond: myBoat.speed)
+            easeReleases.heldSeconds = time - (easeOnAt ?? time)
+            easeOnAt = nil
         }
     }
 
@@ -334,7 +347,19 @@ final class GameSession {
 
     /// How many times Ease has been let go, and your boat's speed in knots the moment it last was: UI tests read it
     /// (`race-ease-release`), since a test's press returns only after the release, with the boat already speeding up.
-    @ObservationIgnored private(set) var easeReleases = (count: 0, knots: 0.0)
+    /// Its `heldSeconds` are the race seconds that Ease was on (#572): a slow simulator sails less race time than a
+    /// test's wall-clock wait, so the test reads the hold from here.
+    @ObservationIgnored private(set) var easeReleases = (count: 0, knots: 0.0, heldSeconds: 0.0)
+
+    /// The race time Ease last went on, nil while it is off (#572).
+    @ObservationIgnored private var easeOnAt: Double?
+
+    /// The race seconds the Ease now on has been held, nil while Ease is off (#572): UI tests read it
+    /// (`race-ease-held`) to let go after a hold measured in race time, not wall-clock time.
+    var easeHeldSeconds: Double? {
+        guard isEasing, let easeOnAt else { return nil }
+        return driver.currentFrame.time - easeOnAt
+    }
 
     private var myBoat: Boat { driver.currentFrame.boats[driver.myBoatIndex] }
 
@@ -470,6 +495,7 @@ final class GameSession {
                 // Your arc's served flash (#489), in race time from the tick it is shown on.
                 if seat == me { scene.servedTurn.served(at: driver.currentFrame.tick) }
             case .finished(me, _):
+                if !playerDone { finishMoment = (now(), Double(event.tick) / Double(Race.tickRate)) }
                 finishForPlayer(showsAt: now().addingTimeInterval(Self.resultsDelay))
             case .disqualified(me, _):
                 finishForPlayer(showsAt: nil)
@@ -495,8 +521,14 @@ final class GameSession {
             isGestureEasing = false
             finishedAt = showsAt
         }
-        if showsAt == nil { finishedAt = nil; showsResults = true }
+        if showsAt == nil { finishedAt = nil; showsResults = true; noteResultsShown() }
         refreshResults()
+    }
+
+    /// The results are up: how long after your finish horn, in both clocks (`resultsDelayShown`), the first time.
+    private func noteResultsShown() {
+        guard resultsDelayShown == nil, let finishMoment else { return }
+        resultsDelayShown = (now().timeIntervalSince(finishMoment.wall), driver.currentFrame.time - finishMoment.raceTime)
     }
 
     /// Rebuilds the results once a tick while you're done, and slides them up once their delay has passed.
@@ -516,6 +548,7 @@ final class GameSession {
         if !showsResults, let finishedAt, now() >= finishedAt {
             showsResults = true
             self.finishedAt = nil
+            noteResultsShown()
         }
     }
 

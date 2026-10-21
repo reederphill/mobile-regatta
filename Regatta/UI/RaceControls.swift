@@ -258,7 +258,9 @@ struct TillerIndicator: View {
 
 /// UI tests only: your boat's speed in knots as an accessibility value (`race-boat-speed`), unsmoothed to two decimals
 /// (the HUD's speed instrument, `race-speed`, is smoothed to one, #457), and her speed the moment Ease was last let go (`race-ease-release`, labelled with how many
-/// times it has been, #112). Read from the driver about four times a second, apart from the HUD's state (#114).
+/// times it has been, #112). `race-ease-held` is the race seconds of the Ease now on, labelled `Easing`, or of the last
+/// one let go, labelled as `race-ease-release` is (#572): a slow simulator sails less race time than a test's wall-clock
+/// wait, so a test holds Ease by this. Read from the driver about four times a second, apart from the HUD's state (#114).
 struct BoatSpeedProbe: View {
     let session: GameSession
 
@@ -268,6 +270,8 @@ struct BoatSpeedProbe: View {
             let value = String(format: "%.2f", knots(metresPerSecond: boat.speed))
             let release = session.easeReleases
             let releaseValue = String(format: "%.2f", release.knots)
+            let held = session.easeHeldSeconds
+            let heldValue = String(format: "%.2f", held ?? release.heldSeconds)
             VStack(spacing: 0) {
                 Text(value)
                     .accessibilityLabel("Boat speed")
@@ -277,11 +281,38 @@ struct BoatSpeedProbe: View {
                     .accessibilityLabel("Ease released \(release.count)")
                     .accessibilityValue(releaseValue)
                     .accessibilityIdentifier("race-ease-release")
+                Text(heldValue)
+                    .accessibilityLabel(held == nil ? "Ease released \(release.count)" : "Easing")
+                    .accessibilityValue(heldValue)
+                    .accessibilityIdentifier("race-ease-held")
             }
             .font(.system(size: 1))
             .foregroundStyle(.clear)
         }
-        .frame(width: 1, height: 2)
+        .frame(width: 1, height: 3)
+        .allowsHitTesting(false)
+    }
+}
+
+/// UI tests only (#572): how long after your finish horn the results slid up (`race-results-delay`), as the app
+/// measured it (`GameSession.resultsDelayShown`): the value is wall-clock seconds then race seconds, two decimals, a
+/// space between, labelled `Results up`; empty, labelled `Results not up`, before. A test's own looks at the screen
+/// can take seconds on a slow simulator, which runs the race slower than its `-timescale` too. About four times a second.
+struct ResultsDelayProbe: View {
+    let session: GameSession
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 0.25)) { _ in
+            let delay = session.resultsDelayShown
+            let value = delay.map { String(format: "%.2f %.2f", $0.wallSeconds, $0.raceSeconds) } ?? ""
+            Text(value.isEmpty ? "-" : value)
+                .accessibilityLabel(delay == nil ? "Results not up" : "Results up")
+                .accessibilityValue(value)
+                .accessibilityIdentifier("race-results-delay")
+                .font(.system(size: 1))
+                .foregroundStyle(.clear)
+        }
+        .frame(width: 1, height: 1)
         .allowsHitTesting(false)
     }
 }
