@@ -133,8 +133,7 @@ import RegattaCore
     @Test func takeoverFrom200SnapshotsLeavesIrons() throws {
         var failures: [String] = []
         for (situation, seed) in Self.cases {
-            // skiff@6 until #455: the cautious bot stays in irons after a takeover under hand steering.
-            let race = Self.race(seed: seed, boatClass: try BotHelmTests.autohelmOn().ref)
+            let race = Self.race(seed: seed)
             var controllers = try Self.setUp(race, situation, seed: seed)
             let noGo = BoatDynamics.noGoAngle(race.boatClass.polar)
             controllers.takeOver(seat: 0, raceSeed: race.setup.raceSeed, cautious: true)
@@ -158,13 +157,14 @@ import RegattaCore
     /// A cautious bot taking over part way into a penalty turn turns it on the way it was turning (`BotBrain.adopt`):
     /// turning it back would reset it (`.penaltyReset`), losing the player's turn. In clear water (`clearWater` from
     /// the one other boat): near a boat she still gives a turn up to keep clear of it (rule 21.2,
-    /// `BotBrain.penaltyInput`), which resets it.
+    /// `BotBrain.penaltyInput`), which resets it. On skiff@9, by hand, a rudder let go turns her nowhere: she reads the
+    /// circle back to where it began (`BotBrain.circleWayBack`, #455; her hand holding an angle there had turned seeds
+    /// 14, 16 and 36 back).
     @Test(.onFiveRules) func takeoverMidPenaltyTurnsOnTheSameWay() throws {
         var resets: [UInt64] = []
         var started = 0
         for seed: UInt64 in 1...60 {
-            // skiff@6 until #455: the cautious bot turns a taken-over penalty back under hand steering.
-            let race = Self.race(seed: seed, fleetSize: 2, boatClass: try BotHelmTests.autohelmOn().ref)
+            let race = Self.race(seed: seed, fleetSize: 2)
             var controllers = try Self.setUp(race, .midPenalty, seed: seed)
             _ = race.drainEvents()
             guard race.boats[0].penaltyTurnsOwed > 0, abs(race.boats[0].penaltyProgress) > deg2rad(10),

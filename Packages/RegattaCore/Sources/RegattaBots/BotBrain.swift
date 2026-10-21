@@ -386,7 +386,10 @@ struct BotBrain: Sendable {
         }
         if let input = penaltyInput(boat, view) {
             handTurn = nil
-            return BotDecision(input: input)
+            var decision = BotDecision(input: input)
+            // Reading a taken-over turn's way (`readPenaltyTurn`), her hand holds no angle: it would turn her back.
+            decision.centred = penaltyRead != nil
+            return decision
         }
         var aim = plan(boat, view)
         planWantsStarboardOnPort = boat.status == .prestart && view.time < 0 && boat.tack == .port && aim.tack == .starboard
@@ -667,6 +670,20 @@ struct BotBrain: Sendable {
         }
         guard let keepClear, keepClear.away != turn, (markAway ?? keepClear.away) == keepClear.away, !penaltyGivenUp,
               owed.progress < .pi, canGiveUpTurn(owed, b, view) else {
+            // "Let her by" (#455), by hand, in a turn she can't give up (`canGiveUpTurn`: near its deadline, or slow):
+            // a boat crossing what is left of her circle inside her keep-clear lookahead (`turnSweep`), she turns on her
+            // way at `HandTackTable.penaltyLetBy`, slower, so the boat is by before her circle comes round to its track.
+            // Never back and never centred: either would give the turn up. At her penalty rudder from 60° in, near her
+            // deadline, she swept into a boat holding its course and was called 21.2
+            // (`penaltyTurnNearItsDeadlineIsNotGivenUp`). Not through the wind at a crawl, where her rudder is hard over
+            // (`penaltyRudder`): slower there, the fall-off would turn her back. A turn she can give up she gives up for
+            // the boat, as before (`penaltyTurningBotKeepsClearUnder21_2`).
+            if Self.turnsByHand(view), owed.isStarted, !canGiveUpTurn(owed, b, view), penaltyRudder(b, turn, owed, view) < 1,
+               let crossing = turnSweep(b, view, direction: turn, angle: max(0, 2 * .pi - owed.progress)),
+               crossing.seconds < keepClearLookahead {
+                penaltyHeldSince = nil
+                return BoatInput(rudder: turn * HandTackTable.penaltyLetBy)
+            }
             return turningOn(b, turn, owed, view)
         }
         penaltyTurn = keepClear.away
@@ -1505,7 +1522,7 @@ struct BotBrain: Sendable {
     /// The point to sail at for the current leg: round each mark to port, approaching it along the
     /// course (upwind to W on the starboard layline, across from W to O); through the gate, then round the
     /// nearer of its marks.
-    private func waypoint(_ b: SeatView.OwnBoat, _ view: SeatView) -> Vec2 {
+    func waypoint(_ b: SeatView.OwnBoat, _ view: SeatView) -> Vec2 {
         let c = view.course
         let leg = c.legs[b.legIndex]
         switch leg {

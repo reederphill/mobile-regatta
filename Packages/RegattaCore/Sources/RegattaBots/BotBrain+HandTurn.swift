@@ -74,6 +74,10 @@ public enum HandTackTable {
     /// A penalty turn's rudder, as a share of full, whatever her handling: hard over, the rudder's drag stops her head
     /// to wind in every turn (8 to 10 s stuck, the turn through the wind at a crawl), as a slammed tack from slow.
     public static let penaltyFraction = 0.7
+    /// "Let her by" (#455, `BotBrain.penaltyInput`): the rudder, a share of full, she turns a penalty turn on with by
+    /// hand, in a turn she can't give up, while a boat crosses what is left of its circle: her way, slower, so the boat
+    /// is by first.
+    public static let penaltyLetBy = 0.35
     /// Radians per second: a penalty turn's rudder turning her through the wind slower than this, she puts it hard
     /// over, from `penaltyLuffMargin` radians outside close-hauled.
     public static let penaltyCrawl = deg2rad(8)

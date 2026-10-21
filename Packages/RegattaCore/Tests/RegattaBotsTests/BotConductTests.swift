@@ -492,8 +492,9 @@ import RegattaCore
                     snapshot.seats[0].boat.penaltyClockTick = snapshot.tick
                 }
                 let skill = BotBrain.Caution.skill
-                // Her brain's input as it is, no hand on the helm, until #455's PR 4 (penalty turns by hand): steering
-                // by hand she draws 21.2 and 11 calls here.
+                // Her brain's input as it is, no hand on the helm, until #564:
+                // by hand her look flips the rudder against the turn as the other boat nears, and she draws 21.2 and 11
+                // calls here.
                 var pilot = Pilot(seat: 0, plannedTack: nil, race: race, skill: skill,
                                   weaknesses: BotBrain.Caution.weaknesses(skill: skill), caution: .standard, helm: false)
                 var kinds: [RaceEvent.Kind] = []
@@ -788,8 +789,9 @@ import RegattaCore
     /// as she does racing (#100), rather than turning on into the boats around her: the turn doesn't collect further
     /// 21.2 calls, and she never owes more than the one. Before, #99 held the turn hard over whoever was near, and one
     /// boat went from one turn owed to four in 2 s.
-    // skiff@7 until #455: on skiff@8 seeds 5 and 7 draw a rule 15 call on the penalised boat (tried again after #471's
-    // step C: the same two, a second turn owed).
+    // skiff@7 until #455 PR 4b: on skiff@8 and later seeds 5 and 7 draw a rule 15 call on the penalised boat (tried
+    // again after #471's step C: the same two, a second turn owed). Given a berth before the gun (`startKeepClear`), the
+    // other bot swings wide across the circle and back into her when she gives the turn up; PR 4b holds the berth.
     @Test(.onFiveRules, .onSkiffSeven) func prestartPenaltyDoesNotCascade() throws {
         var failures: [String] = []
         for seed: UInt64 in [3, 5, 7] {

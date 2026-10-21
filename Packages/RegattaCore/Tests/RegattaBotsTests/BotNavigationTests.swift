@@ -319,16 +319,15 @@ import RegattaCore
     /// #100's review nit, #101: a penalised bot close to her turn's complete deadline turns on rather than give the turn
     /// up to keep clear (`canGiveUpTurn`: never inside `penaltyCompleteMargin` of it). The encounter of
     /// `penaltyTurningBotKeepsClearUnder21_2`, seat 1 coming back past her on the side she turns to, with the turn's
-    /// clock started long enough ago that its complete deadline is 12 s off: she holds her turn hard over, gives nothing
-    /// up, and serves it inside the deadline. With the deadline far off she gives it up, as ever.
-    /// skiff@7 until #455: on skiff@8 her turn at 70 % rudder doesn't finish inside the 12 s this scene leaves her, and
-    /// she is disqualified. Tried again after #471's step C: the same (a turn by hand from 60° in takes her over 12 s,
-    /// and she is called 21.2 on the way).
-    @Test(.onFiveRules, .onSkiffSeven) func penaltyTurnNearItsDeadlineIsNotGivenUp() throws {
+    /// clock started long enough ago that its complete deadline is the time her circle takes her alone and 2 s more
+    /// (`loneCircleSeconds`, measured here: #455's Q3 refit of the 12 s fitted to the tap's circle; by hand from 60° in
+    /// about 15 s on skiff@9): she turns on her way, gives nothing up, keeps clear of seat 1 as she turns (no rule 21.2
+    /// call), and serves it inside the deadline. With the deadline far off she gives it up, as ever.
+    @Test(.onFiveRules) func penaltyTurnNearItsDeadlineIsNotGivenUp() throws {
         let style = BotStyle(skill: 0.8, startSpot: 0.5, finishSpot: 0.7, timingSlack: 0, penaltyDirection: 1)
-        let hardOver = BoatInput(rudder: 1.0)
-        func sail(completeIn seconds: Double) throws -> (kinds: [RaceEvent.Kind], inputs: [BoatInput], race: Race) {
-            let race = try Self.penaltyRace(turned: deg2rad(60), ahead: 14, across: 7)
+        func sail(completeIn seconds: Double, ahead: Double? = 14) throws
+            -> (kinds: [RaceEvent.Kind], inputs: [BoatInput], served: Double?) {
+            let race = try Self.penaltyRace(turned: deg2rad(60), ahead: ahead, across: 7)
             let complete = race.rules.raceFormat.penalty.complete
             var snapshot = race.exportSnapshot()
             snapshot.seats[0].boat.penaltyClockTick = snapshot.tick - RulesConfig.ticks(complete - seconds)
@@ -339,19 +338,31 @@ import RegattaCore
             var driver = BotDriver(seat: 0, raceSeed: race.setup.raceSeed, style: style)
             var kinds: [RaceEvent.Kind] = []
             var inputs: [BoatInput] = []
-            for _ in 0..<RulesConfig.ticks(seconds + 1) {
+            var served: Double?
+            for tick in 0..<RulesConfig.ticks(seconds + 1) {
                 let owing = race.boats[0].penaltyTurnsOwed > 0 && !kinds.contains(.penaltyServed(seat: 0))
                 if let decision = driver.drive(race), owing { inputs.append(decision.input) }
                 race.step()
                 kinds += race.drainEvents().map(\.kind)
+                if served == nil, kinds.contains(.penaltyServed(seat: 0)) { served = Double(tick + 1) / Double(Race.tickRate) }
             }
-            return (kinds, inputs, race)
+            return (kinds, inputs, served)
+        }
+        /// Seconds her circle takes her by hand from 60° in with no boat near: seat 1 out of her way, the deadline far off.
+        func loneCircleSeconds() throws -> Double {
+            try #require(sail(completeIn: 39, ahead: nil).served, "alone she serves it")
         }
 
-        let late = try sail(completeIn: 12)
-        #expect(BotBrain.penaltyCompleteMargin > 12)
-        #expect(!late.kinds.contains(.penaltyReset(seat: 0)), "she gave her turn up with 12 s to its deadline")
-        #expect(!late.inputs.isEmpty && late.inputs.allSatisfy { $0 == hardOver }, "\(late.inputs.map(\.rudder))")
+        let seconds = try loneCircleSeconds() + 2
+        let late = try sail(completeIn: seconds)
+        #expect(seconds < BotBrain.penaltyCompleteMargin, "\(seconds) s: her circle by hand outlasts the margin")
+        #expect(!late.kinds.contains(.penaltyReset(seat: 0)), "she gave her turn up with \(seconds) s to its deadline")
+        // Her way all through: at her penalty rudder (`penaltyHelm`), or slower while she lets seat 1 by
+        // (`HandTackTable.penaltyLetBy`); never centred, never back.
+        let letBy = BoatInput(rudder: HandTackTable.penaltyLetBy).rudder
+        #expect(!late.inputs.isEmpty && late.inputs.allSatisfy { $0.rudder == penaltyHelm().rudder || $0.rudder == letBy }
+                && late.inputs.last == penaltyHelm(), "\(late.inputs.map(\.rudder))")
+        #expect(!BotConductTests.calls(late.kinds).contains("21.2 on 0"), "\(BotConductTests.calls(late.kinds))")
         #expect(late.kinds.contains(.penaltyServed(seat: 0)), "she served her turn")
         #expect(!late.kinds.contains { if case .disqualified = $0 { true } else { false } })
 

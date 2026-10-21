@@ -338,7 +338,10 @@ extension BotBrain {
     /// the helm; a tack or gybe the autohelm is sailing she lets finish, and a tack is hers under rule 13 until she is
     /// close-hauled. A penalty turn already under way she turns on the same way: turning it back would give it up (the
     /// race resets a turn reversed). The rudder held off centre shows the way; a centred one doesn't, so she reads it
-    /// off her next decision (`readPenaltyTurn`).
+    /// off her next decision (`readPenaltyTurn`). On a class she turns by hand a centred rudder turns her nowhere, so
+    /// there is nothing to read: she reads the circle back to where it began instead (`circleWayBack`), and only when
+    /// that can't tell does she read her next decision, the rudder truly centred meanwhile (#455, owner answer 3: she
+    /// finishes what the player started; her hand holding an angle there turned the turn back, and the race reset it).
     mutating func adopt(_ view: SeatView) {
         let b = view.own
         plannedTack = b.tack
@@ -352,10 +355,40 @@ extension BotBrain {
         penaltyProgress = owed.progress
         if b.autohelm == nil, b.rudder != 0 {
             penaltyTurn = b.rudder > 0 ? 1 : -1
+        } else if b.autohelm == nil, Self.turnsByHand(view), let way = circleWayBack(b, view, owed) {
+            penaltyTurn = way
         } else {
             penaltyRead = PenaltyRead(time: view.time, heading: b.heading, progress: owed.progress)
         }
     }
+
+    /// "Read the circle back" (#455): the way (+1 to starboard) a penalty turn she took over part-turned, the rudder
+    /// centred by hand, was going, from where it began. Of the two headings `owed.progress` would have turned her from,
+    /// one either way, the turn began on one she could have sailed (not more than `circleBackNoGo` inside the no-go
+    /// zone: the wind she reads it by may have shifted since) and the nearer her course to her next mark (`waypoint`),
+    /// by more than `circleBackMargin`; nil when that doesn't tell them apart. By the lee, though, the boom tells: she
+    /// came there bearing away past dead downwind, the boom not yet across, so the way that does (the course read
+    /// turned seed 16 of `takeoverMidPenaltyTurnsOnTheSameWay` back, both its headings sailable, 33° apart off her course).
+    func circleWayBack(_ b: SeatView.OwnBoat, _ view: SeatView, _ owed: OwedPenalty) -> Double? {
+        let sailing = b.boomSide.sailingAngle(relativeWind: wrapAngle(b.windDirection - b.heading))
+        if sailing < -.pi / 2, owed.progress > .pi + sailing { return b.boomSide == .port ? -1 : 1 }
+        let course = (waypoint(b, view) - b.position).bearing
+        let noGo = BoatDynamics.noGoAngle(view.boatClass.polar)
+        func miss(_ way: Double) -> Double {
+            let began = b.heading - way * owed.progress
+            guard abs(wrapAngle(began - b.windDirection)) >= noGo - Self.circleBackNoGo else { return .infinity }
+            return abs(wrapAngle(began - course))
+        }
+        let starboard = miss(1), port = miss(-1)
+        guard abs(starboard - port) > Self.circleBackMargin else { return nil }
+        return starboard < port ? 1 : -1
+    }
+
+    /// Radians by which one way's start must sit nearer her course than the other's for `circleWayBack` to choose.
+    static let circleBackMargin = deg2rad(20)
+    /// Radians inside the no-go zone a heading the turn began on may read (`circleWayBack`). Placeholder (#455): on the
+    /// takeover scenes' 19 turns taken over with the rudder let go, 17 read right, 2 not at all, 1 wrong.
+    static let circleBackNoGo = deg2rad(10)
 
     /// A penalty turn she took over part-turned with the rudder centred (`adopt`): when, her heading and how far into
     /// the turn she was.
