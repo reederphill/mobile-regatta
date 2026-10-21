@@ -516,6 +516,13 @@ extension BotBrain {
     /// with Ease (`crossesEarly`): keeping clear by luffing over it early would leave her OCS, trapped above the
     /// boats she keeps clear of.
     func startKeepClear(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double, lookahead: Double) -> Double? {
+        startKeepClearing(b, view, desired: desired, lookahead: lookahead)?.heading
+    }
+
+    /// `startKeepClear`'s heading, and the boat taking a penalty (rule 21.2) she gives berth to among the boats it keeps
+    /// her clear of, the nearest, if one is (`Evasion.berth`, `heldBerth`).
+    func startKeepClearing(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double,
+                           lookahead: Double) -> (heading: Double, berth: Int?)? {
         // OCS, she keeps clear of every boat as a returning one (rule 21.1), whatever rules 10–13 would give her
         // (`OtherBoat.rightOfWay` gives her own relations by those alone, `Race.rightsOfWay(of:)`): she is returning as soon as she heads back. The cautious bot keeps
         // clear of every boat before her start in any case (#104, `keepsClearOfEveryBoat`).
@@ -524,6 +531,8 @@ extension BotBrain {
         let threats = view.others.filter { other in
             guard !other.isGhost, (other.position - b.position).length < Self.keepClearRange else { return false }
             if returning { return true }
+            // Holding her berth's heading, the boat it was for, whose turn is over, is not one to swing back across.
+            if other.seat == holdsBerthFor { return false }
             // Rule 14 before her start: a boat under rule 21 close aboard keeps clear of her, but turning circles or
             // running back in the crowd it can't promise to, so she gives it berth (#337 round 4). Holding on for it,
             // as her view's right of way has it, pin-style bots working down the line from the committee end lost the
@@ -535,6 +544,9 @@ extension BotBrain {
             return !misjudges(other, right.rule)
         }
         guard !threats.isEmpty else { return nil }
+        let berth = returning ? nil : threats
+            .filter { $0.rightOfWay?.rule == .takingAPenalty && $0.rightOfWay?.keepClear == $0.seat }
+            .min { ($0.position - b.position).length < ($1.position - b.position).length }?.seat
         let speed = max(b.speed, 1)
         func closest(_ heading: Double) -> Double {
             let velocity = Vec2.heading(heading) * speed
@@ -563,7 +575,34 @@ extension BotBrain {
             if distance >= clear * Self.keepClearMargin, turn < nearest?.turn ?? .infinity { nearest = (heading, turn) }
             if distance > furthest?.distance ?? -1 { furthest = (heading, distance) }
         }
-        return nearest?.heading ?? furthest?.heading
+        return (nearest?.heading ?? furthest?.heading).map { ($0, berth) }
+    }
+
+    /// The berth she gave a boat taking a penalty before her start (`startKeepClearing`): that boat's seat, and the
+    /// heading she bore off on for it.
+    struct PenalisedBerth: Hashable, Sendable {
+        var seat: Int
+        var heading: Double
+    }
+
+    /// "Hold the berth" (#455 PR 4b): before her start, once the boat taking a penalty she bore off for (`penalisedBerth`)
+    /// is no longer turning it (served, or given up) and still within `penalisedBerthLengths` of her, the heading she
+    /// bore off on, which she holds, keeping clear of the other boats from there (`startKeepClear` leaves that one out,
+    /// `holdsBerthFor`), rather than swing back across it as its rights return to it under rules 10–13. Nil while it is
+    /// still turning (the berth itself, `startKeepClear`), and once it is out of the berth, she has started, or the
+    /// heading would take her over the line early: then the memory goes. It doesn't clear `prestartPenaltyDoesNotCascade`
+    /// (seeds 5 and 7): there the turning boat gives her turn up 0.5 s from contact, inside any helm of hers.
+    mutating func heldBerth(_ b: SeatView.OwnBoat, _ view: SeatView) -> PenalisedBerth? {
+        guard let berth = penalisedBerth else { return nil }
+        guard b.status == .prestart, let other = view.others.first(where: { $0.seat == berth.seat && !$0.isGhost }),
+              (other.position - b.position).length < view.boatClass.hull.length * Self.penalisedBerthLengths,
+              !crossesEarly(b, view, heading: berth.heading)
+        else {
+            penalisedBerth = nil
+            return nil
+        }
+        if other.rightOfWay?.rule == .takingAPenalty, other.rightOfWay?.keepClear == other.seat { return nil }
+        return berth
     }
 
     /// After the gun, not yet started, and not at her spot's approach: she starts wherever she can. A boat

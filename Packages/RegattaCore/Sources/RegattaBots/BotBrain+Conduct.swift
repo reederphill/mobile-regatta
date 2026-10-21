@@ -391,6 +391,94 @@ extension BotBrain {
         return Self.closestApproach(offset: other.position - b.position, relativeVelocity: -Vec2.heading(heading),
                                     lookahead: sailed)
     }
+
+    // MARK: - A little room for a boat turning a penalty
+
+    /// "Give a little room" (#455, the owner's answer 1 of 2026-10-10): the room she makes a boat turning a penalty
+    /// beside her: its seat, and the heading she makes it on.
+    struct LittleRoom: Hashable, Sendable {
+        var seat: Int
+        var heading: Double
+        var since: Double
+    }
+
+    /// Seconds ahead she sees a boat turning a penalty coming into her (`littleRoom`): `base` and `skill` × her skill,
+    /// so Club sees it later. Radians she turns away for it: `angle` and `skillAngle` × her skill, so Club turns less.
+    /// Seconds she holds that heading for it, at most. Placeholders (#455 PR 4).
+    static let littleRoomTable = (base: 1.0, skill: 1.0, angle: deg2rad(6), skillAngle: deg2rad(10), hold: 2.0)
+
+    /// "Give a little room" (#455, owner answer 1): a boat turning a penalty (rule 21.2: she keeps clear of her) about to
+    /// hit her, going on as it has been turning (`track(of:)`), her hull inside `contactGap` of hers within her lookahead
+    /// on the course she holds: she turns a little away from it, once a turn of that boat's (`roomGiven`), never at more
+    /// than the steady helm's rate (`BotHelm.steady`, 0.8 × rule 16.1's), and holds that heading `littleRoomTable.hold`
+    /// seconds, while that boat is still taking her penalty. Later and weaker for Club (`littleRoomTable`, by skill).
+    /// Not when the turn away doesn't open her pass, brings another boat keeping clear of her closer, takes her over
+    /// the line early before the gun, or a mark or the edge would turn her off it; nor when it would take her off her
+    /// own tack, past head to wind or dead downwind, or luff her into the no-go zone (`BoatDynamics.noGoAngle`): luffed
+    /// into the wind beside the circling boat, a turn away tacked her, or stalled her there, and drew rule 13 calls
+    /// (the WIP's Club gate 48 to 58). Not returning over the line early either (rule 21.1 has her keep clear of every
+    /// boat). Before her start too, outside the berth she gives a boat taking a penalty close aboard
+    /// (`startKeepClear`). Rule 21.2 is the boat taking the penalty's to keep: this is rule 14's courtesy, small, so a
+    /// boat circling in the fleet isn't met by a hull she could have missed. Nil otherwise.
+    func littleRoom(_ b: SeatView.OwnBoat, _ view: SeatView) -> (input: BoatInput, room: LittleRoom)? {
+        guard b.status != .ocs else { return nil }
+        let table = Self.littleRoomTable
+        let hull = view.boatClass.hull
+        let contact = Self.contactGap(hull)
+        let skill = style.skill.clamped(to: 0...1)
+        let steps = Int(((table.base + table.skill * skill) / Self.avoidStep).rounded())
+        func pass(_ other: SeatView.OtherBoat, _ heading: Double) -> Double {
+            Self.pass(of: Array(track(of: other, view).prefix(steps + 1)), b, heading: heading, hull: hull)
+        }
+        func steered(_ room: LittleRoom) -> (input: BoatInput, room: LittleRoom) {
+            let input = steer(b, toHeading: room.heading, view)
+            return (BoatInput(rudder: BotHelm.steady(input.rudderValue, standsOn: true, view.boatClass, speed: b.speed),
+                              ease: input.ease), room)
+        }
+        if let making = roomMaking, view.time - making.since < table.hold,
+           let other = view.others.first(where: { $0.seat == making.seat && !$0.isGhost }),
+           other.rightOfWay?.rule == .takingAPenalty, other.rightOfWay?.keepClear == other.seat {
+            return steered(making)
+        }
+        for other in view.others {
+            guard !other.isGhost, !roomGiven.contains(other.seat), roomMaking?.seat != other.seat,
+                  let right = other.rightOfWay, right.rule == .takingAPenalty, right.keepClear == other.seat,
+                  (other.position - b.position).length < hull.length + (b.speed + other.speed) * Self.avoidHorizon
+            else { continue }
+            let now = pass(other, b.heading)
+            guard now < contact else { continue }
+            let away: Double = (other.position - b.position).dot(b.forward.rightPerp) > 0 ? -1 : 1
+            let heading = b.heading + away * (table.angle + table.skillAngle * skill)
+            guard staysOnHerTack(b, view, heading: heading), pass(other, heading) > now,
+                  !turnsTowardsKeepClearBoat(b, view, turn: away),
+                  b.status != .prestart || view.time >= 0 || !crossesEarly(b, view, heading: heading),
+                  avoidMarks(b, view, desired: heading) == nil, avoidEdges(b, view, desired: heading) == nil else { continue }
+            return steered(LittleRoom(seat: other.seat, heading: heading, since: view.time))
+        }
+        return nil
+    }
+
+    /// Whether `heading` keeps her on her own tack, neither past head to wind nor past dead downwind, and out of the no-go
+    /// zone (`BoatDynamics.noGoAngle`) unless it bears her away from where she already is in it (`littleRoom`).
+    func staysOnHerTack(_ b: SeatView.OwnBoat, _ view: SeatView, heading: Double) -> Bool {
+        let now = wrapAngle(b.heading - b.windDirection), then = wrapAngle(heading - b.windDirection)
+        guard now * then > 0 else { return false }
+        return abs(then) >= BoatDynamics.noGoAngle(view.boatClass.polar) || abs(then) > abs(now)
+    }
+
+    /// Keeps `littleRoom`'s memory after a decision: the room she started making, and once made (or let go) the boat
+    /// she made it for, until that boat's turn is over.
+    mutating func noteLittleRoom(_ view: SeatView, _ decision: BotDecision) {
+        if let making = roomMaking, decision.givesRoom?.seat != making.seat {
+            roomGiven.insert(making.seat)
+            roomMaking = nil
+        }
+        if let room = decision.givesRoom, roomMaking == nil { roomMaking = room }
+        guard !roomGiven.isEmpty else { return }
+        roomGiven = roomGiven.filter { seat in
+            view.others.contains { $0.seat == seat && $0.rightOfWay?.rule == .takingAPenalty }
+        }
+    }
 }
 
 extension RacingRule {
