@@ -467,7 +467,9 @@ import RegattaCore
     /// sweeping to port; the other boat, on her port side, sails on what her autohelm holds, never steering for her:
     /// overtaking her from her port quarter a little faster on near enough her course (seed 82 of
     /// `CautiousBotSuiteTests`: she bore away round her circle into a boat overtaking her there), alongside, or
-    /// reaching back past her.
+    /// reaching back past her. With her hand on the helm (#564): her look's straight goes out straight while she owes
+    /// the turn ("the look keeps the turn's way"); handed to her hand's angle hold it swung her back against the turn,
+    /// and 6 of the 21 drew 21.2 and 11 calls.
     @Test func cautiousBotTurningAPenaltyNearABoatHoldingCourseDoesNotFoul() throws {
         var fouls: [String] = []
         var encounters = 0
@@ -492,11 +494,8 @@ import RegattaCore
                     snapshot.seats[0].boat.penaltyClockTick = snapshot.tick
                 }
                 let skill = BotBrain.Caution.skill
-                // Her brain's input as it is, no hand on the helm, until #564:
-                // by hand her look flips the rudder against the turn as the other boat nears, and she draws 21.2 and 11
-                // calls here.
                 var pilot = Pilot(seat: 0, plannedTack: nil, race: race, skill: skill,
-                                  weaknesses: BotBrain.Caution.weaknesses(skill: skill), caution: .standard, helm: false)
+                                  weaknesses: BotBrain.Caution.weaknesses(skill: skill), caution: .standard)
                 var kinds: [RaceEvent.Kind] = []
                 for _ in 0..<(30 * Race.tickRate) where !race.isOver {
                     _ = pilot.drive(race)

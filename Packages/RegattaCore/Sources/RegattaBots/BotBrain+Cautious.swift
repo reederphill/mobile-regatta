@@ -15,6 +15,15 @@ import RegattaCore
 // - "Look before you leap" (`guarded`): every helm she holds she first sails in her mind for a few seconds among
 //   the boats around her, and holds another that keeps further from them when it brings her too close to a boat she
 //   would have to keep clear of.
+// - "Bear away to build way" (#564, `buildsWay`): short of way by hand (under half her close-hauled speed, inside
+//   her best upwind angle, out of any hand turn), her look takes no luff: a luff there only holds her in irons. Its
+//   guard, "never bear off onto her own tack's boat": nor a bear-away towards a boat on her own tack she must keep
+//   clear of, close by; she holds straight. A boat on the other tack she ducks, as a port boat does.
+// - "The look sails her hand" (#564, `handHold`): on a class she steers by hand, a centred helm in her look is her hand
+//   holding an angle (`BotHelm`), sailed by the autohelm's law, as it goes out; not a rudder held at 0.
+// - "The look keeps the turn's way" (#564, `BotBrain.decide`): owing a penalty turn, a straight helm her look puts in
+//   her brain's place goes out truly straight (`BotDecision.centred`), not to her hand's angle hold, which swung her
+//   back against the turn.
 // - "Never attacks": her style's engagement is 0 (#234), so she plays no fleet tactic: no cover, no held lane, no
 //   lee-bow, no tacking on a boat's wind.
 // - As the right-of-way boat she holds her course as every bot does (#101, `holdingCourse`), before her start too,
@@ -129,7 +138,10 @@ extension BotBrain {
     /// (`canGiveUpTurn`): past that she turns on, as any bot does. Without the look, slow in the fleet's dirty air, she
     /// bore away round her circle into a boat overtaking her, and sailed on owing a turn across a starboard boat (seeds
     /// 82 and 38 of `CautiousBotSuiteTests`).
-    func guarded(_ view: SeatView, _ input: BoatInput) -> BoatInput? {
+    ///
+    /// "The look sails her hand" (#564): on a class she steers by hand, a helm inside the dead band is sailed as her
+    /// hand will send it (`handHold`), `holdsHerAngle` as her decision has it.
+    func guarded(_ view: SeatView, _ input: BoatInput, holdsHerAngle: Bool = false) -> BoatInput? {
         let b = view.own
         guard caution != nil, b.isOnCourse, b.autohelm?.isTapping != true else { return nil }
         // Turning a penalty, or 30° into one: the turn she turns on reaches 30° inside her look, and the call comes then.
@@ -184,6 +196,7 @@ extension BotBrain {
         let closeHauled = view.boatClass.polar.bestUpwind(tws: b.polarWindSpeed).twa - deg2rad(5)
         let obstacles = view.course.obstacles.filter { ($0.position - b.position).length < $0.radius + reach }
         let markRoom = hull.length * Self.guardMarkLengths
+        let hand = handHold(b, view, holdsHerAngle: holdsHerAngle)
         /// How far inside `clear` of a boat she must keep clear of the helm takes her, at worst (0: never), and how far
         /// inside `guardMarkLengths` of a mark or other obstacle.
         func intrusion(_ rudder: Double, _ ease: Bool) -> (boats: Double, marks: Double) {
@@ -191,8 +204,14 @@ extension BotBrain {
                                            boomSide: b.boomSide)
             var tacking = senses.tacking
             var worst = 0.0, marks = 0.0
+            let byHand = abs(rudder) <= Autohelm.deadBand ? hand : nil
             for step in 0..<steps {
-                state = BoatDynamics.advance(state, control: .init(rudder: rudder, ease: ease), env: env,
+                let sailed = byHand.map { hand in
+                    hand.rudder(sailingAngle: state.boomSide.sailingAngle(relativeWind: wrapAngle(b.windDirection - state.heading)),
+                                boomSide: state.boomSide, tws: b.polarWindSpeed, grooveTWS: b.grooveWindSpeed,
+                                boatClass: view.boatClass)
+                } ?? rudder
+                state = BoatDynamics.advance(state, control: .init(rudder: sailed, ease: ease), env: env,
                                              boatClass: view.boatClass, dt: Self.guardStep)
                 let twa = abs(wrapAngle(b.windDirection - state.heading))
                 // Owing a turn, any turn she sails counts towards it: 30° on, she keeps clear of every boat.
@@ -232,8 +251,13 @@ extension BotBrain {
         // and fouled under rule 13 a boat she had tacked clear of). Turning to starboard (+) is a luff with the wind
         // over her starboard side (`rudder`).
         let luffSign: Double = b.boomSide == .port ? 1 : -1
+        // "Bear away to build way" (#564): short of way by hand, a luff only holds her in irons (`buildsWay`).
+        let buildingWay = !senses.tacking && buildsWay(b, view)
         for rudder in Self.guardRudders {
-            if senses.tacking, !keepsClearOfAll, rudder * luffSign > 0 { continue }
+            if senses.tacking || buildingWay, !keepsClearOfAll, rudder * luffSign > 0 { continue }
+            if buildingWay, rudder * luffSign < 0, bearsOffOntoHerOwnTacksBoat(b, near, holdsRight, clear: clear, rudder: rudder) {
+                continue
+            }
             if rudder != 0, !keepsClearOfAll, holdsRight.contains(true), turnsTowardsKeepClearBoat(b, view, turn: rudder > 0 ? 1 : -1) { continue }
             for ease in [false, true] {
                 let change = abs(rudder - input.rudderValue) + (ease == input.ease ? 0 : 0.25)
@@ -243,6 +267,46 @@ extension BotBrain {
         }
         guard let best, best.rank < rank(chosen, change: 0) else { return nil }
         return best.input
+    }
+
+    /// "The look sails her hand" (#564): on a class she steers by hand (`holdsWhenCentred` false), the angle her hand
+    /// holds when her helm is centred, as `BotHelm.input` takes it: the one it holds now (her view's autohelm reading,
+    /// or the race's autohelm settling her after a tap), else her own angle if she `holdsHerAngle` (#542), else the
+    /// autohelm's engage (the groove within a snap of her angle). Her look steps it by the autohelm's law alone, not
+    /// her hand's wander, overshoot or lag: those are drawn per decision, not hers to foresee. Nil on a class whose
+    /// autohelm holds a centred rudder. Sailed as a rudder held at 0, a straight her look approved went out as a hard
+    /// turn back to that angle: the look's 0 alternating with her hand's bear-away to the groove stopped an OCS boat
+    /// (ocs 5 and 16 of `takeoverFrom200SnapshotsLeavesIrons`), and her hand standing on turned her onto a boat taking
+    /// a penalty before her start (seed 24 seat 4 of `CautiousBotSuiteTests` with #276's late end read).
+    func handHold(_ b: SeatView.OwnBoat, _ view: SeatView, holdsHerAngle: Bool) -> Autohelm? {
+        guard !view.boatClass.steering.autohelm.holdsWhenCentred else { return nil }
+        if let held = b.autohelm { return Autohelm(target: held.target) }
+        let angle = b.boomSide.sailingAngle(relativeWind: b.relativeWind)
+        return holdsHerAngle ? Autohelm(target: .angle(angle))
+            : Autohelm.engage(sailingAngle: angle, tws: b.grooveWindSpeed, boatClass: view.boatClass).autohelm
+    }
+
+    /// Hull lengths, as a share of `guardLengths`, centre to centre, within which "never bear off onto her own tack's
+    /// boat" holds her straight (`bearsOffOntoHerOwnTacksBoat`).
+    static let ownTackGuardShare = 1.5
+
+    /// "Never bear off onto her own tack's boat" (#564), the guard of "Bear away to build way" (`buildsWay`): whether
+    /// bearing away at `rudder` turns her towards a boat of `near` on her own tack that she must keep clear of (racing,
+    /// one that doesn't keep clear of her, `holdsRight`; before her start or OCS, any boat), within
+    /// `ownTackGuardShare` × `clear` of her now. With her luff barred, her look bore away onto the leeward boat she
+    /// was keeping clear of, pinched at 2 m/s, and she could neither duck nor tack when it tacked onto starboard
+    /// (seed 16 seat 6 of `CautiousBotSuiteTests`, #455's version). Same tack only: a boat crossing on the other tack
+    /// she ducks, and bearing away is the duck (barring it, she held on at 1 m/s and fouled a starboard boat). Towards
+    /// is by bearing alone, so a boat near dead astern counts on whichever quarter it is: bearing away to that side
+    /// swings her stern at it, and she holds straight.
+    func bearsOffOntoHerOwnTacksBoat(_ b: SeatView.OwnBoat, _ near: [SeatView.OtherBoat], _ holdsRight: [Bool],
+                                     clear: Double, rudder: Double) -> Bool {
+        near.indices.contains { i in
+            let other = near[i]
+            guard other.boomSide == b.boomSide, (b.status != .racing || !holdsRight[i]),
+                  (other.position - b.position).length < clear * Self.ownTackGuardShare else { return false }
+            return wrapAngle((other.position - b.position).bearing - b.heading) * rudder > 0
+        }
     }
 
     /// Her own track through a tack or gybe tapped now, a `guardStep` apart for `seconds`: the autohelm sailing the tap

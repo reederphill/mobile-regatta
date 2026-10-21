@@ -716,6 +716,19 @@ extension BotBrain {
         return BotDecision(input: clearingQuarter(b, view, BoatInput(rudder: turn.sign * rudder)))
     }
 
+    /// "Bear away to build way" (#564): whether she is short of way by hand, so the cautious bot's look (`guarded`) takes
+    /// no luff: on a class she turns by hand, out of any hand turn, inside her best upwind angle and under
+    /// `HandTackTable.stall.steerage` of her close-hauled speed. A luff there only holds her in irons: a stopped boat looks
+    /// clear for the look's few seconds, so a luff outranked the bear-away that builds her way (OCS, before her start
+    /// or tacking under rule 13, every boat is one she keeps clear of), and she luffed through head to wind or stalled
+    /// in it (seven of `takeoverFrom200SnapshotsLeavesIrons`' ten failures on skiff@9). She is no more fixed in place
+    /// stopped than moving.
+    func buildsWay(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+        Self.turnsByHand(view) && handTurn == nil
+            && b.twa < view.boatClass.polar.bestUpwind(tws: b.polarWindSpeed).twa
+            && b.speed < closeHauledSpeed(b, view) * HandTackTable.stall.steerage
+    }
+
     /// "Let go in irons": whether she holds the rudder truly centred now, stalled short of head to wind
     /// (`HandTackTable.stall`). The class's irons recovery (#458) falls her off only on a centred rudder; a held one,
     /// hers through a turn or her hand's holding an angle (`BotHelm`), keeps her there. She steers again once she has
