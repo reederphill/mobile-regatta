@@ -320,23 +320,30 @@ extension BotBrain {
     /// `startLuffFloor`, #542 Q8's `committedAvoidance`). With `ease` (#542 PR 2, the penalty way out's ease, dodge
     /// only) she settles to the ease's fraction of that speed (`SeatView.easeSpeedFraction`: the class's, or before the gun
     /// the opening's trim, #477) over its `ease.timeConstant`.
-    func herTrack(_ b: SeatView.OwnBoat, _ view: SeatView, heading target: Double, steps: Int,
-                  axis: Vec2, closest: Double? = nil, ease: Bool = false) -> (track: [Vec2], progress: Double) {
+    /// With `back`, from that step on she steers back for its heading (a duck's luff back to her course once past
+    /// astern, `tackCostsMore`).
+    func herTrack(_ b: SeatView.OwnBoat, _ view: SeatView, heading goal: Double, steps: Int,
+                  axis: Vec2, closest: Double? = nil, ease: Bool = false,
+                  back: (heading: Double, step: Int)? = nil) -> (track: [Vec2], progress: Double) {
         let dt = Self.keepClearPredictionStep
         let polar = view.boatClass.polar
         let floor = closest ?? BoatDynamics.noGoAngle(polar) + deg2rad(5)
         let now = polar.speed(twa: max(b.twa, floor), tws: b.polarWindSpeed)
-        let then = polar.speed(twa: max(abs(wrapAngle(target - b.windDirection)), floor), tws: b.polarWindSpeed)
-        var settled = b.speed * (now > 1e-6 ? (then / now).clamped(to: 0.5...1.5) : 1)
-        var settle = Self.keepClearSpeedSettle
-        if ease {
-            settled *= view.easeSpeedFraction
-            settle = view.boatClass.ease.timeConstant
+        func settledSpeed(_ target: Double) -> Double {
+            let then = polar.speed(twa: max(abs(wrapAngle(target - b.windDirection)), floor), tws: b.polarWindSpeed)
+            return b.speed * (now > 1e-6 ? (then / now).clamped(to: 0.5...1.5) : 1) * (ease ? view.easeSpeedFraction : 1)
         }
+        var target = goal
+        var settled = settledSpeed(target)
+        let settle = ease ? view.boatClass.ease.timeConstant : Self.keepClearSpeedSettle
         var position = b.position, heading = b.heading, speed = b.speed
         var track: [Vec2] = []
         track.reserveCapacity(steps)
-        for _ in 0..<steps {
+        for step in 0..<steps {
+            if let back, step == back.step {
+                target = back.heading
+                settled = settledSpeed(target)
+            }
             let remaining = wrapAngle(target - heading)
             let turn = min(abs(remaining), Self.keepClearTurnRate * dt)
             if turn > 1e-9 {
@@ -469,7 +476,7 @@ extension BotBrain {
         let upwind = abs(sailingAngle(b)) < .pi / 2
         let axis = upwind ? Vec2.heading(b.windDirection) : Vec2.heading(desired)
         // Every boat near her, rolled on what it is doing and what it owes her, and how far off a course must pass it.
-        let boats: [(track: [Vec2], tackTrack: [Vec2], out: Double, owed: Bool)] = view.others.compactMap { other in
+        let boats: [(seat: Int, track: [Vec2], tackTrack: [Vec2], out: Double, owed: Bool)] = view.others.compactMap { other in
             guard !other.isGhost,
                   (other.position - b.position).length < Self.keepClearRange || flagged.contains(other.seat)
             else { return nil }
@@ -491,7 +498,7 @@ extension BotBrain {
             // Against her tack no boat gives way to her (rule 13, `tackReaction`).
             var tackTrack = track
             if tackable, case .givesWay = reaction { tackTrack = predictedTrack(of: other, .measured, view, steps: steps) }
-            return (track, tackTrack, out, owed)
+            return (other.seat, track, tackTrack, out, owed)
         }
         // Rule 13 on the tack: she keeps clear of every boat.
         let tackOut = length * keepClearLengths * Self.keepClearMargin
@@ -543,7 +550,16 @@ extension BotBrain {
                 return abs(off) <= Self.clearingStep || off * latch.side > 0
             })
         }
-        guard let best = latched ?? pick(scored) ?? scored.max(by: { $0.margin < $1.margin }) else { return (nil, scored) }
+        guard var best = latched ?? pick(scored) ?? scored.max(by: { $0.margin < $1.margin }) else { return (nil, scored) }
+        // "Duck when the tack costs more" (#455 PR 5): the tack won on the horizon, but her hand tack costs her the
+        // turn and the rebuild after it; a course on her tack that clears, sailed as a duck, is weighed against it.
+        if best.heading == nil, best.margin >= 1, let duck = pick(scored.filter { $0.heading != nil }),
+           let heading = duck.heading {
+            let threatTrack = boats.first { $0.seat == threat.seat }?.track
+            if tackCostsMore(b, view, duck: heading, desired: desired, threat: threatTrack, steps: steps, axis: axis) {
+                best = duck
+            }
+        }
         guard let heading = best.heading else {
             return (RacingKeepClear(heading: nil, tacks: true, threat: threat.seat), scored)
         }
@@ -552,6 +568,82 @@ extension BotBrain {
             ?? (abs(off) > Self.clearingStep ? KeepClearLatch(side: off > 0 ? 1 : -1) : keepClearLatch)
         let steered = abs(wrapAngle(heading - desired)) < deg2rad(1) ? nil : heading
         return (RacingKeepClear(heading: steered, latch: latch, threat: threat.seat), scored)
+    }
+
+    /// Seconds over which a tack by hand is weighed against a duck (`tackCostsMore`, #455 PR 5): her turn through head
+    /// to wind and the rebuild to speed on the new tack after it (`HandTackTable.longest.tack`). Placeholder.
+    static let tackCostSeconds = HandTackTable.longest.tack
+
+    /// "Duck when the tack costs more" (#455 PR 5, owner 2026-10-20 Q5): a port boat that can't cross a starboard boat
+    /// ducks her when her tack by hand would cost her more than the duck. The scorer's horizon is a few seconds; a tack
+    /// by hand loses most of what it costs after it, building speed back on the new tack (skiff@9: about a length from
+    /// full speed, mostly in the rebuild), and a duck holds its bear-away no longer than it takes to pass astern. So
+    /// over `tackCostSeconds` both are sailed as they would be: the tack by hand as she turns it (`handTackTrack`, the
+    /// class's own turn and acceleration), the duck on `herTrack` to `duck` until she passes closest to the boat she
+    /// escapes (`threat`, rolled over `steps`), then back up to `desired`. The duck wins when it makes at least the
+    /// tack's progress along `axis`. Internal: nothing shows it.
+    func tackCostsMore(_ b: SeatView.OwnBoat, _ view: SeatView, duck: Double, desired: Double, threat: [Vec2]?,
+                       steps: Int, axis: Vec2) -> Bool {
+        let dt = Self.keepClearPredictionStep
+        let span = max(steps, Int((Self.tackCostSeconds / dt).rounded()))
+        var past = steps
+        if let threat {
+            let held = herTrack(b, view, heading: duck, steps: steps, axis: axis).track
+            var closest = Double.infinity
+            for i in 0..<min(held.count, threat.count) where (threat[i] - held[i]).length < closest {
+                closest = (threat[i] - held[i]).length
+                past = i + 1
+            }
+        }
+        let ducked = herTrack(b, view, heading: duck, steps: span, axis: axis, back: (desired, past)).progress
+        let tacked = ((handTackTrack(b, view, seconds: Double(span) * dt).last ?? b.position) - b.position).dot(axis)
+        return ducked >= tacked
+    }
+
+    /// Her own track through a tack by hand begun now (`startHandTurn`, `handTurning`), a `keepClearPredictionStep`
+    /// apart for `seconds`, on the class's own dynamics in the wind she has now: her handling's rudder through head to
+    /// wind, eased onto the new groove as she eases it (`HandTackTable`), then held in the groove while she builds speed.
+    /// No flub, no bear-off first.
+    func handTackTrack(_ b: SeatView.OwnBoat, _ view: SeatView, seconds: Double) -> [Vec2] {
+        let boatClass = view.boatClass
+        let dt = Self.keepClearPredictionStep
+        let sign = handTurnWay(b)
+        let fraction = HandTackTable.tackFraction(handling: turnHandling)
+        let ease = HandTackTable.tackEase(handling: turnHandling)
+        let side: Double = b.tack.other == .port ? 1 : -1
+        let groove = b.windDirection + side * Self.closeHauled(b.polarWindSpeed, view)
+        var state = BoatDynamics.State(position: b.position, heading: b.heading, speed: b.speed, rudder: b.rudder,
+                                       boomSide: b.boomSide)
+        var helm = Autohelm.tackOrGybe(sailingAngle: b.boomSide.sailingAngle(relativeWind: b.relativeWind))
+        helm.isTapping = false
+        let env = BoatDynamics.Environment(windDirection: b.windDirection, windSpeed: b.polarWindSpeed, shadow: b.speedShadow)
+        let from = state.boomSide
+        var turning = true
+        return (0..<Int((seconds / dt).rounded())).map { _ in
+            var rudder = 0.0
+            if turning {
+                let crossed = state.boomSide != from
+                var remaining = sign * wrapAngle(groove - state.heading)
+                if !crossed, remaining < 0 { remaining += 2 * .pi }
+                rudder = fraction
+                var end = fraction * boatClass.steering.turnRate(speed: state.speed) * HandTackTable.leadSeconds
+                if ease > HandTackTable.easeEnd {
+                    end = max(end * HandTackTable.easedShare, HandTackTable.easeEnd)
+                    if remaining < ease {
+                        let t = ((ease - remaining) / (ease - HandTackTable.easeEnd)).clamped(to: 0...1)
+                        rudder *= 1 + (HandTackTable.easedShare - 1) * t
+                    }
+                }
+                rudder *= sign
+                if crossed, remaining <= end { turning = false }
+            }
+            if !turning {
+                let angle = state.boomSide.sailingAngle(relativeWind: wrapAngle(b.windDirection - state.heading))
+                rudder = helm.rudder(sailingAngle: angle, boomSide: state.boomSide, tws: b.polarWindSpeed, boatClass: boatClass)
+            }
+            state = BoatDynamics.advance(state, control: .init(rudder: rudder), env: env, boatClass: boatClass, dt: dt)
+            return state.position
+        }
     }
 
     /// Whether the racing scorer (#531) keeps her clear: racing, a live bot that isn't the cautious one (#531 Q5) nor
