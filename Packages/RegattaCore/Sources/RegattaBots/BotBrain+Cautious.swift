@@ -21,6 +21,9 @@ import RegattaCore
 //   clear of, close by; she holds straight. A boat on the other tack she ducks, as a port boat does.
 // - "The look sails her hand" (#564, `handHold`): on a class she steers by hand, a centred helm in her look is her hand
 //   holding an angle (`BotHelm`), sailed by the autohelm's law, as it goes out; not a rudder held at 0.
+// - "The look keeps the turn's way" (#564, `BotBrain.decide`): owing a penalty turn, a straight helm her look puts in
+//   her brain's place goes out truly straight (`BotDecision.centred`), not to her hand's angle hold, which swung her
+//   back against the turn.
 // - "Never attacks": her style's engagement is 0 (#234), so she plays no fleet tactic: no cover, no held lane, no
 //   lee-bow, no tacking on a boat's wind.
 // - As the right-of-way boat she holds her course as every bot does (#101, `holdingCourse`), before her start too,

@@ -82,7 +82,9 @@ public struct BotDecision: Hashable, Sendable {
     /// the suite counts it before the gun (`BotDriver`).
     var avoidance: BotBrain.Avoidance? = nil
     /// Whether she lets the rudder go, truly centred, stalled in irons (#459, `BotBrain.centresStalled`): her helm sends
-    /// it as it is and holds no angle by hand (`BotHelm.input`), so the class's irons recovery can fall her off.
+    /// it as it is and holds no angle by hand (`BotHelm.input`), so the class's irons recovery can fall her off. Also
+    /// the cautious bot's look putting a straight helm in her brain's place while she owes a penalty turn ("the look
+    /// keeps the turn's way", #564).
     var centred = false
     /// Whether, on a class with the new planing rule (#462), the angle her hand holds when she lets the rudder go is
     /// the one she is at, never the downwind groove's snap (`BotHelm.input`): the angle she aims at running is her
@@ -337,6 +339,12 @@ struct BotBrain: Sendable {
                 if input != decision.input {
                     decision.avoidsContact = false
                     decision.avoidance = nil
+                    // "The look keeps the turn's way" (#564): owing a turn, a straight her look put in her brain's place
+                    // goes out straight. Her hand's angle hold swung her back to the angle she held before the turn,
+                    // against it, as the other boat neared, and she was called under 21.2 (the penalty scene of
+                    // `BotConductTests`). Only owing a turn: sent straight while racing, it fouled seeds 29 and 32 of
+                    // `CautiousBotSuiteTests`.
+                    if input.rudderValue == 0, view.own.penaltyTurnsOwed > 0 { decision.centred = true }
                 }
                 decision.input = input
             }
