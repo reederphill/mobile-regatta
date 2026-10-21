@@ -399,6 +399,8 @@ public struct RaceResult: Codable, Hashable, Sendable {
     public var rank: RaceRank? = nil
     /// Perfect hand steering against Club's (#435), in a race of the handling mix; nil otherwise.
     public var handling: RaceHandling? = nil
+    /// Its two seats' profiles against each other (#484), in a two-boat race of the parity mix; nil otherwise.
+    public var parity: RaceParity? = nil
 
     /// `ranks`: each seat's place in the race's order at the end (`Race.place(of:)`), finished or not.
     init(cell: BotRaceCell, finalTick: Int, capped: Bool, tideStateAtGun: Double?, seats: [SeatMetrics],
@@ -409,8 +411,9 @@ public struct RaceResult: Codable, Hashable, Sendable {
         tideStateAtGunDegrees = tideStateAtGun.map { $0 * 180 / .pi }
         self.seats = seats
         fleet = FleetMetrics(seats)
-        // The handling mix's baseline and tactician steer by hand: their gap is the handling's, not the skill gap's.
-        skillGap = cell.profileMix == .handling ? nil : RaceSkillGap(seats: seats, ranks: ranks, hullLength: hullLength)
+        // The handling and parity mixes' profiles steer by hand: their gaps are the 2×2's, not the skill gap's.
+        skillGap = [.handling, .parity].contains(cell.profileMix) ? nil
+            : RaceSkillGap(seats: seats, ranks: ranks, hullLength: hullLength)
         funPass = cell.profileMix == .funPass ? RaceFunPass(seats: seats, ranks: ranks) : nil
         let middle = midFleet(ranks)
         midFleetSeats = middle
@@ -421,6 +424,7 @@ public struct RaceResult: Codable, Hashable, Sendable {
         rivals = cell.profileMix == .rivals ? RaceRivals(cell: cell, seats: seats, ranks: ranks) : nil
         rank = cell.profileMix == .rankStability ? RaceRank(seats: seats, ranks: ranks) : nil
         handling = cell.profileMix == .handling ? RaceHandling(seats: seats, hullLength: hullLength) : nil
+        parity = cell.profileMix == .parity && seats.count == 2 ? RaceParity(seats: seats, hullLength: hullLength) : nil
     }
 }
 
@@ -602,6 +606,9 @@ func median(_ sorted: [Double]) -> Double {
     sorted.isEmpty ? 0 : (sorted[(sorted.count - 1) / 2] + sorted[sorted.count / 2]) / 2
 }
 
+/// `median`, for a type with a `median` of its own.
+private func medianOfSorted(_ sorted: [Double]) -> Double { median(sorted) }
+
 /// How a race's tactician at Club-level execution did against its executor (#222, #105: "a perfect-execution,
 /// poor-tactics bot loses to a good-tactics, average-execution bot: decisions stay the main skill").
 public struct RaceExecution: Codable, Hashable, Sendable {
@@ -636,6 +643,11 @@ public struct HandlingGain: Codable, Hashable, Sendable {
         let ahead = seats.filter { $0.profile == perfect }
         let behind = seats.filter { $0.profile == club }
         guard !ahead.isEmpty, !behind.isEmpty else { return nil }
+        self.init(ahead, over: behind, hullLength: hullLength)
+    }
+
+    /// `ahead`'s seats' gain over `behind`'s (the parity mix's, #484: one seat's over the other's).
+    init(_ ahead: [SeatMetrics], over behind: [SeatMetrics], hullLength: Double) {
         let beats = legGainSeconds(ahead, over: behind) { $0.beats }
         let runs = legGainSeconds(ahead, over: behind) { $0.runs }
         secondsPerBeat = beats.map(\.seconds)
@@ -696,6 +708,295 @@ public struct HandlingSummary: Codable, Hashable, Sendable {
         baseline = Medians(baselines)
         tactician = Medians(tacticians)
         all = Medians(baselines + tacticians)
+    }
+}
+
+/// A two-boat race of the parity mix (#484): seat 0's profile against seat 1's, as `ParitySummary` pools them.
+public struct RaceParity: Codable, Hashable, Sendable {
+    /// Seat 0's profile, then seat 1's.
+    public var profiles: [BotProfile]
+    /// Whether seat 0 beat seat 1: 1 ahead, 0 behind, ½ level (`paritySort`).
+    public var firstWin: Double
+    /// Seat 1's seconds on the course less seat 0's (+: seat 0 ahead), both finished; nil otherwise.
+    public var marginSeconds: Double?
+    /// Seat 0's gain over seat 1, each beat and run (`HandlingGain`, at seat 1's speed along the leg), and seat 1's over
+    /// seat 0 (at seat 0's).
+    public var firstGain: HandlingGain
+    public var secondGain: HandlingGain
+
+    init?(seats: [SeatMetrics], hullLength: Double) {
+        guard seats.count == 2, let first = seats[0].profile, let second = seats[1].profile else { return nil }
+        profiles = [first, second]
+        let (a, b) = (paritySort(seats[0]), paritySort(seats[1]))
+        firstWin = a < b ? 1 : a > b ? 0 : 0.5
+        marginSeconds = seats.allSatisfy(\.finished) ? seats[1].onCourseSeconds - seats[0].onCourseSeconds : nil
+        firstGain = HandlingGain([seats[0]], over: [seats[1]], hullLength: hullLength)
+        secondGain = HandlingGain([seats[1]], over: [seats[0]], hullLength: hullLength)
+    }
+}
+
+/// Where a seat of a parity race comes at the end, lower ahead: finishers first by place, then the rest by metres to go
+/// (#484's `parity.py`: a seat with neither place nor metres to go counts as at the line).
+func paritySort(_ seat: SeatMetrics) -> (Int, Int, Double) {
+    (seat.finished ? 0 : 1, seat.place ?? 99, seat.metresToFinish ?? 0)
+}
+
+/// A share over races (#484): its races, the share, and its 95 % confidence half-width (1.96 standard errors, from the
+/// population deviation, as the brief's `parity.py`).
+public struct ParityShare: Codable, Hashable, Sendable {
+    public var races: Int
+    public var share: Double
+    public var ci: Double
+
+    /// Nil for none.
+    init?(_ values: [Double]) {
+        guard let estimate = ParityEstimate(values) else { return nil }
+        races = estimate.count
+        share = estimate.mean
+        ci = estimate.ci
+    }
+
+    var text: String { "\(fixed(share, 3))±\(fixed(ci, 3)) (\(races))" }
+}
+
+/// A mean over legs (#484): how many, the mean, its 95 % confidence half-width (as `ParityShare`'s) and the median.
+public struct ParityEstimate: Codable, Hashable, Sendable {
+    public var count: Int
+    public var mean: Double
+    public var ci: Double
+    public var median: Double
+
+    /// Nil for none.
+    init?(_ values: [Double]) {
+        guard !values.isEmpty else { return nil }
+        let n = Double(values.count)
+        let m = values.reduce(0, +) / n
+        let deviation = (values.reduce(0) { $0 + ($1 - m) * ($1 - m) } / n).squareRoot()
+        count = values.count
+        mean = m
+        ci = 1.96 * deviation / n.squareRoot()
+        median = medianOfSorted(values.sorted())
+    }
+
+    /// `3.55±0.68 (3.40)`.
+    var text: String { "\(fixed(mean))±\(fixed(ci)) (\(fixed(median)))" }
+}
+
+/// One profile's per-leg gains over another's (#484): beats and runs, seconds and hull lengths; nil for a kind of leg
+/// none of their races completed.
+public struct ParityLegGains: Codable, Hashable, Sendable {
+    public var beatSeconds: ParityEstimate?
+    public var beatLengths: ParityEstimate?
+    public var runSeconds: ParityEstimate?
+    public var runLengths: ParityEstimate?
+
+    init(_ gains: [HandlingGain]) {
+        beatSeconds = ParityEstimate(gains.flatMap(\.secondsPerBeat))
+        beatLengths = ParityEstimate(gains.flatMap(\.lengthsPerBeat))
+        runSeconds = ParityEstimate(gains.flatMap(\.secondsPerRun))
+        runLengths = ParityEstimate(gains.flatMap(\.lengthsPerRun))
+    }
+}
+
+/// A row profile against a column profile (#484): the share of their races the row won, and its per-leg gains.
+public struct ParityPair: Codable, Hashable, Sendable {
+    public var winShare: ParityShare
+    public var gains: ParityLegGains
+}
+
+/// A ratio per kind of leg and unit (#484's T2 and T3); nil where a side had no legs or the ratio divides by 0.
+public struct ParityRatios: Codable, Hashable, Sendable {
+    public var beatSeconds: Double?
+    public var beatLengths: Double?
+    public var runSeconds: Double?
+    public var runLengths: Double?
+
+    init(_ ratio: (KeyPath<ParityLegGains, ParityEstimate?>) -> Double?) {
+        beatSeconds = ratio(\.beatSeconds)
+        beatLengths = ratio(\.beatLengths)
+        runSeconds = ratio(\.runSeconds)
+        runLengths = ratio(\.runLengths)
+    }
+
+    /// `beats 0.56 s, 0.62 L; runs 0.99 s, 1.19 L`.
+    var text: String {
+        let f = { (value: Double?) in value.map { fixed($0) } ?? "-" }
+        return "beats \(f(beatSeconds)) s, \(f(beatLengths)) L; runs \(f(runSeconds)) s, \(f(runLengths)) L"
+    }
+}
+
+/// A Q1 race's finish margin (#484): seconds, + with the handler ahead, and where: venue and conditions ids, seed, and
+/// the handler's seat.
+public struct ParityMargin: Codable, Hashable, Sendable {
+    public var seconds: Double
+    public var venue: String
+    public var conditions: String
+    public var seed: UInt64
+    public var handlerSeat: Int
+
+    var text: String { "\(fixed(seconds, 1)) \(venue) \(conditions) seed \(seed) seat \(handlerSeat)" }
+}
+
+/// Q1's tails (#484): the finish margins of the races both finished, handler over the tactician.
+public struct ParityMargins: Codable, Hashable, Sendable {
+    public var races: Int
+    /// The 10th percentile, median and 90th percentile, seconds (`v[min(n − 1, ⌊p n⌋)]` of the sorted margins, as the
+    /// brief's `parity.py`).
+    public var p10Seconds: Double
+    public var medianSeconds: Double
+    public var p90Seconds: Double
+    /// Races decided by more than `decidedSeconds` either way.
+    public var decidedOver30: Int
+    /// The three worst for the handler, worst first, and her three best, best first.
+    public var worst: [ParityMargin]
+    public var best: [ParityMargin]
+
+    static let decidedSeconds = 30.0
+
+    /// Nil for none.
+    init?(_ margins: [ParityMargin]) {
+        guard !margins.isEmpty else { return nil }
+        // By seconds, then race order: a stable sort.
+        let sorted = margins.enumerated().sorted { ($0.element.seconds, $0.offset) < ($1.element.seconds, $1.offset) }.map(\.element)
+        let seconds = sorted.map(\.seconds)
+        let quantile = { (p: Double) in seconds[min(seconds.count - 1, Int(p * Double(seconds.count)))] }
+        races = sorted.count
+        p10Seconds = quantile(0.1)
+        medianSeconds = median(seconds)
+        p90Seconds = quantile(0.9)
+        decidedOver30 = seconds.filter { abs($0) > Self.decidedSeconds }.count
+        worst = Array(sorted.prefix(3))
+        best = Array(sorted.suffix(3).reversed())
+    }
+}
+
+/// The parity mix's two-boat races over a run (#484, #426 Q1, ADR 0007's 2×2): every profile against every other, Q1
+/// (the handler, `executor`, against the tactician with Club's hand, `tacticianClubSteering`), each one's per-leg gains
+/// over the baseline (`clubSteering`), T3 and T2, a row per conditions file, and Q1's tails. What `ParityLimits` holds.
+public struct ParitySummary: Codable, Hashable, Sendable {
+    /// One conditions file's races (by id).
+    public struct Conditions: Codable, Hashable, Sendable {
+        public var races: Int
+        /// As `ParitySummary.pairs`, over these races.
+        public var pairs: [String: [String: ParityPair]]
+    }
+
+    /// Two-boat races of the parity mix.
+    public var races: Int
+    /// Row profile, then column profile (`BotProfile.rawValue`): the row against the column, in the races with both.
+    public var pairs: [String: [String: ParityPair]]
+    /// Q1: the share of their races the handler won, and the tactician with Club's hand (what the band gates).
+    public var handlerWinShare: ParityShare?
+    public var tacticianWinShare: ParityShare?
+    /// T3: |H − T| / max(|H|, |T|) of the handler's and the tactician's mean gains over the baseline.
+    public var legGainGap: ParityRatios
+    /// T2: both's mean gain over the baseline (HT) over the larger of the handler's and the tactician's.
+    public var bothOverBest: ParityRatios
+    /// By conditions id.
+    public var byConditions: [String: Conditions]
+    /// Q1's finish margins, + with the handler ahead; nil when no Q1 race had both finish.
+    public var margins: ParityMargins?
+
+    static let baseline = BotProfile.clubSteering, handler = BotProfile.executor
+    static let tactician = BotProfile.tacticianClubSteering, both = BotProfile.tactician
+
+    /// Nil when no two-boat race of the parity mix sailed.
+    init?(_ races: [RaceResult]) {
+        let sailed = races.compactMap { race in race.parity.map { (race.cell, $0) } }
+        guard !sailed.isEmpty else { return nil }
+        self.races = sailed.count
+        typealias Reading = (cell: BotRaceCell, win: Double, gain: HandlingGain, margin: Double?, seat: Int)
+        // Each race read both ways: seat 0 over seat 1, and seat 1 over seat 0. Race order is kept.
+        let readings = sailed.flatMap { cell, race -> [(BotProfile, BotProfile, Reading)] in
+            [(race.profiles[0], race.profiles[1], (cell, race.firstWin, race.firstGain, race.marginSeconds, 0)),
+             (race.profiles[1], race.profiles[0], (cell, 1 - race.firstWin, race.secondGain, race.marginSeconds.map { -$0 }, 1))]
+        }
+        func pairs(_ readings: [(BotProfile, BotProfile, Reading)]) -> [String: [String: ParityPair]] {
+            Dictionary(grouping: readings) { $0.0.rawValue }.mapValues { row in
+                Dictionary(grouping: row) { $0.1.rawValue }.compactMapValues { cells in
+                    ParityShare(cells.map(\.2.win)).map { ParityPair(winShare: $0, gains: ParityLegGains(cells.map(\.2.gain))) }
+                }
+            }
+        }
+        let table = pairs(readings)
+        self.pairs = table
+        handlerWinShare = table[Self.handler.rawValue]?[Self.tactician.rawValue]?.winShare
+        tacticianWinShare = table[Self.tactician.rawValue]?[Self.handler.rawValue]?.winShare
+        let overBaseline = { (profile: BotProfile) in table[profile.rawValue]?[Self.baseline.rawValue]?.gains }
+        let (h, t, ht) = (overBaseline(Self.handler), overBaseline(Self.tactician), overBaseline(Self.both))
+        legGainGap = ParityRatios { leg in
+            guard let h = h?[keyPath: leg]?.mean, let t = t?[keyPath: leg]?.mean, max(abs(h), abs(t)) > 0 else { return nil }
+            return abs(h - t) / max(abs(h), abs(t))
+        }
+        bothOverBest = ParityRatios { leg in
+            guard let h = h?[keyPath: leg]?.mean, let t = t?[keyPath: leg]?.mean, let ht = ht?[keyPath: leg]?.mean,
+                  max(h, t) != 0 else { return nil }
+            return ht / max(h, t)
+        }
+        let conditionsID = { (cell: BotRaceCell) in (try? dataFileKey(cell.conditions).id) ?? cell.conditions }
+        byConditions = Dictionary(grouping: readings) { conditionsID($0.2.cell) }.mapValues { readings in
+            Conditions(races: readings.count / 2, pairs: pairs(readings))
+        }
+        margins = ParityMargins(readings.compactMap { row, column, reading in
+            guard row == Self.handler, column == Self.tactician, let seconds = reading.margin else { return nil }
+            return ParityMargin(seconds: seconds, venue: (try? dataFileKey(reading.cell.venue).id) ?? reading.cell.venue,
+                                conditions: conditionsID(reading.cell), seed: reading.cell.seed, handlerSeat: reading.seat)
+        })
+    }
+
+    /// The text report's lines.
+    var lines: [String] {
+        let profiles = [Self.baseline, Self.handler, Self.tactician, Self.both]
+        let names = [Self.baseline: "0", Self.handler: "H", Self.tactician: "T", Self.both: "HT"]
+        let label = { (p: BotProfile) in "\(names[p] ?? "?") \(p.rawValue)" }
+        var lines = ["parity: \(races) two-boat races; win share, row over column \(profiles.map(label).joined(separator: ", ")), "
+            + "±95% CI (races):"]
+        for row in profiles {
+            let cells = profiles.map { column in
+                row == column ? "-" : pairs[row.rawValue]?[column.rawValue]?.winShare.text ?? "·"
+            }
+            lines.append("  \(label(row)): " + cells.joined(separator: " | "))
+        }
+        let share = { (s: ParityShare?) in s.map { "\(fixed($0.share, 3))±\(fixed($0.ci, 3))" } ?? "-" }
+        lines.append("  Q1: the handler won \(share(handlerWinShare)), the tactician with Club's hand \(share(tacticianWinShare)), "
+            + "of \(handlerWinShare?.races ?? 0) races")
+        let estimate = { (e: ParityEstimate?) in e.map(\.text) ?? "-" }
+        let gainsText = { (g: ParityLegGains) in
+            "\(estimate(g.beatSeconds)) s, \(estimate(g.beatLengths)) L over \(g.beatSeconds?.count ?? 0) beats | "
+                + "\(estimate(g.runSeconds)) s, \(estimate(g.runLengths)) L over \(g.runSeconds?.count ?? 0) runs"
+        }
+        lines.append("  per-leg gains, mean±CI (median):")
+        if let q1 = pairs[Self.handler.rawValue]?[Self.tactician.rawValue]?.gains {
+            lines.append("    H over T: " + gainsText(q1))
+        }
+        for profile in [Self.handler, Self.tactician, Self.both] {
+            guard let gains = pairs[profile.rawValue]?[Self.baseline.rawValue]?.gains else { continue }
+            lines.append("    \(names[profile] ?? "?") over 0: " + gainsText(gains))
+        }
+        lines.append("  T3 gap |H - T| / max: \(legGainGap.text)")
+        lines.append("  T2 HT / max(H, T): \(bothOverBest.text)")
+        lines.append("  by conditions, means beat s (L) / run s (L): Q1 handler's share; H over T; H, T and HT over 0:")
+        let mean = { (e: ParityEstimate?) in e.map { fixed($0.mean) } ?? "-" }
+        let legs = { (g: ParityLegGains?) in
+            "\(mean(g?.beatSeconds)) (\(mean(g?.beatLengths))) / \(mean(g?.runSeconds)) (\(mean(g?.runLengths)))"
+        }
+        for id in byConditions.keys.sorted() {
+            guard let c = byConditions[id] else { continue }
+            let q1 = c.pairs[Self.handler.rawValue]?[Self.tactician.rawValue]
+            let over = [Self.handler, Self.tactician, Self.both].map { p in
+                "\(names[p] ?? "?") \(legs(c.pairs[p.rawValue]?[Self.baseline.rawValue]?.gains))"
+            }
+            lines.append("    \(id), \(c.races) races: Q1 \(q1?.winShare.text ?? "-"); H over T \(legs(q1?.gains)); "
+                + over.joined(separator: ", "))
+        }
+        if let margins {
+            lines.append("  Q1 finish margins, s (+: the handler ahead), \(margins.races) races both finished: "
+                + "p10 \(fixed(margins.p10Seconds, 1)), median \(fixed(margins.medianSeconds, 1)), p90 \(fixed(margins.p90Seconds, 1)); "
+                + "\(margins.decidedOver30) decided by > \(Int(ParityMargins.decidedSeconds)) s")
+            lines.append("    worst for the handler: " + margins.worst.map(\.text).joined(separator: ", "))
+            lines.append("    best: " + margins.best.map(\.text).joined(separator: ", "))
+        }
+        return lines
     }
 }
 
@@ -796,7 +1097,8 @@ public struct AxesSummary: Codable, Hashable, Sendable {
     }
 }
 
-/// Execution against tactics over a run (#105): what `minTacticsBeatsExecutionShare` holds.
+/// Execution against tactics over a run (#105): the legacy execution mix's, reported, no longer gated (#484: its
+/// tactician is Club only on her turns, neither Q1 nor a cell of the 2×2; the parity mix reads Q1).
 public struct ExecutionSummary: Codable, Hashable, Sendable {
     /// Races with both profiles.
     public var races: Int
@@ -1458,6 +1760,8 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
     public var cautious: CautiousSummary?
     /// The handling mix (#435) over its races; nil when none sailed.
     public var handling: HandlingSummary?
+    /// The parity mix's two-boat races (#484); nil, and left out of the JSON, when none sailed.
+    public var parity: ParitySummary? = nil
     /// Places by tactics skill and by handling skill (#443): the live mix's live bots; nil when none sailed.
     public var axes: AxesSummary? = nil
     /// The same over the handling mix's profiles (tactics or none, a perfect or Club hand); nil when none sailed.
@@ -1507,13 +1811,14 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
         rank = RankSummary(races)
         cautious = CautiousSummary(races)
         handling = HandlingSummary(races.compactMap(\.handling))
+        parity = ParitySummary(races)
         axes = AxesSummary(live: races)
         handlingAxes = AxesSummary(handlingMix: races)
         timings = RunTimings(maxP99Ms: races.map(\.timings.p99Ms).max() ?? 0,
                              maxMs: races.map(\.timings.maxMs).max() ?? 0)
         breaches = thresholds.breaches(tiers: tiers, timings: timings, skillGap: skillGap, funPass: funPass, start: start,
                                        navigation: navigation, conduct: conduct, closeEncounters: closeEncounters,
-                                       execution: execution, watchdog: watchdog, rivals: rivals, rank: rank)
+                                       watchdog: watchdog, rivals: rivals, rank: rank, parity: parity)
         passed = breaches.isEmpty
     }
 
@@ -1577,6 +1882,7 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
                 + (matrix.handSteers ? ":" : " (the class's autohelm holds a centred rudder: handling unfelt; sail with --autohelm off):"))
             lines += axes.lines(skillAxis: "skill", handlingAxis: "handling")
         }
+        if let parity { lines += parity.lines }
         if let execution {
             lines.append("execution: tactician at Club execution beat the executor in \(fixed(execution.tacticsBeatsExecutionShare)) "
                 + "of \(execution.races) races")

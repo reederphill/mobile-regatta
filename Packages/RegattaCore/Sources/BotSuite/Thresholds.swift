@@ -46,14 +46,17 @@ public struct TierLimits: Codable, Hashable, Sendable {
 /// What a scripted profile must show over a run (#231), keyed in the thresholds by `BotProfile.rawValue`.
 /// Every limit is optional: a profile's tickets (#238, #234, #105) add theirs as keys here.
 public struct ProfileLimits: Codable, Hashable, Sendable {
-    /// The tactician's least mean win share over the baseline, across the races with both (ADR 0007).
+    /// The tactician's least mean win share over the baseline, across the races with both, both on a perfect hand: the
+    /// 2×2's "tactics pays at a perfect hand" (ADR 0007; #484: 0.75 is what parity implies, the handling dividend's own
+    /// two-boat share, both over the tactician with Club's hand, reading 0.742).
     public var minTacticianWinShare: Double?
     /// The tactician's least median gain over the baseline per beat, hull lengths.
     public var minTacticianGainLengthsPerBeat: Double?
     /// The tactician's least tacks per beat in the fun-pass scenario (#221: "the tactician averages ≥ 4
     /// tacks per beat"), over the beats her seats completed.
     public var minTacticianTacksPerBeat: Double?
-    /// The least share of the fun-pass races with both in which the tactician beats the blip-tacker (#221).
+    /// The least share of the fun-pass races with both in which the tactician beats the blip-tacker (#221: shifts are
+    /// worth playing, blips are not): tactics pays at a perfect hand, both seats steering perfectly (#484).
     public var minTacticianBeatsBlipTackerShare: Double?
     /// The tactician's least median gain over the baseline per run, hull lengths (#105: downwind, she gybes on headers,
     /// stays in the pressure and out of the shadow of the boats behind her).
@@ -61,28 +64,22 @@ public struct ProfileLimits: Codable, Hashable, Sendable {
     /// The tactician's least mean lead over the baseline at their first cross after the gun, hull lengths (#105: she
     /// starts at the end the line's bias favours, the baseline at her style's spot).
     public var minTacticianStartGainLengths: Double?
-    /// The least share of the races with both in which the tactician at Club-level execution beats the executor (#222,
-    /// #105: "execution never beats tactics").
-    public var minTacticsBeatsExecutionShare: Double?
 
     public init(minTacticianWinShare: Double? = nil, minTacticianGainLengthsPerBeat: Double? = nil,
                 minTacticianTacksPerBeat: Double? = nil, minTacticianBeatsBlipTackerShare: Double? = nil,
-                minTacticianGainLengthsPerRun: Double? = nil, minTacticianStartGainLengths: Double? = nil,
-                minTacticsBeatsExecutionShare: Double? = nil) {
+                minTacticianGainLengthsPerRun: Double? = nil, minTacticianStartGainLengths: Double? = nil) {
         self.minTacticianWinShare = minTacticianWinShare
         self.minTacticianGainLengthsPerBeat = minTacticianGainLengthsPerBeat
         self.minTacticianTacksPerBeat = minTacticianTacksPerBeat
         self.minTacticianBeatsBlipTackerShare = minTacticianBeatsBlipTackerShare
         self.minTacticianGainLengthsPerRun = minTacticianGainLengthsPerRun
         self.minTacticianStartGainLengths = minTacticianStartGainLengths
-        self.minTacticsBeatsExecutionShare = minTacticsBeatsExecutionShare
     }
 
-    /// Why `skillGap`, `funPass` and `execution` miss these limits, each line starting with `profile`. A limit gates only
-    /// what the run sailed: none without a skill gap, a fun pass or an execution race, and none on a fun pass without its
-    /// numbers, nor on a skill gap without runs or a start lead.
-    func breaches(_ profile: String, skillGap: SkillGapSummary?, funPass: FunPassSummary? = nil,
-                  execution: ExecutionSummary? = nil) -> [String] {
+    /// Why `skillGap` and `funPass` miss these limits, each line starting with `profile`. A limit gates only what the run
+    /// sailed: none without a skill gap or a fun pass, and none on a fun pass without its numbers, nor on a skill gap
+    /// without runs or a start lead.
+    func breaches(_ profile: String, skillGap: SkillGapSummary?, funPass: FunPassSummary? = nil) -> [String] {
         var breaches: [String] = []
         if let gap = skillGap {
             if let minimum = minTacticianWinShare, gap.tacticianWinShare < minimum {
@@ -97,9 +94,6 @@ public struct ProfileLimits: Codable, Hashable, Sendable {
             if let minimum = minTacticianStartGainLengths, let lead = gap.meanStartGainLengths, lead < minimum {
                 breaches.append("\(profile): start \(fixed(lead)) lengths ahead at the first cross < \(fixed(minimum))")
             }
-        }
-        if let minimum = minTacticsBeatsExecutionShare, let execution, execution.tacticsBeatsExecutionShare < minimum {
-            breaches.append("\(profile): beat the executor \(fixed(execution.tacticsBeatsExecutionShare)) < \(fixed(minimum))")
         }
         if let minimum = minTacticianTacksPerBeat, let tacks = funPass?.tacksPerBeat[BotProfile.tactician.rawValue],
            tacks < minimum {
@@ -277,6 +271,43 @@ public struct RankLimits: Codable, Hashable, Sendable {
     }
 }
 
+/// The parity band (#426 Q1, #484, ADR 0007) over the parity mix's two-boat races (`ParitySummary`): a handler with
+/// weak tactics keeps pace with a tactician with weak handling. Optional; it gates only a run that sailed them.
+public struct ParityLimits: Codable, Hashable, Sendable {
+    /// The least and most share of their races the tactician with Club's hand (`tacticianClubSteering`) may win against
+    /// the handler (`executor`): Q1's band.
+    public var minTacticianWinShare: Double?
+    public var maxTacticianWinShare: Double?
+    /// The widest T3 gap, |H − T| / max(|H|, |T|), of the handler's and the tactician's mean gains over the baseline in
+    /// seconds, on beats and on runs, each pooled over the conditions files.
+    public var maxLegGainGap: Double?
+
+    public init(minTacticianWinShare: Double? = nil, maxTacticianWinShare: Double? = nil, maxLegGainGap: Double? = nil) {
+        self.minTacticianWinShare = minTacticianWinShare
+        self.maxTacticianWinShare = maxTacticianWinShare
+        self.maxLegGainGap = maxLegGainGap
+    }
+
+    func breaches(_ summary: ParitySummary?) -> [String] {
+        guard let summary else { return [] }
+        var breaches: [String] = []
+        if let share = summary.tacticianWinShare?.share {
+            if let minimum = minTacticianWinShare, share < minimum {
+                breaches.append("parity: tactician win share \(fixed(share, 3)) < \(fixed(minimum, 3))")
+            }
+            if let maximum = maxTacticianWinShare, share > maximum {
+                breaches.append("parity: tactician win share \(fixed(share, 3)) > \(fixed(maximum, 3))")
+            }
+        }
+        if let maximum = maxLegGainGap {
+            for (legs, gap) in [("beats", summary.legGainGap.beatSeconds), ("runs", summary.legGainGap.runSeconds)] {
+                if let gap, gap > maximum { breaches.append("parity: leg gain gap on \(legs) \(fixed(gap)) > \(fixed(maximum))") }
+            }
+        }
+        return breaches
+    }
+}
+
 /// The suite's gate (#19, #27): limits per tier, keyed by `BotTier.rawValue`, per scripted profile, keyed by
 /// `BotProfile.rawValue` (#231, #238), the start's (#99), navigation's (#100), conduct's (#101), and the worst race's p99
 /// tick. A tier or profile with no limits isn't gated, and a profile's, the start's, navigation's or conduct's limits gate
@@ -300,6 +331,8 @@ public struct BotThresholds: Codable, Hashable, Sendable {
     public var rivals: RivalLimits?
     /// Rank stability's (#105); nil when a thresholds file has none.
     public var rank: RankLimits?
+    /// The parity band's (#484); nil when a thresholds file has none.
+    public var parity: ParityLimits?
     /// The worst race's p99 tick, milliseconds: #27's budget, "p99 tick under 5 ms on one shared vCPU". On a CI runner
     /// the times are noisy; the authoritative budget is `regatta-bench`'s on the reference runner (#69).
     public var maxP99TickMs: Double
@@ -310,7 +343,7 @@ public struct BotThresholds: Codable, Hashable, Sendable {
     public init(tiers: [String: TierLimits], profiles: [String: ProfileLimits] = [:], start: StartLimits? = nil,
                 navigation: NavigationLimits? = nil, conduct: ConductLimits? = nil, encounters: EncounterLimits? = nil,
                 watchdog: WatchdogLimits? = nil, rivals: RivalLimits? = nil, rank: RankLimits? = nil,
-                maxP99TickMs: Double, placeholders: [String] = []) {
+                parity: ParityLimits? = nil, maxP99TickMs: Double, placeholders: [String] = []) {
         self.tiers = tiers
         self.profiles = profiles
         self.start = start
@@ -320,12 +353,13 @@ public struct BotThresholds: Codable, Hashable, Sendable {
         self.watchdog = watchdog
         self.rivals = rivals
         self.rank = rank
+        self.parity = parity
         self.maxP99TickMs = maxP99TickMs
         self.placeholders = placeholders
     }
 
     private enum CodingKeys: String, CodingKey {
-        case tiers, profiles, start, navigation, conduct, encounters, watchdog, rivals, rank, maxP99TickMs, placeholders
+        case tiers, profiles, start, navigation, conduct, encounters, watchdog, rivals, rank, parity, maxP99TickMs, placeholders
     }
 
     public init(from decoder: Decoder) throws {
@@ -339,25 +373,25 @@ public struct BotThresholds: Codable, Hashable, Sendable {
                   watchdog: try c.decodeIfPresent(WatchdogLimits.self, forKey: .watchdog),
                   rivals: try c.decodeIfPresent(RivalLimits.self, forKey: .rivals),
                   rank: try c.decodeIfPresent(RankLimits.self, forKey: .rank),
+                  parity: try c.decodeIfPresent(ParityLimits.self, forKey: .parity),
                   maxP99TickMs: try c.decode(Double.self, forKey: .maxP99TickMs),
                   placeholders: try c.decodeIfPresent([String].self, forKey: .placeholders) ?? [])
     }
 
-    /// Why a run with these tier summaries, timings, skill gap, fun pass, start, navigation, conduct and close encounters misses the
-    /// thresholds; empty when it meets them.
+    /// Why a run with these tier summaries, timings, skill gap, fun pass, start, navigation, conduct, close encounters,
+    /// watchdog, rival band, rank stability and parity misses the thresholds; empty when it meets them.
     public func breaches(tiers summaries: [String: TierSummary], timings: BotSuiteReport.RunTimings,
                          skillGap: SkillGapSummary? = nil, funPass: FunPassSummary? = nil,
                          start: StartSummary? = nil, navigation: NavigationSummary? = nil,
                          conduct: ConductSummary? = nil, closeEncounters: CloseEncounterSummary? = nil,
-                         execution: ExecutionSummary? = nil, watchdog: WatchdogSummary? = nil,
-                         rivals: RivalPaceSummary? = nil, rank: RankSummary? = nil) -> [String] {
+                         watchdog: WatchdogSummary? = nil, rivals: RivalPaceSummary? = nil, rank: RankSummary? = nil,
+                         parity: ParitySummary? = nil) -> [String] {
         var breaches = BotTier.allCases.flatMap { tier -> [String] in
             guard let summary = summaries[tier.rawValue], let limits = tiers[tier.rawValue] else { return [] }
             return limits.breaches(tier.rawValue, summary)
         }
         for profile in BotProfile.allCases {
-            breaches += profiles[profile.rawValue]?.breaches(profile.rawValue, skillGap: skillGap, funPass: funPass,
-                                                             execution: execution) ?? []
+            breaches += profiles[profile.rawValue]?.breaches(profile.rawValue, skillGap: skillGap, funPass: funPass) ?? []
         }
         breaches += self.start?.breaches(start) ?? []
         breaches += self.navigation?.breaches(navigation) ?? []
@@ -366,6 +400,7 @@ public struct BotThresholds: Codable, Hashable, Sendable {
         breaches += self.watchdog?.breaches(watchdog) ?? []
         breaches += self.rivals?.breaches(rivals) ?? []
         breaches += self.rank?.breaches(rank) ?? []
+        breaches += self.parity?.breaches(parity) ?? []
         if timings.maxP99Ms > maxP99TickMs {
             breaches.append("tick: worst p99 \(fixed(timings.maxP99Ms, 3)) ms > \(fixed(maxP99TickMs, 3))")
         }

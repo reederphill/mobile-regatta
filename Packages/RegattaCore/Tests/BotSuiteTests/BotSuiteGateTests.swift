@@ -62,21 +62,26 @@ import Testing
     }
 
     /// #105: the bundled thresholds give every key the fun-pass breach test covers, the tick budget is #27's 5 ms, and
-    /// every placeholder (the keys #389 sets) names a key they hold.
+    /// every placeholder (the keys #389 sets) names a key they hold. #484 (the owner's D1–D4): the execution gate is gone,
+    /// the parity band is gated as placeholders, and tactics pays at a perfect hand at 0.75 still.
     @Test func bundledThresholdsHoldEveryGateKey() throws {
         let thresholds = try BotThresholds.bundled()
         #expect(thresholds.maxP99TickMs == 5)
         let keys = ["profiles.tactician.minTacticianWinShare", "profiles.tactician.minTacticianGainLengthsPerBeat",
                     "profiles.tactician.minTacticianTacksPerBeat", "profiles.tactician.minTacticianBeatsBlipTackerShare",
                     "profiles.tactician.minTacticianGainLengthsPerRun", "profiles.tactician.minTacticianStartGainLengths",
-                    "profiles.tactician.minTacticsBeatsExecutionShare", "encounters.minCloseEncountersPerRace",
-                    "watchdog.maxCentredRudder161Calls", "rivals.maxMeanPlaceGap", "rank.minSkillRankCorrelation"]
+                    "encounters.minCloseEncountersPerRace", "watchdog.maxCentredRudder161Calls", "rivals.maxMeanPlaceGap",
+                    "rank.minSkillRankCorrelation", "parity.minTacticianWinShare", "parity.maxTacticianWinShare",
+                    "parity.maxLegGainGap"]
         for key in keys {
             #expect(thresholds.hasKey(key), "thresholds.json has no \(key)")
             #expect(thresholds.placeholders.contains(key), "\(key) isn't marked a placeholder")
         }
         #expect(thresholds.watchdog?.maxCentredRudder161Calls == 0)
-        #expect(thresholds.profiles["tactician"]?.minTacticsBeatsExecutionShare == 0.75)
+        #expect(!thresholds.hasKey("profiles.tactician.minTacticsBeatsExecutionShare"))
+        #expect(thresholds.profiles["tactician"]?.minTacticianWinShare == 0.75)
+        #expect(thresholds.profiles["tactician"]?.minTacticianBeatsBlipTackerShare == 0.75)
+        #expect(thresholds.parity == ParityLimits(minTacticianWinShare: 0.4, maxTacticianWinShare: 0.6, maxLegGainGap: 0.25))
         #expect(thresholds.placeholders.allSatisfy(thresholds.hasKey))
         #expect(!thresholds.hasKey("profiles.tactician"), "a block isn't a key")
         var wrong = unmissableThresholds()
@@ -91,7 +96,6 @@ import Testing
         thresholds.watchdog = WatchdogLimits(maxCentredRudder161Calls: 0)
         thresholds.rivals = RivalLimits(maxMeanPlaceGap: 2)
         thresholds.rank = RankLimits(minSkillRankCorrelation: 0.5)
-        thresholds.profiles["tactician"] = ProfileLimits(minTacticsBeatsExecutionShare: 0.75)
         let calm = BotSuiteReport.RunTimings(maxP99Ms: 0, maxMs: 0)
         func breaches(rivals: RivalPaceSummary? = nil, rank: RankSummary? = nil) -> [String] {
             thresholds.breaches(tiers: [:], timings: calm, rivals: rivals, rank: rank)
@@ -217,7 +221,7 @@ import Testing
         #expect(club.profileMixes.contains(.live))
         let small = try BotSuiteOptions(arguments: ["--fleet-size", "2"]).matrix()
         #expect(!small.profileMixes.contains(.rivals) && !small.profileMixes.contains(.rankStability))
-        #expect(small.profileMixes.contains(.execution))
+        #expect(small.profileMixes.contains(.skillGap))
         #expect(throws: BotSuiteError.self) {
             try BotSuiteOptions(arguments: ["--tier-mix", "club", "--profile-mix", "execution"]).matrix()
         }
@@ -307,25 +311,23 @@ import Testing
     }
 
     /// One race of each scripted mix the fun-pass keys read, short: the fun pass (three boats), all-National live (the
-    /// close encounters and the watchdog), the skill gap, execution, rivals and rank stability; one lap.
+    /// close encounters and the watchdog), the skill gap, rivals and rank stability; one lap.
     private func gateMatrix() throws -> String {
         try fixture(BotMatrix(seeds: [1], venues: ["dev-venue@7"], conditions: ["classic-oscillating@7"], fleetSizes: [3],
                               tierMixes: [.national, .mixed],
-                              profileMixes: [.live, .funPass, .execution, .rivals, .rankStability], laps: 1),
+                              profileMixes: [.live, .funPass, .rivals, .rankStability], laps: 1),
                     named: "gate-matrix")
     }
 
     /// #105 acceptance (#238's, extended): a run that misses a fixture's fun-pass keys exits non-zero, naming each: the
     /// skill gap (win share, gain per beat), tacks per beat, the blip-tacker, close encounters, the rival pace band, the
-    /// 16.1 watchdog; and #105's own: gain per run, start gain, execution against tactics, skill against rank. One that
-    /// meets them exits 0.
+    /// 16.1 watchdog; and #105's own: gain per run, start gain, skill against rank. One that meets them exits 0.
     @Test func funPassThresholdBreachExitsNonZero() throws {
         let matrix = try gateMatrix()
         var impossible = unmissableThresholds()
         impossible.profiles["tactician"] = ProfileLimits(
             minTacticianWinShare: 1.01, minTacticianGainLengthsPerBeat: 1_000, minTacticianTacksPerBeat: 1_000,
-            minTacticianBeatsBlipTackerShare: 1.01, minTacticianGainLengthsPerRun: 1_000, minTacticianStartGainLengths: 1_000,
-            minTacticsBeatsExecutionShare: 1.01)
+            minTacticianBeatsBlipTackerShare: 1.01, minTacticianGainLengthsPerRun: 1_000, minTacticianStartGainLengths: 1_000)
         impossible.encounters = EncounterLimits(minCloseEncountersPerRace: 1_000)
         impossible.watchdog = WatchdogLimits(maxCentredRudder161Calls: -1)
         impossible.rivals = RivalLimits(maxMeanPlaceGap: -1)
@@ -337,19 +339,18 @@ import Testing
         for breach in ["tactician: win share", "tactician: gain", "lengths/beat <", "tactician: tacks",
                        "tactician: beat the blip-tacker", "encounters: close encounters", "rivals: mean place gap",
                        "watchdog: centred-rudder 16.1 calls", "lengths/run <", "tactician: start",
-                       "tactician: beat the executor", "rank: skill vs finishing order"] {
+                       "rank: skill vs finishing order"] {
             #expect(failing.stdout.contains("  " + breach) || failing.stdout.contains(breach), "no breach: \(breach)")
         }
         let lines = failing.stdout.components(separatedBy: "\n")
         let gate = try #require(lines.firstIndex(of: "gate: FAIL"))
         let breaches = lines[(gate + 1)...].filter { $0.hasPrefix("  ") }
-        #expect(breaches.count == 11, "one breach a key: \(breaches)")
+        #expect(breaches.count == 10, "one breach a key: \(breaches)")
 
         var easy = unmissableThresholds()
         easy.profiles["tactician"] = ProfileLimits(
             minTacticianWinShare: 0, minTacticianGainLengthsPerBeat: -1_000, minTacticianTacksPerBeat: 0,
-            minTacticianBeatsBlipTackerShare: 0, minTacticianGainLengthsPerRun: -1_000, minTacticianStartGainLengths: -1_000,
-            minTacticsBeatsExecutionShare: 0)
+            minTacticianBeatsBlipTackerShare: 0, minTacticianGainLengthsPerRun: -1_000, minTacticianStartGainLengths: -1_000)
         easy.encounters = EncounterLimits(minCloseEncountersPerRace: 0)
         easy.watchdog = WatchdogLimits(maxCentredRudder161Calls: 1_000)
         easy.rivals = RivalLimits(maxMeanPlaceGap: 1_000)
@@ -360,7 +361,7 @@ import Testing
     }
 
     /// #105 acceptance (#222): the execution mix races the executor against the tactician at Club-level execution, and
-    /// the report gives the share of races tactics won, each race's order behind it.
+    /// the report gives the share of races tactics won, each race's order behind it. Reported, no longer gated (#484).
     @Test func executorLosesToTacticianReported() throws {
         let matrix = BotMatrix(seeds: [1, 2], venues: ["dev-venue@7"], conditions: ["classic-oscillating@7"], fleetSizes: [2],
                                tierMixes: [.national], profileMixes: [.execution], laps: 1)

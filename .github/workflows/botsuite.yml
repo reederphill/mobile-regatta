@@ -5,14 +5,16 @@
 # times on a hosted runner are noisy; the authoritative tick budget is the Bench workflow's on the reference server.
 # The image pin is linux-test.sh's IMAGE; scripts/check-image-pins.sh (run by check.sh) holds them equal.
 #
-# The matrix is split into one job per profile mix (keep in step with matrix.json's profileMixes), and each job's
-# summaries and gates read its own races alone:
+# The matrix is split into one job per profile mix (keep in step with matrix.json's profileMixes, plus the parity mix,
+# which the bundled matrix doesn't sail), and each job's summaries and gates read its own races alone:
 #   live            the live tier tables (finish share, irons, contacts, edge time), the start, navigation, conduct
 #                   and close-encounter gates, and the 16.1 watchdog: all read the live fleets, which only this job sails.
 #   skillGap+funPass  the tactician's skill-gap gates (win share, gain per beat and per run, start gain) over both
 #                   mixes' races pooled, as one run of the matrix pools them, and the fun pass's (tacks per beat,
 #                   beats the blip-tacker). One job, so no skill-gap gate runs twice on two different samples.
-#   execution       tactics beats execution.     cautious  the cautious bot (reported, no gate).
+#   parity          handling against tactics (#426 Q1, #484): the 2×2's two-boat round robin, its own args
+#                   (--fleet-size 2 --seeds 384: 640 races a pair, ±0.036 on Q1), and the parity band's gates.
+#   cautious        the cautious bot (reported, no gate).
 #   rivals          the rival pace band.         rankStability  skill vs finishing order.
 #                   Both are sailed in fleets of 10 only (matrix.json mixFleetSizes), never pooled across fleet sizes.
 # Every job gates the worst p99 tick of its own races, so together they gate the worst of the whole matrix.
@@ -52,7 +54,7 @@ jobs:
         include:
           - { name: live, mixes: "live" }
           - { name: skillGap-funPass, mixes: "skillGap funPass" }
-          - { name: execution, mixes: "execution" }
+          - { name: parity, mixes: "parity", args: "--fleet-size 2 --seeds 384" }
           - { name: cautious, mixes: "cautious" }
           - { name: rivals, mixes: "rivals" }
           - { name: rankStability, mixes: "rankStability" }
@@ -66,7 +68,7 @@ jobs:
           bin="$(swift build -c release --package-path Packages/RegattaCore --show-bin-path)"
           mixes=()
           for mix in ${{ matrix.mixes }}; do mixes+=(--profile-mix "$mix"); done
-          "$bin/regatta-botsuite" "${mixes[@]}" --json "botsuite-${{ matrix.name }}.json" \
+          "$bin/regatta-botsuite" "${mixes[@]}" ${{ matrix.args }} --json "botsuite-${{ matrix.name }}.json" \
             2>&1 | tee "botsuite-${{ matrix.name }}.txt"
       - name: Summary
         if: always()

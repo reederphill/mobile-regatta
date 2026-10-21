@@ -30,10 +30,12 @@ import Testing
         // #231: the live bots the tiers gate, and the skill-gap scenario; #238: the fun pass, in classic
         // oscillating conditions only.
         // #355: the hunters mix is sailed only when named (`--profile-mix hunters`), never in the bundle.
-        // #105: execution, the cautious bot among live bots, rivals and rank stability join it.
+        // #105: the cautious bot among live bots, rivals and rank stability join it.
         // #435: so is the handling mix (`--profile-mix handling`), and the bundle sails each class as bundled.
-        #expect(Set(matrix.profileMixes) == Set(ProfileMix.allCases).subtracting([.hunters, .handling]))
-        #expect(!matrix.cells.contains { $0.profileMix == .hunters || $0.profileMix == .handling })
+        // #484: the parity mix too, and the legacy execution mix, ungated, leaves the bundle: both are sailed by name.
+        let byName: Set<ProfileMix> = [.hunters, .handling, .execution, .parity]
+        #expect(Set(matrix.profileMixes) == Set(ProfileMix.allCases).subtracting(byName))
+        #expect(!matrix.cells.contains { byName.contains($0.profileMix) })
         #expect(!matrix.autohelmOff && matrix.cells.allSatisfy { $0.autohelmOff == nil })
         #expect(!matrix.seeds.isEmpty && !matrix.tideStatesDegrees.isEmpty)
         // Venue × conditions pairings: dev-venue's four and two at each real venue; three of them classic oscillating.
@@ -43,14 +45,11 @@ import Testing
         let races = matrix.seeds.count * matrix.tideStatesDegrees.count
         let fleets = matrix.fleetSizes.count, tiers = TierMix.allCases.count
         // Live, skill gap and cautious in every pairing, fleet size and tier mix; the fun pass in the classic oscillating
-        // pairings only; execution, rivals and rank stability in every pairing but one tier mix each
-        // (`ProfileMix.tierMix`). Rivals and rank stability in fleets of 10 alone (`mixFleetSizes`), so their summaries
-        // pool no other size.
+        // pairings only; rivals and rank stability in every pairing but one tier mix each (`ProfileMix.tierMix`), in
+        // fleets of 10 alone (`mixFleetSizes`), so their summaries pool no other size.
         #expect(matrix.mixFleetSizes == [.rivals: 10, .rankStability: 10])
-        #expect(matrix.cells.count == races * fleets * tiers * (3 * pairings + classicPairings) + races * fleets * pairings
-            + races * pairings * 2)
+        #expect(matrix.cells.count == races * fleets * tiers * (3 * pairings + classicPairings) + races * pairings * 2)
         #expect(Set(matrix.cells.filter { [.rivals, .rankStability].contains($0.profileMix) }.map(\.fleetSize)) == [10])
-        #expect(Set(matrix.cells.filter { $0.profileMix == .execution }.map(\.tierMix)) == [.national])
         #expect(Set(matrix.cells.filter { $0.profileMix == .rankStability }.map(\.tierMix)) == [.mixed])
         #expect(Set(matrix.cells.filter { $0.profileMix == .funPass }.map(\.conditions)) == ["classic-oscillating@7"])
     }

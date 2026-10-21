@@ -54,6 +54,14 @@ public enum ProfileMix: String, Codable, CaseIterable, Hashable, Sendable {
     /// when named (`--profile-mix handling`), never in the bundled matrix; all-National fleets, as `execution`; its races
     /// stay out of the live tiers the thresholds gate and out of the skill gap. `BotSuiteReport.handling` reports it.
     case handling
+    /// Handling against tactics (#426 Q1, #484, ADR 0007's 2×2): the baseline (`clubSteering`: groove-only tactics, Club's
+    /// hand), the handler (`executor`: groove-only tactics, a perfect hand), the tactician (`tacticianClubSteering`: Club's
+    /// hand) and both (`tactician`), `parityProfiles`. In a two-boat race, a round robin: the six pairs, each in both seat
+    /// orders, by `seed % 12` (`parityDeal`), so seeds 1…n with n a multiple of 12 sail every ordered pair n / 12 times
+    /// (`BotMatrix.validate` refuses another count). In a bigger fleet the four by turns, as `handling`. Read Q1 with
+    /// `--profile-mix parity --fleet-size 2`: `BotSuiteReport.parity` reports its two-boat races. Sailed only when named,
+    /// never in the bundled matrix; all-National fleets, as `handling`, out of the live tiers and the skill gap.
+    case parity
 
     /// The profile sailing `seat` in a race of `fleetSize` boats with race seed `seed`, or nil for a live bot. Only the
     /// hunters mix reads the fleet size, but every mix needs it: a seat of the fleet.
@@ -67,11 +75,29 @@ public enum ProfileMix: String, Codable, CaseIterable, Hashable, Sendable {
             ProfileMix.isHunterSeat(seat, seed: seed, fleetSize: fleetSize) ? .hunter : nil
         case .execution: (seat + Int(seed % 2)).isMultiple(of: 2) ? .executor : .tacticianClubExecution
         case .handling: ProfileMix.handlingProfiles[(seat + Int(seed % 4)) % 4]
+        case .parity:
+            ProfileMix.parityProfiles[fleetSize == 2 ? ProfileMix.parityDeal(seed: seed)[seat] : (seat + Int(seed % 4)) % 4]
         }
     }
 
     /// The handling mix's profiles, by turns: perfect and Club hand steering, without tactics and with.
     public static let handlingProfiles: [BotProfile] = [.baseline, .clubSteering, .tactician, .tacticianClubSteering]
+
+    /// The parity mix's profiles, ADR 0007's 2×2: the baseline (0), the handler (H), the tactician (T) and both (HT).
+    public static let parityProfiles: [BotProfile] = [.clubSteering, .executor, .tacticianClubSteering, .tactician]
+
+    /// The parity mix's two-boat deals: each pair of `parityProfiles` once in each seat order.
+    public static let parityDeals = 12
+
+    /// The parity mix's two-boat race on `seed`: indices into `parityProfiles`, seat 0's first. The pairs (0, 1), (0, 2),
+    /// (0, 3), (1, 2), (1, 3), (2, 3) in turn, two seeds each: the pair as written on an even `seed % 12`, the other way
+    /// round on the odd one after it.
+    static func parityDeal(seed: UInt64) -> [Int] {
+        let deal = Int(seed % UInt64(parityDeals))
+        let pairs = [[0, 1], [0, 2], [0, 3], [1, 2], [1, 3], [2, 3]]
+        let pair = pairs[deal / 2]
+        return deal.isMultiple(of: 2) ? pair : pair.reversed()
+    }
 
     /// The seat the cautious bot sails in the cautious mix (#105), or none in another mix.
     public func cautiousSeats(seed: UInt64, fleetSize: Int) -> Set<Int> {
@@ -118,7 +144,7 @@ public enum ProfileMix: String, Codable, CaseIterable, Hashable, Sendable {
     public var gatesLiveTiers: Bool {
         switch self {
         case .live, .skillGap, .funPass, .execution: true
-        case .hunters, .cautious, .rivals, .rankStability, .handling: false
+        case .hunters, .cautious, .rivals, .rankStability, .handling, .parity: false
         }
     }
 
@@ -129,7 +155,7 @@ public enum ProfileMix: String, Codable, CaseIterable, Hashable, Sendable {
     public var tierMix: TierMix? {
         switch self {
         case .live, .skillGap, .funPass, .hunters, .cautious: nil
-        case .execution, .handling: .national
+        case .execution, .handling, .parity: .national
         case .rivals, .rankStability: .mixed
         }
     }
@@ -145,7 +171,7 @@ public enum ProfileMix: String, Codable, CaseIterable, Hashable, Sendable {
     /// The fun pass's numbers (#221) are for an oscillating breeze: a matrix sails it in no other conditions.
     public var conditionsID: String? {
         switch self {
-        case .live, .skillGap, .hunters, .execution, .cautious, .rivals, .rankStability, .handling: nil
+        case .live, .skillGap, .hunters, .execution, .cautious, .rivals, .rankStability, .handling, .parity: nil
         case .funPass: "classic-oscillating"
         }
     }
@@ -398,6 +424,27 @@ public struct BotMatrix: Codable, Hashable, Sendable {
             if let size = fleetSizes.filter({ sails(.handling, inFleetOf: $0) }).min(), size < needed {
                 throw BotSuiteError.matrix("handling deals \(needed) profiles, so it needs fleets of at least \(needed); the matrix sails it in a fleet of \(size)")
             }
+        }
+        if profileMixes.contains(.parity) { try validateParity() }
+    }
+
+    /// The parity mix (#484) measures hand steering against tactics, so it needs hand steering as `handling` does. Its
+    /// two-boat races deal the 12 ordered pairs by `seed % 12`, so seeds that miss some deals or repeat some more often
+    /// would weigh the pairs unevenly: refused. A bigger fleet deals the four by turns, so needs at least four boats.
+    private func validateParity() throws {
+        guard handSteers else {
+            throw BotSuiteError.matrix("parity measures hand steering, which shows only with autohelmOff (--autohelm off)")
+        }
+        let sizes = fleetSizes.filter { sails(.parity, inFleetOf: $0) }
+        let needed = ProfileMix.parityProfiles.count
+        if let size = sizes.first(where: { $0 != 2 && $0 < needed }) {
+            throw BotSuiteError.matrix("parity sails two boats, or deals \(needed) profiles by turns in fleets of at least \(needed); the matrix sails it in a fleet of \(size)")
+        }
+        let deals = ProfileMix.parityDeals
+        let perDeal = Dictionary(grouping: seeds) { $0 % UInt64(deals) }.mapValues(\.count)
+        if sizes.contains(2), perDeal.count < deals || Set(perDeal.values).count > 1 {
+            throw BotSuiteError.matrix("parity deals \(deals) ordered pairs by seed % \(deals), so its two-boat races need "
+                + "every deal as often: \(seeds.count) seeds don't (with --seeds, a multiple of \(deals), e.g. 384)")
         }
     }
 

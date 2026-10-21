@@ -150,7 +150,7 @@ A seat a bot sails for herself: a fleet-fill seat, or a seat whose player left f
 _Avoid_: replacement, substitute
 
 **Executor**:
-A bot-suite profile only: perfect handling with groove-only tactics (#426): the top handling draw, h = 1 (the best hand tack and gybe, no botch, [#459](https://github.com/reederphill/mobile-regatta/issues/459)) and no hand-steering error (ADR 0011). On an older class with a roll tack she hits every roll. #426's parity between handling and tactics is read against her: the `execution` mix races her against the tactician at Club's tacks and gybes, and the parity band is each winning 0.4–0.6 of the races.
+A bot-suite profile only: perfect handling with groove-only tactics (#426): the top handling draw, h = 1 (the best hand tack and gybe, no botch, [#459](https://github.com/reederphill/mobile-regatta/issues/459)) and no hand-steering error (ADR 0011). On an older class with a roll tack she hits every roll. On a class without a roll tack she sails as the baseline does. #426's parity between handling and tactics is read against her: the `parity` mix races her, the handler of ADR 0007's 2×2, against the tactician with Club handling (`tacticianClubSteering`) in two-boat races ([#484](https://github.com/reederphill/mobile-regatta/issues/484)), and the parity band is each winning 0.4–0.6 of the races.
 _Avoid_: perfect bot
 
 **Watchdog**:
