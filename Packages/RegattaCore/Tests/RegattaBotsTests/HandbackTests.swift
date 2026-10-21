@@ -28,9 +28,11 @@ import RegattaCore
     ///   tick after they send it.
     @Test(.onFiveRules) func handbackKeepsPenaltyProgressAndAutohelmTarget() throws {
         var penaltyHandbacks = 0, autohelmHandbacks = 0
-        for seed: UInt64 in 1...16 {
+        // #276 PR 2: the live bots' late end read moves the fleet's tracks, and seeds 1…16 left 5 mid-penalty scenes; the
+        // mid-penalty seeds run on to 21 (the first range holding 6), the autohelm's stay 1…16.
+        for seed: UInt64 in 1...21 {
             if try Self.penaltyHandback(seed: seed) { penaltyHandbacks += 1 }
-            if try Self.autohelmHandback(seed: seed) { autohelmHandbacks += 1 }
+            if seed <= 16, try Self.autohelmHandback(seed: seed) { autohelmHandbacks += 1 }
         }
         #expect(penaltyHandbacks >= 6, "\(penaltyHandbacks) mid-penalty handbacks")
         #expect(autohelmHandbacks == 16)

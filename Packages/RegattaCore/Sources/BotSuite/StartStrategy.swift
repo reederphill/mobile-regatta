@@ -180,6 +180,13 @@ public struct StartStrategySummary: Codable, Hashable, Sendable {
     public var middleThirdCalls: Int
     public var committeeThirdCalls: Int
     public var approaches: [ApproachRow]
+    /// The start strategies live bots sailed at the gun (#276, `SeatMetrics.startStrategy`), as the approach rows are
+    /// read; nil when no seat had one. `kind` is the strategy's name.
+    public var strategies: [ApproachRow]?
+    /// Re-choices a live bot's seat, her plan's trigger failed.
+    public var strategySwitchesPerSeat: Double?
+    /// The late end read's delivery (#276 PR 2), pinward and committee-ward: nil when no starter read the end late.
+    public var delivery: [DeliveryRow]?
     public var predictability: [PredictabilityRow]
 
     /// Median, p10 and p90, each the nearest-rank sample (`startplan.py`'s `q`).
@@ -221,6 +228,17 @@ public struct StartStrategySummary: Codable, Hashable, Sendable {
         public var overAtGunShare: Double
         public var callsPerSeat: Double
         public var speedAtGunMedian: Double?
+    }
+
+    /// The starters whose late end read (`SeatMetrics.lateEndShiftAsked`) asked their spot one way along the line: the
+    /// shift asked and the shift delivered (start spot less her style's spot, `lateEndStyleSpot`), mean shares of the
+    /// line, and the delivery ratio, delivered over asked, pooled.
+    public struct DeliveryRow: Codable, Hashable, Sendable {
+        public var way: String
+        public var starters: Int
+        public var askedMean: Double
+        public var deliveredMean: Double
+        public var ratio: Double
     }
 
     /// One conditions file's races: of those with |bias at the gun| ≥ `readableBiasDegrees`, the share whose favoured
@@ -308,6 +326,39 @@ public struct StartStrategySummary: Codable, Hashable, Sendable {
                 speedAtGunMedian: speeds.isEmpty ? nil : nearestRank(speeds.sorted(), 0.5))
         }
 
+        let chose = watched.flatMap(\.seats).filter { $0.startStrategy != nil }
+        if chose.isEmpty {
+            strategies = nil
+            strategySwitchesPerSeat = nil
+        } else {
+            strategies = Set(chose.compactMap(\.startStrategy)).sorted().map { name in
+                let seats = chose.filter { $0.startStrategy == name }
+                let speeds = seats.filter(isOnTime).compactMap(\.speedAtGunShare).filter { !$0.isNaN }
+                return ApproachRow(
+                    kind: name, seats: seats.count, share: share(seats.count, of: chose.count),
+                    onTimeShare: share(seats.filter(isOnTime).count, of: seats.count),
+                    meanStartSeconds: seats.reduce(0) { $0 + min($1.startSeconds ?? 99, 60) } / Double(seats.count),
+                    overAtGunShare: share(seats.filter { $0.overLineAtGun == true }.count, of: seats.count),
+                    callsPerSeat: Double(seats.reduce(0) { $0 + ($1.preGunCalls ?? 0) }) / Double(seats.count),
+                    speedAtGunMedian: speeds.isEmpty ? nil : nearestRank(speeds.sorted(), 0.5))
+            }
+            strategySwitchesPerSeat = Double(chose.reduce(0) { $0 + ($1.startStrategySwitches ?? 0) }) / Double(chose.count)
+        }
+
+        let reads = watched.flatMap(\.seats).filter { started($0) && $0.lateEndStyleSpot != nil && ($0.lateEndShiftAsked ?? 0) != 0 }
+        if reads.isEmpty {
+            delivery = nil
+        } else {
+            delivery = [("pinward", -1.0), ("committee-ward", 1.0)].map { way, sign in
+                let seats = reads.filter { ($0.lateEndShiftAsked ?? 0) * sign > 0 }
+                let asked = seats.reduce(0) { $0 + ($1.lateEndShiftAsked ?? 0) }
+                let delivered = seats.reduce(0) { $0 + ($1.startLineSpot ?? 0) - ($1.lateEndStyleSpot ?? 0) }
+                let n = Double(max(seats.count, 1))
+                return DeliveryRow(way: way, starters: seats.count, askedMean: asked / n, deliveredMean: delivered / n,
+                                   ratio: asked == 0 ? 0 : delivered / asked)
+            }
+        }
+
         predictability = Set(watched.map(\.cell.conditions)).sorted().map { conditions in
             let races = watched.filter { $0.cell.conditions == conditions }
             let readable = races.filter { abs($0.lineBiasAtGunDegrees ?? 0) >= Self.readableBiasDegrees }
@@ -350,6 +401,23 @@ public struct StartStrategySummary: Codable, Hashable, Sendable {
                 [ApproachKind(rawValue: $0.kind)?.label ?? $0.kind, "\($0.seats)", fixed($0.share, 3), fixed($0.onTimeShare, 3),
                  fixed($0.meanStartSeconds, 2), fixed($0.overAtGunShare, 3), fixed($0.callsPerSeat, 3), text($0.speedAtGunMedian, 2)]
             })
+        if let strategies {
+            lines.append("start strategies chosen, live bots at the gun (\(strategies.reduce(0) { $0 + $1.seats }) seats; "
+                + "re-chosen \(text(strategySwitchesPerSeat, 3)) a seat): share, on time, mean start s, over at the gun, pre-gun "
+                + "calls a seat, on-time starters' speed at the gun of close-hauled (median)")
+            lines += table([["strategy", "seats", "share", "on time", "mean start s", "over at gun", "calls/seat", "speed at gun"]]
+                + strategies.map {
+                    [$0.kind, "\($0.seats)", fixed($0.share, 3), fixed($0.onTimeShare, 3), fixed($0.meanStartSeconds, 2),
+                     fixed($0.overAtGunShare, 3), fixed($0.callsPerSeat, 3), text($0.speedAtGunMedian, 2)]
+                })
+        }
+        if let delivery {
+            lines.append("late end read, starters by the way the bias asked their spot: shift asked and delivered (start spot "
+                + "less her style's), mean share of the line, and the delivery ratio (delivered / asked, pooled)")
+            lines += table([["asked", "starters", "asked", "delivered", "ratio"]] + delivery.map {
+                [$0.way, "\($0.starters)", fixed($0.askedMean, 3), fixed($0.deliveredMean, 3), fixed($0.ratio, 3)]
+            })
+        }
         lines.append("bias predictability: of the races with |bias at the gun| >= \(fixed(Self.readableBiasDegrees, 0)) deg, the "
             + "share whose favoured end some seconds before the gun is the gun's; the bias's swing over the last "
             + "\(StartStrategyTally.windowSeconds) s, median of all races, deg")

@@ -429,6 +429,8 @@ extension BotBrain {
         let b = view.own
         plannedTack = b.tack
         lastTackTime = view.time
+        // #276: a takeover chooses her start strategy fresh, from what the seat sees.
+        startStrategy = nil
         if b.autohelm?.isTapping == true {
             lastTapTime = view.time
             senses.tacking = b.twa < .pi / 2

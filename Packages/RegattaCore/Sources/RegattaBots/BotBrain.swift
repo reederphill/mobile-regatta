@@ -31,9 +31,18 @@ public struct BotStyle: Hashable, Sendable {
     public var engagement: Double
     /// −1…1: which way, and how far, she misreads the start line's bias (`BotWeaknesses.lineBiasMisread`).
     public var lineBiasDraw: Double
+    /// −1…1 each: how much she likes each named start strategy over the plain hold (#276), her style's say in the
+    /// chooser beside the situation's once there is more than one strategy (PR 3). No named personalities (#102): each
+    /// is its own draw. Drawn now, read by nothing yet.
+    public var boatEndDraw: Double
+    public var outAndInReachingDraw: Double
+    public var vanderbiltDraw: Double
+    public var portApproachDraw: Double
 
     public init(skill: Double, startSpot: Double, finishSpot: Double, timingSlack: Double, penaltyDirection: Double,
-                favouredSide: Double = 0, tackWillingness: Double = 0.5, engagement: Double = 0.5, lineBiasDraw: Double = 0) {
+                favouredSide: Double = 0, tackWillingness: Double = 0.5, engagement: Double = 0.5, lineBiasDraw: Double = 0,
+                boatEndDraw: Double = 0, outAndInReachingDraw: Double = 0, vanderbiltDraw: Double = 0,
+                portApproachDraw: Double = 0) {
         self.skill = skill
         self.startSpot = startSpot
         self.finishSpot = finishSpot
@@ -43,6 +52,10 @@ public struct BotStyle: Hashable, Sendable {
         self.tackWillingness = tackWillingness
         self.engagement = engagement
         self.lineBiasDraw = lineBiasDraw
+        self.boatEndDraw = boatEndDraw
+        self.outAndInReachingDraw = outAndInReachingDraw
+        self.vanderbiltDraw = vanderbiltDraw
+        self.portApproachDraw = portApproachDraw
     }
 
     /// A style drawn from `rng` (the bot's own seed), sailing at `skill`.
@@ -61,6 +74,11 @@ public struct BotStyle: Hashable, Sendable {
         tackWillingness = rng.unit()
         engagement = rng.unit()
         lineBiasDraw = rng.range(-1, 1)
+        // #276: appended, so every draw above keeps its place.
+        boatEndDraw = rng.range(-1, 1)
+        outAndInReachingDraw = rng.range(-1, 1)
+        vanderbiltDraw = rng.range(-1, 1)
+        portApproachDraw = rng.range(-1, 1)
     }
 }
 
@@ -130,6 +148,21 @@ struct BotBrain: Sendable {
     /// The tactician's spot on the start line as she reads its bias (#105, `Tactics.startsAtFavouredEnd`, `readLineBias`),
     /// 0 the pin … 1 the committee boat; nil until she has read it, or for any other bot.
     var favouredEndSpot: Double?
+    /// A live bot's spot on the start line as she reads its favoured end late (#276, `readEndLate`), 0 the pin … 1 the
+    /// committee boat; nil until she has read it, and for the tactician (`favouredEndSpot`) or any other bot.
+    var lateEndSpot: Double?
+    /// The late read's last ask (#276, `readEndLate`): her style's spot then, and the shift along the line, a share of it,
+    /// that the bias asked for before her reach capped it. Report-only (the suite's delivery ratio).
+    var lateEndAsk: (styleSpot: Double, shift: Double)?
+    /// Her start strategy (#276, `chooseStartStrategy`), remembered from her choice: nil before she has chosen, and
+    /// after a takeover (`adopt`), which chooses fresh.
+    var startStrategy: StartChoice?
+    /// The times she has chosen her start strategy again since she first chose it, her plan's trigger failed (the
+    /// suite's count).
+    var startStrategySwitches = 0
+    /// Whether she is a live bot: neither a bot-suite profile nor the cautious bot (#276). Only a live bot chooses a start
+    /// strategy and reads the end late; the others sail `starboardHoldAim` as they always have.
+    let isLive: Bool
     var lastTackTime = -1_000.0
     /// The fleet tactic (#234) that last turned her plan to the other tack (`upwindTack`), and when: her tap then is
     /// that play's (`BotDecision.play`, for the suite's count, #337).
@@ -302,6 +335,7 @@ struct BotBrain: Sendable {
          weaknesses: BotWeaknesses? = nil, caution: Caution? = nil) {
         self.style = style
         self.caution = caution
+        isLive = profile == nil && caution == nil
         self.weaknesses = weaknesses ?? profile?.weaknesses(skill: style.skill)
             ?? BotWeaknesses(skill: style.skill, handling: handling)
         tactics = Tactics(profile: profile, skill: style.skill, style: style, weaknesses: self.weaknesses)
@@ -378,6 +412,8 @@ struct BotBrain: Sendable {
             takingOver = false
             adopt(view)
         }
+        // #276: a live bot chooses her start strategy at her first decision from T−45, whatever this one sails.
+        if isLive { chooseStartStrategy(boat, view) }
         // Her latched side is the scorer's of this decision only if it makes one, and on the tack it was latched on.
         if keepClearLatchTack != boat.tack { keepClearLatch = nil }
         var scorerDecided = false
