@@ -191,6 +191,7 @@ struct RaceView: View {
                 BoatSpeedProbe(session: session)
                 CueProbe(session: session)
                 PaceProbe(session: session)
+                ResultsDelayProbe(session: session)
                 RaceStatusProbe(hud: session.hud)
             }
 

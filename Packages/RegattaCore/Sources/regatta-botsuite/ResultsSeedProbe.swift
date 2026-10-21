@@ -7,16 +7,18 @@ import RegattaCore
 
 enum ResultsSeedProbe {
     static let usage = """
-        usage: regatta-botsuite results-seed [--from <n>] [--to <n>] [--laps <n>] [--opponents <n>] [--min-gap-ticks <n>]
+        usage: regatta-botsuite results-seed [--from <n>] [--to <n>] [--laps <n>] [--opponents <n>] [--start-seconds <n>]
+                                             [--min-gap-ticks <n>]
           The first race seed in from...to (default 1...400) on which the app's `-demo` race (`RaceConfig.launch()`
-          with `-seed` and `-laps`: you and the opponents (default 7), a 60 s sequence, laps (default 1), the bundled
-          files, the wind seed pinned to the seed, a bot sailing your boat) has your boat finish at least
-          min-gap-ticks (default 1680: 14 s of wall-clock time at -timescale 4, 30 ticks/s × 4) before the race closes.
+          with `-seed`, `-laps` and `-startSeconds`: you and the opponents (default 7), a start-seconds sequence
+          (default 60), laps (default 1), the bundled files, the wind seed pinned to the seed, a bot sailing your boat)
+          has your boat finish at least min-gap-ticks (default 1680: 14 s of wall-clock time at -timescale 4, 30 ticks/s
+          × 4) before the race closes. Ticks count from the gun.
           Prints `seed <n> finish <tick> close <tick>`; exits 1 when no seed in the range does, 2 on a usage error.
         """
 
     static func main(arguments: [String]) -> Int32 {
-        var options = (from: UInt64(1), to: UInt64(400), laps: 1, opponents: 7, minGap: 1680)
+        var options = (from: UInt64(1), to: UInt64(400), laps: 1, opponents: 7, startSeconds: 60, minGap: 1680)
         var rest = arguments[...]
         while let flag = rest.popFirst() {
             guard let text = rest.popFirst(), let value = Int(text), value >= 0 else {
@@ -28,6 +30,7 @@ enum ResultsSeedProbe {
             case "--to": options.to = UInt64(value)
             case "--laps": options.laps = value
             case "--opponents": options.opponents = value
+            case "--start-seconds": options.startSeconds = value
             case "--min-gap-ticks": options.minGap = value
             default:
                 FileHandle.standardError.write(Data("results-seed: unknown option \(flag)\n\(usage)\n".utf8))
@@ -38,13 +41,15 @@ enum ResultsSeedProbe {
             FileHandle.standardError.write(Data("results-seed: --from is after --to\n".utf8))
             return 2
         }
-        guard options.laps >= 1, RaceSetup.fleetSizes.contains(options.opponents + 1) else {
+        guard options.laps >= 1, RaceSetup.fleetSizes.contains(options.opponents + 1),
+              (1...60).contains(options.startSeconds) else {
             FileHandle.standardError.write(Data(
-                "results-seed: --laps must be at least 1 and --opponents in \(RaceSetup.fleetSizes.lowerBound - 1)...\(RaceSetup.fleetSizes.upperBound - 1)\n\(usage)\n".utf8))
+                "results-seed: --laps must be at least 1, --opponents in \(RaceSetup.fleetSizes.lowerBound - 1)...\(RaceSetup.fleetSizes.upperBound - 1) and --start-seconds in 1...60 (the app's -startSeconds)\n\(usage)\n".utf8))
             return 2
         }
         for seed in options.from...options.to {
-            guard let (finish, close) = sail(seed: seed, laps: options.laps, opponents: options.opponents) else { continue }
+            guard let (finish, close) = sail(seed: seed, laps: options.laps, opponents: options.opponents,
+                                             startSeconds: options.startSeconds) else { continue }
             if close - finish >= options.minGap {
                 print("seed \(seed) finish \(finish) close \(close)")
                 return 0
@@ -56,10 +61,10 @@ enum ResultsSeedProbe {
         return 1
     }
 
-    /// The app's `-demo -seed <seed> -laps <laps>` race sailed headless to its close: your boat's finish tick and the
-    /// close's, or nil when she didn't finish.
-    static func sail(seed: UInt64, laps: Int, opponents: Int) -> (finish: Int, close: Int)? {
-        let (race, demo) = demoRace(seed: seed, laps: laps, opponents: opponents)
+    /// The app's `-demo -seed <seed> -laps <laps> -startSeconds <startSeconds>` race sailed headless to its close: your
+    /// boat's finish tick and the close's, or nil when she didn't finish.
+    static func sail(seed: UInt64, laps: Int, opponents: Int, startSeconds: Int = 60) -> (finish: Int, close: Int)? {
+        let (race, demo) = demoRace(seed: seed, laps: laps, opponents: opponents, startSeconds: startSeconds)
         var controllers = demo
         var finish: Int?
         while !race.isOver {
@@ -70,11 +75,11 @@ enum ResultsSeedProbe {
         return finish.map { ($0, race.tick) }
     }
 
-    /// The app's `-demo -seed <seed> -laps <laps>` race at its first tick, and its controllers. Mirrors
-    /// `RaceConfig.setup`, `.seatControllers` and `.windSeed(pinnedTo:)`.
-    static func demoRace(seed: UInt64, laps: Int, opponents: Int) -> (Race, SeatControllers) {
+    /// The app's `-demo -seed <seed> -laps <laps> -startSeconds <startSeconds>` race at its first tick, and its
+    /// controllers. Mirrors `RaceConfig.setup`, `.seatControllers` and `.windSeed(pinnedTo:)`.
+    static func demoRace(seed: UInt64, laps: Int, opponents: Int, startSeconds: Int = 60) -> (Race, SeatControllers) {
         let setup = try! RaceSetup(raceSeed: RaceSeed(seed), seats: [.human] + Array(repeating: .bot, count: opponents),
-                                   laps: laps, startSequenceTicks: 60 * Race.tickRate)
+                                   laps: laps, startSequenceTicks: startSeconds * Race.tickRate)
         var wind = SplitMix64(seed: seed ^ 0x5749_4E44_5345_4544) // "WINDSEED", as RaceConfig.windSeed(pinnedTo:)
         let race = Race(setup: setup, windSeed: WindSeed(wind.next()))
         var controllers = SeatControllers(setup: setup)

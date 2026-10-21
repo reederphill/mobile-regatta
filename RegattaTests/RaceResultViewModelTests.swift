@@ -188,6 +188,31 @@ import RegattaCore
         #expect(session.showsResults)
     }
 
+    /// The app measures the sheet's delay itself, in wall-clock and race seconds from your finish horn (#572): UI tests
+    /// read it (`race-results-delay`), as a slow simulator's race runs slower than its timescale.
+    @Test func sheetDelayIsMeasuredInBothClocks() throws {
+        let session = GameSession(config: PracticeSetup().config(seed: 1, windSeed: 1))
+        var clock = Date(timeIntervalSinceReferenceDate: 0)
+        session.now = { clock }
+        let me = session.driver.myBoatIndex
+        let finish = session.driver.currentFrame.time
+        session.consume([RaceEvent(tick: session.driver.currentFrame.tick, kind: .finished(seat: me, place: 1))])
+        #expect(session.resultsDelayShown == nil)
+        session.driver.tick(2)
+        clock += GameSession.resultsDelay
+        session.refreshHUD()
+        #expect(session.showsResults)
+        let delay = try #require(session.resultsDelayShown)
+        #expect(delay.wallSeconds == GameSession.resultsDelay)
+        #expect(delay.raceSeconds > 1.9 && abs(delay.raceSeconds - (session.driver.currentFrame.time - finish)) < 1e-9,
+                "\(delay.raceSeconds) race seconds")
+        // The close after it changes nothing: the delay is the sheet's first showing.
+        session.driver.tick(1)
+        clock += 5
+        session.consume([RaceEvent(tick: session.driver.currentFrame.tick, kind: .raceClosed(results: .empty))])
+        #expect(session.resultsDelayShown?.wallSeconds == GameSession.resultsDelay)
+    }
+
     /// Your DSQ, or the race closing with you still racing, shows the results at once.
     @Test func sheetShowsAtOnceOnYourDSQOrTheClose() {
         let dsq = GameSession(config: PracticeSetup().config(seed: 1, windSeed: 1))
