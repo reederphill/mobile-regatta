@@ -10,8 +10,8 @@ import RegattaCore
 //   (`BotBrain.turnHandling`): a poor helm is slower to notice she is off, and luffs too little or too much at first.
 //   Bearing away the moment the hull lifts she would drop straight off again: slow, with the wind coming aft.
 // - "Keep the wind in her sails": on the plane she sails no deeper than leaves her the apparent wind she planes on,
-//   with a margin. For most bots that is the wind her groove reads; one who reads the lulls (`Tactics.heatsUpInLulls`)
-//   heads up as the wind drops, before she falls rather than after.
+//   with a margin. For most bots that is the wind her groove reads; one who reads the lulls (`BotBrain.heatsUpInLulls`,
+//   a good hand's, not a tactic: #484) heads up as the wind drops, before she falls rather than after.
 // - "Build speed before she bears away": slow for her angle (round the windward mark, out of a turn) she comes down
 //   only as she gathers speed, the apparent wind kept forward.
 // - "Bear away gently": planing, she bears away with no more rudder than she gybes with.
@@ -267,7 +267,7 @@ extension BotBrain {
         guard PlaningTable.keepsTheFloor, let planing = view.boatClass.planing else { return aim }
         let polar = view.boatClass.polar
         let now = b.polarWindSpeed
-        let reads = tactics.heatsUpInLulls && b.speedShadow >= 1
+        let reads = heatsUpInLulls && b.speedShadow >= 1
         let tws = reads ? now : senses.grooveWind ?? now
         let share = planing.stayOnSpeedShare.map {
             $0 + HandTackTable.ramp(turnHandling, PlaningTable.speedMargin, PlaningTable.noticeHandling)

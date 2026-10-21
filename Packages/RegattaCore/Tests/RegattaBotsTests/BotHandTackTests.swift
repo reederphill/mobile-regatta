@@ -88,11 +88,14 @@ import Testing
     /// - #455 PR 3 (a steady helm standing on, and steady off a mark or along a lane towards a boat keeping clear of
     ///   her, her keeping clear reshaped by a mark or the edge never capped; the scorer's bear-away past dead downwind
     ///   kept a bear-away): both.
+    /// - #484 PR 2 (heating up in a lull is her handling's, not a tactic: a live bot reads the lulls from her handling
+    ///   draw, not her place in National's skill band): the long, where a bot whose hand and skill sit on different
+    ///   sides of the switch now reads the lulls otherwise on the run; the short kept its digest.
     @Test(.onSixRules) func skiffEightBotsAreBitIdentical() throws {
         let short = try Self.digest(seed: 459, boatClass: Self.skiffEight)
         let long = try Self.digest(seed: 462, boatClass: Self.skiffEight, seconds: 700)
         #expect(hex64(short) == "0x0ebe49c09e219dc6")
-        #expect(hex64(long) == "0xccc060adafe27241")
+        #expect(hex64(long) == "0xf543ce361b6c0c91")
     }
 
     // MARK: - skiff@8: tacks and gybes by hand
@@ -219,7 +222,7 @@ import Testing
         var helm = BotHelm()
 
         /// A skill-1 groove-only bot (the baseline, no weaknesses) that tacks or gybes only when told (`plannedTack`),
-        /// turning by hand at `handling`.
+        /// turning by hand at `handling`, and reading the lulls as that hand does (#484).
         init(seat: Int, race: Race, handling: Double, seed: UInt64 = 1) {
             self.seat = seat
             brain = BotBrain(style: BotConductTests.skill1, profile: .baseline, seed: seed)
@@ -227,6 +230,7 @@ import Testing
             brain.tactics.downwindShiftThreshold = nil
             brain.tactics.corridor = 100
             brain.turnHandling = handling
+            brain.heatsUpInLulls = BotBrain.readsTheLulls(handling: handling)
             brain.plannedTack = race.boats[seat].tack
             // She gybes onto no layline of her own accord: only when told.
             brain.laylineError = (race.boats[seat].legIndex, .pi / 3)
