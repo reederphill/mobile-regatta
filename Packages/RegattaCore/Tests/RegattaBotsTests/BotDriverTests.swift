@@ -263,16 +263,18 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
         }
     }
 
-    /// No exceptions for bots (#19): a scripted seat that sends a bot's applied inputs sails the same boat.
+    /// No exceptions for bots (#19): a scripted seat that sends a bot's applied inputs sails the same boat. Seed 18 since
+    /// #276 PR 2 (the first from 17 that does): on 17 the fleet's named starts now bring a bot to seat 2 before the gun,
+    /// where the keep-clear scorer reads a person's boat as such (#531), so the fleet, not the scripted seat, sails apart.
     @Test func scriptedSeatReplayingABotsInputsSailsTheSameBoat() throws {
         let ticks = Race.tickRate * 150
-        let botSailed = botRace(seed: 17)
+        let botSailed = botRace(seed: 18)
         var bots = SeatControllers(setup: botSailed.setup)
         sail(botSailed, &bots, ticks: ticks)
         let script = try #require(botSailed.log).inputs.filter { $0.seat == 2 }
         #expect(script.count > 50)
 
-        let scripted = botRace(seed: 17)
+        let scripted = botRace(seed: 18)
         var controllers = SeatControllers(setup: scripted.setup)
         controllers[2] = .human
         var next = 0

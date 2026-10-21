@@ -199,6 +199,11 @@ public enum BotRaceHarness {
                 metrics.preGunHeldOffTackSeconds = Double(driver.preGunHeldOffTackDecisions * BotDriver.decisionInterval)
                     / Double(Race.tickRate)
                 metrics.preGunHeldOffTackCalls = heldOffTackCalls[seat]
+                // #276: the start strategy she sailed at the gun (report-only; a live bot's).
+                if let strategy = driver.startStrategyAtGun {
+                    metrics.startStrategy = strategy
+                    metrics.startStrategySwitches = driver.startStrategySwitches
+                }
                 if profiles[seat] == nil, !cautiousSeats.contains(seat) { metrics.engagement = driver.style.engagement }
                 metrics.handling = driver.handling
             }

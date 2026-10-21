@@ -141,6 +141,12 @@ _Avoid_: easy bot, autopilot
 A dropped player's boat while the cautious bot sails it ([#150](https://github.com/reederphill/mobile-regatta/issues/150)): from the end of the input hold (half a second after her last input, a second if she never sent one) until she is back or the race closes. Not a bot seat: her name, no bot glyph, only the disconnected mark on the roster, gone the moment she is back. Still gone at the close with the boat not home, she is RET. A finish the bot sailed while she was gone counts for her rating at its place if she dropped less than a minute before it, otherwise she is rated as retired; either way it is not a completed race, not a win and not the lobby's "won" line. A finish she sailed herself, before dropping or after coming back, is hers in full.
 _Avoid_: bot seat, replacement, AFK boat
 
+**Start strategy**:
+How a live bot means to start ([#276](https://github.com/reederphill/mobile-regatta/issues/276)): chosen once from 45 s before the gun from the situation and her style, remembered, and dropped only on a named abort (`BotBrain+StartStrategy`). Whatever her strategy, from 15 s before the gun she reads which end of the line is favoured and moves her spot towards it as far as she can still reach. Internal: nothing shows a player which strategy a bot sails, and no bot sails one to be seen. Bot-suite profiles and the cautious bot sail **starboard hold** only.
+- **Starboard hold** (`starboardHold`): today's start: set up below and to the right of her spot, hold with Ease along the line towards it, sheet in and go on her reckoning. The fallback.
+- **Boat end** (`boatEnd`): her end is the committee boat's and its front row has room; she sets up below the committee boat by 20 s before the gun, hovers with Ease at her hold angle, and goes on her reckoning.
+_Avoid_: telegraph (a bot's strategy is never shown), personality
+
 **Fleet fill**:
 The bots that bring an online fleet up to 10 boats at fleet lock. Each is rated at the fleet's median human rating, give or take 150, and sails at the skill the versioned rating map (`bot-ratings@n.json`) gives that rating ([#149](https://github.com/reederphill/mobile-regatta/issues/149)). She has a sailing name and a free starter livery from her seat's seed, no rating on show, and never appears in the lobby.
 _Avoid_: filler, AI opponents

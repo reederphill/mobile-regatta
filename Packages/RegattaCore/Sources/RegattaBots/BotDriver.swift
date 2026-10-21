@@ -78,6 +78,11 @@ public struct BotDriver: Sendable {
     /// (held off her tack: too slow to tack, or boats in the way), and whether her last decision was one
     /// (`heldOffTack`, which the suite joins with the rule 10 calls on her).
     public private(set) var preGunHeldOffTackDecisions = 0
+    /// The start strategy she was sailing at her last decision before the gun (#276, `BotBrain.startStrategy`), by its
+    /// name; nil for a bot that never chose one (a profile, the cautious bot). Report-only.
+    public private(set) var startStrategyAtGun: String?
+    /// The times a named abort re-chose her start strategy (#276). Report-only.
+    public var startStrategySwitches: Int { brain.startStrategySwitches }
     public private(set) var heldOffTack = false
 
     private(set) var brain: BotBrain
@@ -188,6 +193,7 @@ public struct BotDriver: Sendable {
         if let avoidance = decision.avoidance, view.own.status == .prestart, view.time < 0 { notePreGun(avoidance, view) }
         heldOffTack = brain.planWantsStarboardOnPort && decision.tap == nil && brain.handTurn == nil
         if heldOffTack { preGunHeldOffTackDecisions += 1 }
+        if view.time < 0, view.own.status == .prestart { startStrategyAtGun = brain.startStrategy?.plan.rawValue }
         let next = race.tick + 1
         race.apply(decision.input, seat: seat, atTick: next)
         if let tap = decision.tap { race.tap(tap, seat: seat, atTick: next) }

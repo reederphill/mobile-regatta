@@ -180,6 +180,11 @@ public struct StartStrategySummary: Codable, Hashable, Sendable {
     public var middleThirdCalls: Int
     public var committeeThirdCalls: Int
     public var approaches: [ApproachRow]
+    /// The start strategies live bots sailed at the gun (#276, `SeatMetrics.startStrategy`), as the approach rows are
+    /// read; nil when no seat had one. `kind` is the strategy's name.
+    public var strategies: [ApproachRow]?
+    /// Re-choices by a named abort, a live bot's seat.
+    public var strategySwitchesPerSeat: Double?
     public var predictability: [PredictabilityRow]
 
     /// Median, p10 and p90, each the nearest-rank sample (`startplan.py`'s `q`).
@@ -308,6 +313,25 @@ public struct StartStrategySummary: Codable, Hashable, Sendable {
                 speedAtGunMedian: speeds.isEmpty ? nil : nearestRank(speeds.sorted(), 0.5))
         }
 
+        let chose = watched.flatMap(\.seats).filter { $0.startStrategy != nil }
+        if chose.isEmpty {
+            strategies = nil
+            strategySwitchesPerSeat = nil
+        } else {
+            strategies = Set(chose.compactMap(\.startStrategy)).sorted().map { name in
+                let seats = chose.filter { $0.startStrategy == name }
+                let speeds = seats.filter(isOnTime).compactMap(\.speedAtGunShare).filter { !$0.isNaN }
+                return ApproachRow(
+                    kind: name, seats: seats.count, share: share(seats.count, of: chose.count),
+                    onTimeShare: share(seats.filter(isOnTime).count, of: seats.count),
+                    meanStartSeconds: seats.reduce(0) { $0 + min($1.startSeconds ?? 99, 60) } / Double(seats.count),
+                    overAtGunShare: share(seats.filter { $0.overLineAtGun == true }.count, of: seats.count),
+                    callsPerSeat: Double(seats.reduce(0) { $0 + ($1.preGunCalls ?? 0) }) / Double(seats.count),
+                    speedAtGunMedian: speeds.isEmpty ? nil : nearestRank(speeds.sorted(), 0.5))
+            }
+            strategySwitchesPerSeat = Double(chose.reduce(0) { $0 + ($1.startStrategySwitches ?? 0) }) / Double(chose.count)
+        }
+
         predictability = Set(watched.map(\.cell.conditions)).sorted().map { conditions in
             let races = watched.filter { $0.cell.conditions == conditions }
             let readable = races.filter { abs($0.lineBiasAtGunDegrees ?? 0) >= Self.readableBiasDegrees }
@@ -350,6 +374,16 @@ public struct StartStrategySummary: Codable, Hashable, Sendable {
                 [ApproachKind(rawValue: $0.kind)?.label ?? $0.kind, "\($0.seats)", fixed($0.share, 3), fixed($0.onTimeShare, 3),
                  fixed($0.meanStartSeconds, 2), fixed($0.overAtGunShare, 3), fixed($0.callsPerSeat, 3), text($0.speedAtGunMedian, 2)]
             })
+        if let strategies {
+            lines.append("start strategies chosen, live bots at the gun (\(strategies.reduce(0) { $0 + $1.seats }) seats; "
+                + "re-chosen \(text(strategySwitchesPerSeat, 3)) a seat): share, on time, mean start s, over at the gun, pre-gun "
+                + "calls a seat, on-time starters' speed at the gun of close-hauled (median)")
+            lines += table([["strategy", "seats", "share", "on time", "mean start s", "over at gun", "calls/seat", "speed at gun"]]
+                + strategies.map {
+                    [$0.kind, "\($0.seats)", fixed($0.share, 3), fixed($0.onTimeShare, 3), fixed($0.meanStartSeconds, 2),
+                     fixed($0.overAtGunShare, 3), fixed($0.callsPerSeat, 3), text($0.speedAtGunMedian, 2)]
+                })
+        }
         lines.append("bias predictability: of the races with |bias at the gun| >= \(fixed(Self.readableBiasDegrees, 0)) deg, the "
             + "share whose favoured end some seconds before the gun is the gun's; the bias's swing over the last "
             + "\(StartStrategyTally.windowSeconds) s, median of all races, deg")
