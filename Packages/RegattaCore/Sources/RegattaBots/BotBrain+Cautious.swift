@@ -12,6 +12,8 @@ import RegattaCore
 //   (`keepsClearOfEveryBoat`), and a tack is hers to finish under rule 13: she bears away to close-hauled before
 //   she holds any closer to the wind, racing too.
 // - "Hang back" (`hangBackAim`): before the gun she keeps out of the crowd below the line, and starts late.
+//   Its guard, "the hang-back never crosses the line before the gun" (#578, `hasSameTackBoatToLeeward`): with a boat
+//   on her own tack to leeward, she waits deep, keeping clear astern of it rather than luffing over the line.
 // - "Look before you leap" (`guarded`): every helm she holds she first sails in her mind for a few seconds among
 //   the boats around her, and holds another that keeps further from them when it brings her too close to a boat she
 //   would have to keep clear of.
@@ -372,9 +374,9 @@ extension BotBrain {
     static let hangBackEdgeRoom = 25.0
 
     /// "Hang back" (#104): before the gun the cautious bot keeps out of the crowd below the line altogether. She waits
-    /// off the nearer end of the line, beyond it and below it, on a beam reach with the sheets eased, and starts once
-    /// the gun has gone and the fleet has sailed off (`startAim`). Nil when it doesn't apply: not the cautious bot, or
-    /// the gun has gone.
+    /// off the nearer end of the line, beyond it and below it, on a beam reach with the sheets eased (deep, with a boat
+    /// on her own tack to leeward: `hasSameTackBoatToLeeward`), and starts once the gun has gone and the fleet has
+    /// sailed off (`startAim`). Nil when it doesn't apply: not the cautious bot, or the gun has gone.
     mutating func hangBackAim(_ b: SeatView.OwnBoat, _ view: SeatView) -> Aim? {
         guard caution != nil, b.status == .prestart, view.time < 0 else { return nil }
         let c = view.course
@@ -391,7 +393,24 @@ extension BotBrain {
             tries += 1
         }
         guard (point - b.position).length <= Self.hangBackRadius else { return navigate(b, to: point, view) }
-        return Aim(angle: .pi / 2, tack: b.tack, tolerance: deg2rad(5), ease: true)
+        let angle = hasSameTackBoatToLeeward(b, view) ? Self.hangBackDeepAngle : .pi / 2
+        return Aim(angle: angle, tack: b.tack, tolerance: deg2rad(5), ease: true)
+    }
+
+    /// The wind angle she waits on with a boat on her own tack to leeward of her (`hangBackAim`, #578). Placeholder.
+    static let hangBackDeepAngle = deg2rad(120)
+
+    /// "The hang-back never crosses the line before the gun" (#578): waiting off an end of the line, a boat on her own
+    /// tack to leeward of her within `keepClearRange`, one she keeps clear of, has her wait deep (`hangBackDeepAngle`)
+    /// rather than on the beam. Held on the beam, she kept clear of a boat climbing to leeward and ahead of her by
+    /// luffing, and the luff carried her over the line's extension before the gun; deep, she keeps clear astern of it.
+    func hasSameTackBoatToLeeward(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+        let leeward = b.forward.rightPerp * (b.tack == .port ? 1 : -1)
+        return view.others.contains { other in
+            let offset = other.position - b.position
+            return !other.isGhost && other.tack == b.tack && offset.length < Self.keepClearRange
+                && offset.dot(leeward) > 0
+        }
     }
 
     // MARK: - Taking over
