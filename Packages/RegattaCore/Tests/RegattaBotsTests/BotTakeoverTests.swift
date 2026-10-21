@@ -7,9 +7,12 @@ import RegattaCore
 /// view alone (`BotBrain.adopt`) and sails on.
 @Suite struct BotTakeoverTests {
     /// Placeholders (#104, tuned by #105): seconds after the takeover by which she is out of irons, and the share of
-    /// takeovers that must be.
+    /// takeovers that must be. 0.97 since #564 ("Bear away to build way": her look luffed a slow boat into irons, 10 of
+    /// 204 failed): 3 of 204 fail on skiff@9 (0.985; seeds 35–68 the same), all slow hand turns from a broad angle with
+    /// no boat near, her look not in it: midPenalty 11, edge 24 and edge 28 (the worst, 69 ticks). Out of scope here,
+    /// the hand turn's (#459/#461).
     static let ironsDeadline = 10.0
-    static let ironsPassShare = 0.95
+    static let ironsPassShare = 0.97
     /// Seconds she sails after the takeover.
     static let sailSeconds = 30.0
     /// A boat slower than this, pointing inside the no-go zone and turning no penalty, is in irons: the bot suite's
@@ -127,8 +130,8 @@ import RegattaCore
     /// The situations, 34 seeds of each: 204 takeovers.
     static let cases: [(Situation, UInt64)] = Situation.allCases.flatMap { situation in (1...34).map { (situation, UInt64($0)) } }
 
-    /// #104 acceptance: a cautious bot taking a seat over leaves irons: from 200 snapshots of a boat anywhere, in ≥ 95 %
-    /// (`ironsPassShare`) she is never in irons (the bot suite's definition) from `ironsDeadline` seconds after the
+    /// #104 acceptance: a cautious bot taking a seat over leaves irons: from 200 snapshots of a boat anywhere, in ≥ 97 %
+    /// (`ironsPassShare`, #564) she is never in irons (the bot suite's definition) from `ironsDeadline` seconds after the
     /// takeover on.
     @Test func takeoverFrom200SnapshotsLeavesIrons() throws {
         var failures: [String] = []

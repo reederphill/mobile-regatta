@@ -15,6 +15,10 @@ import RegattaCore
 // - "Look before you leap" (`guarded`): every helm she holds she first sails in her mind for a few seconds among
 //   the boats around her, and holds another that keeps further from them when it brings her too close to a boat she
 //   would have to keep clear of.
+// - "Bear away to build way" (#564, `buildsWay`): short of way by hand (under half her close-hauled speed, inside
+//   her best upwind angle, out of any hand turn), her look takes no luff: a luff there only holds her in irons. Its
+//   guard, "never bear off onto her own tack's boat": nor a bear-away towards a boat on her own tack she must keep
+//   clear of, close by; she holds straight. A boat on the other tack she ducks, as a port boat does.
 // - "Never attacks": her style's engagement is 0 (#234), so she plays no fleet tactic: no cover, no held lane, no
 //   lee-bow, no tacking on a boat's wind.
 // - As the right-of-way boat she holds her course as every bot does (#101, `holdingCourse`), before her start too,
@@ -232,8 +236,13 @@ extension BotBrain {
         // and fouled under rule 13 a boat she had tacked clear of). Turning to starboard (+) is a luff with the wind
         // over her starboard side (`rudder`).
         let luffSign: Double = b.boomSide == .port ? 1 : -1
+        // "Bear away to build way" (#564): short of way by hand, a luff only holds her in irons (`buildsWay`).
+        let buildingWay = !senses.tacking && buildsWay(b, view)
         for rudder in Self.guardRudders {
-            if senses.tacking, !keepsClearOfAll, rudder * luffSign > 0 { continue }
+            if senses.tacking || buildingWay, !keepsClearOfAll, rudder * luffSign > 0 { continue }
+            if buildingWay, rudder * luffSign < 0, bearsOffOntoHerOwnTacksBoat(b, near, holdsRight, clear: clear, rudder: rudder) {
+                continue
+            }
             if rudder != 0, !keepsClearOfAll, holdsRight.contains(true), turnsTowardsKeepClearBoat(b, view, turn: rudder > 0 ? 1 : -1) { continue }
             for ease in [false, true] {
                 let change = abs(rudder - input.rudderValue) + (ease == input.ease ? 0 : 0.25)
@@ -243,6 +252,29 @@ extension BotBrain {
         }
         guard let best, best.rank < rank(chosen, change: 0) else { return nil }
         return best.input
+    }
+
+    /// Hull lengths, as a share of `guardLengths`, centre to centre, within which "never bear off onto her own tack's
+    /// boat" holds her straight (`bearsOffOntoHerOwnTacksBoat`).
+    static let ownTackGuardShare = 1.5
+
+    /// "Never bear off onto her own tack's boat" (#564), the guard of "Bear away to build way" (`buildsWay`): whether
+    /// bearing away at `rudder` turns her towards a boat of `near` on her own tack that she must keep clear of (racing,
+    /// one that doesn't keep clear of her, `holdsRight`; before her start or OCS, any boat), within
+    /// `ownTackGuardShare` × `clear` of her now. With her luff barred, her look bore away onto the leeward boat she
+    /// was keeping clear of, pinched at 2 m/s, and she could neither duck nor tack when it tacked onto starboard
+    /// (seed 16 seat 6 of `CautiousBotSuiteTests`, #455's version). Same tack only: a boat crossing on the other tack
+    /// she ducks, and bearing away is the duck (barring it, she held on at 1 m/s and fouled a starboard boat). Towards
+    /// is by bearing alone, so a boat near dead astern counts on whichever quarter it is: bearing away to that side
+    /// swings her stern at it, and she holds straight.
+    func bearsOffOntoHerOwnTacksBoat(_ b: SeatView.OwnBoat, _ near: [SeatView.OtherBoat], _ holdsRight: [Bool],
+                                     clear: Double, rudder: Double) -> Bool {
+        near.indices.contains { i in
+            let other = near[i]
+            guard other.boomSide == b.boomSide, (b.status != .racing || !holdsRight[i]),
+                  (other.position - b.position).length < clear * Self.ownTackGuardShare else { return false }
+            return wrapAngle((other.position - b.position).bearing - b.heading) * rudder > 0
+        }
     }
 
     /// Her own track through a tack or gybe tapped now, a `guardStep` apart for `seconds`: the autohelm sailing the tap
