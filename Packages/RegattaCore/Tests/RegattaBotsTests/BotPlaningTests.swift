@@ -186,8 +186,10 @@ import Testing
         let before = view.own.polarWindSpeed / 0.6
         hand.brain.senses.grooveWind = before
         let groove = Aim.groove(.downwind, tack: .starboard, angle: view.boatClass.polar.bestDownwind(tws: before).twa)
+        // A hand that does not read the lulls (#484: Club's, below `BotBrain.readsTheLulls(handling:)`) sails on.
+        hand.brain.heatsUpInLulls = false
         #expect(hand.brain.downwindAim(view.own, view, aim: groove) == groove, "she does not read the lulls")
-        hand.brain.tactics.heatsUpInLulls = true
+        hand.brain.heatsUpInLulls = true
         let heated = hand.brain.downwindAim(view.own, view, aim: groove)
         print("BOTPLANING lull: groove \(rad2deg(groove.angle))°, heated \(rad2deg(heated.angle))°")
         #expect(heated.angle <= groove.angle - deg2rad(1.5), "\(rad2deg(heated.angle))°")

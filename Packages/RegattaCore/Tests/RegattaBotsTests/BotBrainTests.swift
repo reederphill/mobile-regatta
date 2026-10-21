@@ -150,15 +150,43 @@ import RegattaCore
         #expect(staysIn(try #require(scored.heading), scored.view))
     }
 
+    /// "Read the lull at her boat" is a hand's, not a tactic (#484, #426 Q2): a perfect hand reads the lulls, tactician
+    /// or not, and Club's hand doesn't, tactician or not; a live bot reads them from her handling draw, from 0.2 into
+    /// National's handling band up, whatever her skill; the cautious bot, at the floor of Club's, never does.
+    @Test func readingTheLullsIsAHandsNotATactic() throws {
+        let style = BotStyle(skill: 0.9, startSpot: 0.5, finishSpot: 0.7, timingSlack: 0, penaltyDirection: 1)
+        let reads: [BotProfile: Bool] = [
+            .baseline: true, .tactician: true, .blipTacker: true, .hunter: true, .executor: true,
+            .tacticianClubExecution: false, .clubSteering: false, .tacticianClubSteering: false,
+        ]
+        #expect(Set(reads.keys) == Set(BotProfile.allCases))
+        for (profile, expected) in reads {
+            #expect(BotBrain(style: style, profile: profile).heatsUpInLulls == expected, "\(profile)")
+        }
+        let edge = BotTier.national.handling(at: BotBrain.nationalHeatsUpInLulls)
+        #expect(BotTier.club.handling(at: 0.5) < edge && edge < 1)
+        for skill in [0.4, 0.7, 0.9, 1.0] {
+            var own = style
+            own.skill = skill
+            #expect(!BotBrain(style: own, handling: BotTier.club.handling(at: 0.5)).heatsUpInLulls, "skill \(skill)")
+            #expect(!BotBrain(style: own, handling: edge - 0.01).heatsUpInLulls, "skill \(skill)")
+            #expect(BotBrain(style: own, handling: edge + 0.01).heatsUpInLulls, "skill \(skill)")
+            #expect(BotBrain(style: own, handling: 1).heatsUpInLulls, "skill \(skill)")
+        }
+        let cautious = BotBrain(style: style, weaknesses: BotBrain.Caution.weaknesses(skill: BotBrain.Caution.skill),
+                                caution: .standard)
+        #expect(!cautious.heatsUpInLulls)
+    }
+
     /// The bot suite's profiles (#231): the baseline sails the groove only; the tactician leaves it.
     @Test func profilesSetWhatTheBotPlays() throws {
         let baseline = Tactics(profile: .baseline, skill: 0.9)
         let tactician = Tactics(profile: .tactician, skill: 0.1)
-        #expect(!baseline.replanes && !baseline.heatsUpInLulls && !baseline.pinchesToFetch)
+        #expect(!baseline.replanes && !baseline.pinchesToFetch)
         #expect(!baseline.seeksPuffs && !baseline.seeksPressure && !baseline.goesToThePressure && !baseline.seeksClearAir)
         #expect(!baseline.covers)
         #expect(baseline.downwindShiftThreshold == nil && baseline.anticipation == 0)
-        #expect(tactician.replanes && tactician.heatsUpInLulls && tactician.pinchesToFetch)
+        #expect(tactician.replanes && tactician.pinchesToFetch)
         #expect(tactician.seeksPuffs && tactician.seeksPressure && tactician.goesToThePressure && tactician.seeksClearAir)
         #expect(tactician.covers)
         #expect(tactician.corridor > baseline.corridor)

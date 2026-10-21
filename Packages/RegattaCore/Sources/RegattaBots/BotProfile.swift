@@ -5,11 +5,12 @@
 /// bots players race are #234's, which may reuse these.
 public enum BotProfile: String, Codable, CaseIterable, Hashable, Sendable {
     /// The groove and nothing else: she sails the grooves and the laylines, tacks on headers past a
-    /// threshold, taps each tack and gybe on time, and ignores the fleet but for keeping clear.
+    /// threshold, taps each tack and gybe on time, and ignores the fleet but for keeping clear. Her hand is perfect, so
+    /// she reads the lulls (`BotBrain.heatsUpInLulls`: a good hand's, not a tactic, #484).
     case baseline
-    /// The baseline, plus leaving the groove when it pays: she heads up in a lull and off the plane to
-    /// plane again, sails towards the puffs drawn on the water, tacks out of dirty air, covers the boat close
-    /// behind her, and tacks on smaller headers, leading them by how fast the wind is turning.
+    /// The baseline, plus leaving the groove when it pays: she heads up off the plane to plane again, sails towards
+    /// the puffs drawn on the water, tacks out of dirty air, covers the boat close behind her, and tacks on smaller
+    /// headers, leading them by how fast the wind is turning.
     case tactician
     /// The baseline, but tacking on every header past 3° (#221, #238): a blip, the wobble that never outlasts
     /// its 30 s window, as readily as a real shift. Tacking on a blip is a mistake: the tactician should beat her.
@@ -26,19 +27,21 @@ public enum BotProfile: String, Codable, CaseIterable, Hashable, Sendable {
     case hunter
     /// Execution without tactics (#222, #105, #426): the baseline's tactics with perfect handling: the top handling
     /// draw (`BotBrain.turnHandling` 1: the best hand tack and gybe, never flubbed, #459) and no hand-steering error,
-    /// with no angle noise (`BotWeaknesses.none`). On a class with a roll tack (legacy) she rolls every tack and hits
-    /// every roll; on a class without one she sails as `baseline`. A measuring profile for the suite only: the parity mix
+    /// with no angle noise (`BotWeaknesses.none`); she reads the lulls, as every perfect hand does (#484). On a class
+    /// with a roll tack (legacy) she rolls every tack and hits every roll; on a class without one she sails as
+    /// `baseline`. A measuring profile for the suite only: the parity mix
     /// races her, the 2×2's handler, against `tacticianClubSteering` (#426 Q1, #484).
     case executor
     /// The tactician at Club-level execution (#222, #105), Club on her turns only: her tactics, but she turns her tacks
     /// and gybes by hand as the centre of Club's handling band does (#459, `BotBrain.turnHandling`), her legs steered
-    /// perfectly; on a class with a roll tack (legacy) half her rolls miss instead (`clubExecutionRollHitRate`; rolls only,
-    /// the orchestrator's ruling on #105). A measuring profile for the suite only: the legacy execution mix's, ungated
-    /// (#484).
+    /// perfectly, and reading no lulls, as Club's hand doesn't (`BotBrain.heatsUpInLulls`, #484); on a class with a
+    /// roll tack (legacy) half her rolls miss instead (`clubExecutionRollHitRate`; rolls only, the orchestrator's ruling
+    /// on #105). A measuring profile for the suite only: the legacy execution mix's, ungated (#484).
     case tacticianClubExecution
     /// The baseline steering by hand at Club level (#435): her tactics and no weaknesses, but Club's shift lag, wander
     /// and overshoot (`BotWeaknesses.clubHandSteering`), felt only in a class whose autohelm doesn't hold a centred
-    /// rudder. A measuring profile for the suite only: the handling mix races her against the baseline.
+    /// rudder; Club's hand doesn't read the lulls (`BotBrain.heatsUpInLulls`, #484). A measuring profile for the suite
+    /// only: the handling mix races her against the baseline.
     case clubSteering
     /// The tactician steering by hand at Club level (#435), as `clubSteering` is the baseline. A measuring profile for
     /// the suite only: the handling mix races her against the tactician, and the parity mix, the 2×2's tactician with

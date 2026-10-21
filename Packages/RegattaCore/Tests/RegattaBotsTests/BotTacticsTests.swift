@@ -738,7 +738,7 @@ import Testing
                 let header = try #require(live.headerThreshold)
                 #expect(header == threshold)
                 #expect(live.anticipation == 0 && live.corridor == 0.35 && live.downwindShiftThreshold == nil)
-                #expect(!live.heatsUpInLulls && !live.pinchesToFetch && !live.goesToThePressure && !live.seeksClearAir)
+                #expect(!live.pinchesToFetch && !live.goesToThePressure && !live.seeksClearAir)
                 #expect(!live.runsToPressure && !live.gybesOutOfShadow && !live.startsAtFavouredEnd)
                 #expect(!live.covers && !live.hunts && live.replanes && live.rollsTacks)
             }
@@ -763,7 +763,7 @@ import Testing
                     let previousHeader = try #require(p.headerThreshold)
                     #expect(abs(header - target) <= abs(previousHeader - target) + 1e-12)
                     let switches: [KeyPath<Tactics, Bool>] = [
-                        \.heatsUpInLulls, \.pinchesToFetch, \.seeksClearAir, \.goesToThePressure, \.runsToPressure,
+                        \.pinchesToFetch, \.seeksClearAir, \.goesToThePressure, \.runsToPressure,
                         \.gybesOutOfShadow, \.startsAtFavouredEnd, \.seeksPuffs, \.seeksPressure, \.replanes,
                     ]
                     for key in switches where p[keyPath: key] {
@@ -781,12 +781,12 @@ import Testing
             }
             // The ramp takes her all the way: every switch is on by the top.
             let top = try #require(previous)
-            #expect(top.heatsUpInLulls && top.pinchesToFetch && top.seeksClearAir && top.goesToThePressure)
+            #expect(top.pinchesToFetch && top.seeksClearAir && top.goesToThePressure)
             #expect(top.runsToPressure && top.gybesOutOfShadow && top.startsAtFavouredEnd)
         }
         // Each switch at or before the top, staggered through the band.
-        let switchOns = [Tactics.nationalHeatsUpInLulls, Tactics.nationalPinchesToFetch, Tactics.nationalDownwindShifts,
-                         Tactics.nationalSeeksClearAir, Tactics.nationalPressureAndLine]
+        let switchOns = [Tactics.nationalPinchesToFetch, Tactics.nationalDownwindShifts, Tactics.nationalSeeksClearAir,
+                         Tactics.nationalPressureAndLine]
         #expect(switchOns.allSatisfy { $0 > 0 && $0 <= 1 })
         #expect(switchOns == switchOns.sorted() && Set(switchOns).count == switchOns.count)
     }

@@ -22,8 +22,6 @@ struct Tactics: Sendable, Equatable {
     var downwindShiftThreshold: Double?
     /// Off the plane, she heads up to plane again, then bears away to the groove.
     var replanes: Bool
-    /// On the plane in a lull, she heads up to stay on it; not in another boat's wind shadow (#263).
-    var heatsUpInLulls: Bool
     /// Close to her mark and just below its layline, she pinches up to fetch it rather than tack twice.
     var pinchesToFetch: Bool
     /// Upwind, she weighs the puffs and lulls drawn on the water ahead on each tack.
@@ -155,7 +153,7 @@ struct Tactics: Sendable, Equatable {
             // #263: a corridor a little wider than the baseline's and her tacks as close together as hers, measured in
             // the fun pass: with skiff@3's tack cost and momentum, 0.8 and 20 s cost her the edge (#300 retunes).
             self.init(headerThreshold: deg2rad(4), tackInterval: 15, anticipation: 6, corridor: 0.5,
-                      downwindShiftThreshold: deg2rad(5), replanes: true, heatsUpInLulls: true, pinchesToFetch: true,
+                      downwindShiftThreshold: deg2rad(5), replanes: true, pinchesToFetch: true,
                       seeksPuffs: true, seeksPressure: true, goesToThePressure: true, seeksClearAir: true, covers: true)
             // #234 (ruling 3): her cover stays #231's (`covers`) and she holds no lane. #234's first lee-bow and tack on
             // a boat's wind cost her fun-pass gain on 16 seeds (1.91 → 1.74 L/beat); with #329's forecast trigger and
@@ -183,8 +181,8 @@ struct Tactics: Sendable, Equatable {
 
     /// #366: where through the National band (`BotTier.national.skillBand`, 0 at its bottom … 1 at its top) a live bot
     /// takes up each of the tactician's tactics. Placeholders (#389 retunes), staggered so they don't all arrive at
-    /// once; each at or before 1, so a live bot at the top of the band sails the tactician's tactics.
-    static let nationalHeatsUpInLulls = 0.2
+    /// once; each at or before 1, so a live bot at the top of the band sails the tactician's tactics. Reading the lulls
+    /// is her handling's, not a tactic (#484: `BotBrain.heatsUpInLulls`, `BotBrain.nationalHeatsUpInLulls`).
     static let nationalPinchesToFetch = 0.4
     static let nationalDownwindShifts = 0.5
     static let nationalSeeksClearAir = 0.6
@@ -193,7 +191,7 @@ struct Tactics: Sendable, Equatable {
 
     /// #366 (#364, "the ceiling"): a live bot's tactics ramp toward the tactician's through the National band. Her
     /// anticipation, corridor and header threshold move linearly from her own to the tactician's, and each of the
-    /// tactician's other tactics switches on at its named place in the band (`nationalHeatsUpInLulls` …). Below the
+    /// tactician's other tactics switches on at its named place in the band (`nationalPinchesToFetch` …). Below the
     /// band nothing moves. Her style stays hers: her favoured side, tack interval and engagement (and the fleet tactics
     /// it floors), her skill's puff range and tactical quality; the tactician's pure cover (`covers`) stays the
     /// tactician's. Skill is an input, so nothing is drawn.
@@ -208,7 +206,6 @@ struct Tactics: Sendable, Equatable {
         if let own = headerThreshold, let target = tactician.headerThreshold {
             headerThreshold = lerp(own, target)
         }
-        if w >= Self.nationalHeatsUpInLulls { heatsUpInLulls = tactician.heatsUpInLulls }
         if w >= Self.nationalPinchesToFetch { pinchesToFetch = tactician.pinchesToFetch }
         if w >= Self.nationalDownwindShifts { downwindShiftThreshold = tactician.downwindShiftThreshold }
         if w >= Self.nationalSeeksClearAir { seeksClearAir = tactician.seeksClearAir }
@@ -221,16 +218,15 @@ struct Tactics: Sendable, Equatable {
     }
 
     init(headerThreshold: Double?, tackInterval: Double, anticipation: Double = 0, corridor: Double = 0.35,
-         downwindShiftThreshold: Double? = nil, replanes: Bool = false, heatsUpInLulls: Bool = false,
-         pinchesToFetch: Bool = false, seeksPuffs: Bool = false, seeksPressure: Bool = false,
-         goesToThePressure: Bool = false, seeksClearAir: Bool = false, covers: Bool = false) {
+         downwindShiftThreshold: Double? = nil, replanes: Bool = false, pinchesToFetch: Bool = false,
+         seeksPuffs: Bool = false, seeksPressure: Bool = false, goesToThePressure: Bool = false,
+         seeksClearAir: Bool = false, covers: Bool = false) {
         self.headerThreshold = headerThreshold
         self.tackInterval = tackInterval
         self.anticipation = anticipation
         self.corridor = corridor
         self.downwindShiftThreshold = downwindShiftThreshold
         self.replanes = replanes
-        self.heatsUpInLulls = heatsUpInLulls
         self.pinchesToFetch = pinchesToFetch
         self.seeksPuffs = seeksPuffs
         self.seeksPressure = seeksPressure
@@ -548,6 +544,18 @@ extension BotBrain {
     /// swings her from her mark, enough to gybe out of past the tactician's 5° threshold. A tunable for #389.
     static let downwindShadowWeight = deg2rad(4)
 
+    /// "Read the lull at her boat" (#263, #484): where through National's handling band
+    /// (`BotTier.national.handlingBand`, 0 at its bottom … 1 at its top) a hand reads the lulls (`heatsUpInLulls`). Her
+    /// handling's, not a tactic (#426 Q2, the owner's D5 of 2026-10-20): whatever her tier or skill, from handling 0.68
+    /// up, so a perfect hand reads them and Club's centre (0.55) doesn't. Placeholder: #366's place in the skill band,
+    /// moved to the handling band.
+    static let nationalHeatsUpInLulls = 0.2
+
+    /// Whether a bot turning by hand at `handling` (`turnHandling`) reads the lulls (`nationalHeatsUpInLulls`).
+    static func readsTheLulls(handling: Double) -> Bool {
+        handling >= BotTier.national.handling(at: nationalHeatsUpInLulls)
+    }
+
     /// How far above the groove she sails in a lull to stay on the plane: past the downwind snap.
     static let lullHeatUp = deg2rad(12)
     /// On the plane, she is in a lull when her speed is within this share above the class's off-plane speed.
@@ -577,7 +585,7 @@ extension BotBrain {
         }
         // "Heats up in a lull, not in a shadow" (#263): a boat's wind shadow slows her whatever angle she sails
         // (`speedShadow`), so heading up there only sails her further.
-        if tactics.heatsUpInLulls && b.speed < planing.offSpeed * Self.lullSpeedMargin && b.speedShadow >= 1 {
+        if heatsUpInLulls && b.speed < planing.offSpeed * Self.lullSpeedMargin && b.speedShadow >= 1 {
             return aim.offset(by: -Self.lullHeatUp, tolerance: deg2rad(3))
         }
         return aim

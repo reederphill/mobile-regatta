@@ -181,6 +181,12 @@ struct BotBrain: Sendable {
     /// How well she turns a tack or gybe by hand, 0…1 (#459, `turnHandling(profile:weaknesses:caution:)`): read only by
     /// the hand turn, on a class whose tap sails nothing. A `var` only so tests can set it apart from her weaknesses.
     var turnHandling: Double
+    /// "Read the lull at her boat" (#263): on the plane she reckons the wind she has now rather than her groove's running
+    /// average, and heads up as it drops, before she falls rather than after; never in another boat's wind shadow,
+    /// where heading up only sails her further into it. A good hand's, not a tactic (#484, #426 Q2):
+    /// `readsTheLulls(handling:)` of her `turnHandling`, a profile's from her hand as a live bot's from her handling draw.
+    /// A `var` only so tests can set it apart from her handling.
+    var heatsUpInLulls: Bool
     /// The tack or gybe she is steering by hand (#459, `handTurning`); nil while she isn't.
     var handTurn: HandTurn?
     /// Her draws for her flubbed hand turns (#459): a stream of her seed of its own, drawn only by the hand turn.
@@ -305,6 +311,7 @@ struct BotBrain: Sendable {
         rng = SplitMix64(seed: seed, stream: Self.brainStream)
         tacticsRng = SplitMix64(seed: seed, stream: Self.tacticsStream)
         turnHandling = Self.turnHandling(profile: profile, weaknesses: self.weaknesses, caution: caution)
+        heatsUpInLulls = Self.readsTheLulls(handling: turnHandling)
         handTurnRng = SplitMix64(seed: seed, stream: Self.handTurnStream)
         planingRng = SplitMix64(seed: seed, stream: Self.planingStream)
     }
