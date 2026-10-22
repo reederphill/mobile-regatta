@@ -6,8 +6,8 @@
 #   scripts/pick-ui-seeds.sh           probe and rewrite the table
 #   scripts/pick-ui-seeds.sh --check   probe and report where the table differs, without rewriting (exit 1 if it does)
 #
-# The probes are `regatta-botsuite results-seed` and `rounding-seed` (Packages/RegattaCore, release build, through
-# scripts/heavy.sh). Rows:
+# The probes are `regatta-botsuite results-seed`, `rounding-seed` and `ease-seed` (Packages/RegattaCore, release build,
+# through scripts/heavy.sh). Rows:
 #   resultsSheet  ResultsUITests.testSheetAppearsAbout3sAfterFinishWhileSceneRenders: `-demo -laps 1 -startSeconds 10
 #                 -timescale 4` (7 opponents, the launch race), your boat finishes >= 14 s of wall-clock time before the
 #                 close: the sim ticks at 30 Hz and -timescale 4 runs at most 120 ticks/s, so >= 1,680 ticks (#445: at
@@ -17,6 +17,11 @@
 #                 (the launch race, 7 opponents, 2 laps), your boat starts within 2 s of the gun and rounds the
 #                 windward mark within 140 s of it with no rule call against her (#477: CI's simulator ran the race at
 #                 1.25-1.4x, so the test's 180 s budget reached 157-170 s after the gun).
+#   ease          EaseUITests.testEasingSlowsTheBoat: `-autostart -timescale 1` (the launch race, your boat human), clear
+#                 air and a steady wind for every runner the probe models (first tap T-59 to T-40, either short ease):
+#                 no other boat's ribbons or backwind on her, her wind within 5 % of the start reading's, the long
+#                 ease at least 0.2 kn under the test's physics bar and under the short ease (#579: on seed 1 a fast
+#                 runner read her start speed in two bots' wakes and the bar fell under the long ease).
 set -euo pipefail
 
 # The timescale ResultsUITests launches at, and the ticks that give it 14 s of wall-clock time after your finish.
@@ -63,6 +68,9 @@ found="$("$probe" rounding-seed --from 1 --to 400 --laps 2 --opponents 7 --max-s
     --max-rounding-ticks "$rounding_max_rounding_ticks")"
 echo "firstRounding: $found"
 read -r _ rounding_seed _ rounding_start _ rounding_tick <<<"$found"
+found="$("$probe" ease-seed --from 1 --to 400)"
+echo "ease: $found"
+read -r _ ease_seed _ ease_margin <<<"$found"
 
 table=RegattaUITests/SeedTable.swift
 generated="$(mktemp)"
@@ -82,6 +90,11 @@ enum SeedTable {
     /// your boat starts within $rounding_max_start_ticks ticks of the gun and rounds the windward mark within $rounding_max_rounding_ticks ticks of it, with no rule
     /// call against her. Probed: she starts at tick $rounding_start and rounds at tick $rounding_tick.
     static let firstRounding: UInt64 = $rounding_seed
+    /// \`EaseUITests.testEasingSlowsTheBoat\`: the \`-autostart\` launch race on which your boat sails clear air in a steady
+    /// wind (no other boat's ribbons or backwind, her wind within 5 % of the start reading's) from the first tap to the
+    /// long ease's release, for a first tap anywhere from T-59 to T-40, the long ease at least 0.2 kn under the test's
+    /// bar. Probed: the least margin under the bar is $ease_margin kn.
+    static let ease: UInt64 = $ease_seed
 }
 SWIFT
 

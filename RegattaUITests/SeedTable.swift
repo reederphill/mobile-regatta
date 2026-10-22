@@ -12,4 +12,9 @@ enum SeedTable {
     /// your boat starts within 60 ticks of the gun and rounds the windward mark within 4200 ticks of it, with no rule
     /// call against her. Probed: she starts at tick 11 and rounds at tick 4001.
     static let firstRounding: UInt64 = 18
+    /// `EaseUITests.testEasingSlowsTheBoat`: the `-autostart` launch race on which your boat sails clear air in a steady
+    /// wind (no other boat's ribbons or backwind, her wind within 5 % of the start reading's) from the first tap to the
+    /// long ease's release, for a first tap anywhere from T-59 to T-40, the long ease at least 0.2 kn under the test's
+    /// bar. Probed: the least margin under the bar is 0.34 kn.
+    static let ease: UInt64 = 4
 }

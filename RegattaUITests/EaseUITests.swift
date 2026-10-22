@@ -18,6 +18,11 @@ import XCTest
 /// target (10 race seconds of speeding up from the eased half, skiff@9's 4.5 s time constant, leave her within 95 % of
 /// it) and the wind's changes; a longer hold lowers the bar by the physics' own drop. From the gun the class's fraction,
 /// 0.3, slows her more, so the bar holds there too.
+///
+/// The bar takes her wind as steady and her air as hers, so the race is `SeedTable.ease`, picked by a headless probe
+/// (`regatta-botsuite ease-seed`, #579) for clear air and a steady wind over every runner speed it models. On seed 1
+/// she sailed through two bots' ribbons before the gun: a fast runner read her start speed in a wake and the bar fell
+/// under the long ease's speed (4.33 kn against 4.14).
 final class EaseUITests: RaceUITestCase {
     /// fleet-rules@8's `raceFormat.opening.easeSpeedFraction`: before the gun an ease sails this share of her target.
     static let easedFraction = 0.5
@@ -42,7 +47,7 @@ final class EaseUITests: RaceUITestCase {
     /// and each of the two eases a 20 s hold and two 15 s looks: 205 s.
     @MainActor func testEasingSlowsTheBoat() throws {
         // Real time (the fixture default, pinned here), so a race second is a wall-clock second on a fast runner.
-        let app = launchRace(["-timescale", "1"])
+        let app = launchRace(["-seed", "\(SeedTable.ease)", "-timescale", "1"])
         let ease = app.descendants(matching: .any)["race-ease"]
         XCTAssertTrue(ease.waitForExistence(timeout: 10), "no VoiceOver Ease element")
         let status = app.staticTexts["race-status"]
