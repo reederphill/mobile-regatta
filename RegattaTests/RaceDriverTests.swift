@@ -19,6 +19,19 @@ import RegattaCore
         #expect(abs(Interpolation.angle(from: deg2rad(10), to: deg2rad(30), 0.5) - deg2rad(20)) < 1e-12)
     }
 
+    /// At its ends a blend is its end, bit for bit (#579): seed 7's last two headings, where `a + (b − a)·1` came
+    /// back an ulp off `b`, so a finished race wasn't drawn at its last tick.
+    @Test func theEndsAreExact() {
+        let a = -1.9897026193551226, b = -1.9980582113646703
+        #expect(Interpolation.angle(from: a, to: b, 1) == b)
+        #expect(Interpolation.angle(from: a, to: b, 0) == a)
+        #expect(Interpolation.value(from: a, to: b, 1) == b)
+        #expect(Interpolation.value(from: a, to: b, 0) == a)
+        let p = Vec2(2.0116687585638187, -0.29503971139565544), q = Vec2(1.9178793731816082, -0.3377430633266551)
+        #expect(Interpolation.position(from: p, to: q, 1) == q)
+        #expect(Interpolation.position(from: p, to: q, 0) == p)
+    }
+
     @Test func positionInterpolatesLinearly() {
         let p = Interpolation.position(from: Vec2(0, 0), to: Vec2(10, -4), 0.25)
         #expect(p == Vec2(2.5, -1))

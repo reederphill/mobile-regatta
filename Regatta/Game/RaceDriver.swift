@@ -304,18 +304,21 @@ struct SailState: Equatable {
 }
 
 /// Rendering between ticks (#18). Presentation only: none of it feeds back into a race.
+/// Every blend is exact at its ends: `t` 0 is `from` and `t` 1 is `to`, bit for bit. `a + (b − a)·1` is not `b` in
+/// floating point (a heading came back an ulp off, #579), so a finished race, drawn at `alpha` 1, would not be drawn
+/// at its last tick.
 enum Interpolation {
     static func value(from a: Double, to b: Double, _ t: Double) -> Double {
-        a + (b - a) * t
+        t >= 1 ? b : t <= 0 ? a : a + (b - a) * t
     }
 
     static func position(from a: Vec2, to b: Vec2, _ t: Double) -> Vec2 {
-        a + (b - a) * t
+        t >= 1 ? b : t <= 0 ? a : a + (b - a) * t
     }
 
     /// Turns the short way round: from −179° to 179° passes through ±180°, never through 0°.
     static func angle(from a: Double, to b: Double, _ t: Double) -> Double {
-        wrapAngle(a + wrapAngle(b - a) * t)
+        t >= 1 ? b : t <= 0 ? a : wrapAngle(a + wrapAngle(b - a) * t)
     }
 
     /// `to`, with its position, heading and winds' directions eased back towards `from`. Everything else,
