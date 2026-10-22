@@ -519,6 +519,26 @@ extension BotBrain {
         return b.relativeWind > 0 ? -1 : 1
     }
 
+    /// "Pinned, bear away first" (#276 PR 2, Fable's ruling of 2026-10-21): racing, a penalty turn by hand sailed by its
+    /// crossings (fleet-rules@6 on, `turnsByCrossings`), held to her proper course against a boat to windward (rule 17,
+    /// `SeatView.OwnBoat.properCourse`): the way (+1 to starboard) that bears her away, or nil. Until her turn's first
+    /// counting crossing she isn't taking a penalty (`Boat.isTakingPenalty`) and keeps her rights, so a luff first (the
+    /// shorter turn from close-hauled, `penaltyLuffFirst`) sails her above her proper course at the windward boat:
+    /// rule 17, and 16.1 against a boat pinched there, which RRS 44.2 doesn't excuse. Traced (seed 2, mixed 10, seat 2):
+    /// her turn chosen in company before the boat came up to windward, held off by her way out, then turned on, luffing,
+    /// into a boat 1.1 lengths to windward: rule 17. On the wind only (inside `HandTackTable.penaltyTurn.luffFirstAngle`,
+    /// where "luff first" is hers): off it her turn already bears her away, to the gybe, and on a run the bearing-away
+    /// way flips as she crosses dead downwind; turned back there, a pinned boat on the run (nat58 seed 7, hollin-bay,
+    /// classic-oscillating, 16 boats, seat 9) dithered by the lee until her turn ran out of time. Before the gun she is
+    /// told no proper course (nil), so starts are unmoved by construction.
+    func pinnedBearAwayFirst(_ b: SeatView.OwnBoat, _ view: SeatView) -> Double? {
+        guard b.status == .racing, b.properCourse != nil, b.twa < HandTackTable.penaltyTurn.luffFirstAngle,
+              Self.turnsByHand(view), Self.turnsByCrossings(view) else {
+            return nil
+        }
+        return b.relativeWind > 0 ? -1 : 1
+    }
+
     /// Whether, on a class she turns by hand, she is too slow to turn a penalty turn up through the wind, or to give
     /// one up and turn it again the other way (`canGiveUpTurn`): under `HandTackTable.penaltyTurn.luffFirstSpeed` of
     /// her close-hauled speed in clear air. From a standstill head to wind the rudder turns her 3° a second.

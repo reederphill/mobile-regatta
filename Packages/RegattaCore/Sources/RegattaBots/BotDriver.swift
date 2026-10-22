@@ -79,6 +79,15 @@ public struct BotDriver: Sendable {
     /// (`heldOffTack`, which the suite joins with the rule 10 calls on her).
     public private(set) var preGunHeldOffTackDecisions = 0
     public private(set) var heldOffTack = false
+    /// The start strategy she was sailing at her last decision before the gun (#276, `BotBrain.startStrategy`), by its
+    /// name; nil for a bot that never chose one (a profile, the cautious bot). Report-only.
+    public private(set) var startStrategyAtGun: String?
+    /// The times she chose her start strategy again, its trigger failed (#276). Report-only.
+    public var startStrategySwitches: Int { brain.startStrategySwitches }
+    /// Her late read of the favoured end at her last decision before the gun (#276, `BotBrain.lateEndAsk`): her style's
+    /// spot and the shift along the line the bias asked for, shares of the line; nil if she never read it. Report-only.
+    public private(set) var lateEndStyleSpot: Double?
+    public private(set) var lateEndShiftAsked: Double?
 
     private(set) var brain: BotBrain
     /// Her own hand on the helm for a class whose autohelm doesn't hold a centred rudder (#434); idle otherwise.
@@ -188,6 +197,11 @@ public struct BotDriver: Sendable {
         if let avoidance = decision.avoidance, view.own.status == .prestart, view.time < 0 { notePreGun(avoidance, view) }
         heldOffTack = brain.planWantsStarboardOnPort && decision.tap == nil && brain.handTurn == nil
         if heldOffTack { preGunHeldOffTackDecisions += 1 }
+        if view.time < 0, view.own.status == .prestart {
+            startStrategyAtGun = brain.startStrategy?.plan.rawValue
+            lateEndStyleSpot = brain.lateEndAsk?.styleSpot
+            lateEndShiftAsked = brain.lateEndAsk?.shift
+        }
         let next = race.tick + 1
         race.apply(decision.input, seat: seat, atTick: next)
         if let tap = decision.tap { race.tap(tap, seat: seat, atTick: next) }

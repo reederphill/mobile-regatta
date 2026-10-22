@@ -137,6 +137,15 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
     public var speedAtGunShare: Double? = nil
     public var overLineAtGun: Bool? = nil
     public var preGunCalls: Int? = nil
+    /// The start strategy her bot was sailing at the gun (#276, `BotDriver.startStrategyAtGun`) and the times it chose
+    /// again, its plan's trigger failed. Report-only; nil for a seat no live bot sailed.
+    public var startStrategy: String? = nil
+    public var startStrategySwitches: Int? = nil
+    /// Her bot's late read of the favoured end at its last decision before the gun (#276, `BotDriver.lateEndStyleSpot`):
+    /// her style's spot and the shift the bias asked for, shares of the line from the pin. Report-only; nil if she never
+    /// read it.
+    public var lateEndStyleSpot: Double? = nil
+    public var lateEndShiftAsked: Double? = nil
 
     public static let metricKeys = [
         "finished", "place", "ironsSeconds", "markContacts", "boatContacts", "contactsEndingInFouls",
@@ -163,6 +172,7 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         case preGunRefusedHoldsTurned, preGunHeldEarly, preGunLastHeldEarlySeconds, preGunEarlyLuffs
         case preGunAvoidCommitted, preGunAvoidEarly, preGunHeldOffTackSeconds, preGunHeldOffTackCalls
         case approachKind, speedAtGunShare, overLineAtGun, preGunCalls
+        case startStrategy, startStrategySwitches, lateEndStyleSpot, lateEndShiftAsked
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -238,6 +248,10 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         try c.encodeIfPresent(speedAtGunShare, forKey: .speedAtGunShare)
         try c.encodeIfPresent(overLineAtGun, forKey: .overLineAtGun)
         try c.encodeIfPresent(preGunCalls, forKey: .preGunCalls)
+        try c.encodeIfPresent(startStrategy, forKey: .startStrategy)
+        try c.encodeIfPresent(startStrategySwitches, forKey: .startStrategySwitches)
+        try c.encodeIfPresent(lateEndStyleSpot, forKey: .lateEndStyleSpot)
+        try c.encodeIfPresent(lateEndShiftAsked, forKey: .lateEndShiftAsked)
     }
 
     static func name(_ status: BoatStatus) -> String {

@@ -1,21 +1,24 @@
 import RegattaCore
 
 /// The start (#99): from wherever the start row (#35) or a takeover left her, to her spot on the line as the
-/// gun goes.
+/// gun goes. This file is the start strategy `starboardHold` (#276, `starboardHoldAim`): today's plan, and so far the
+/// only one. A live bot comes to it through her chooser (`BotBrain+StartStrategy.swift`); every bot-suite profile and
+/// the cautious bot sail it directly.
 ///
 /// Her style picks the spot (`BotStyle.startSpot`), and she starts there if she can reach it in the time left
 /// (`reachableSpot`). She approaches it on starboard, from below and to the right of it: sheets let out, she
 /// holds with Ease on the way, at the class's eased fraction of her polar speed, then sheets in for the run in.
-/// She never waits inside the no-go zone: letting go there hands her to the autohelm, which bears her away to
-/// the groove (ADR 0007, #219), and holding her there stalls her in irons. So she holds just outside it
-/// (`holdMargin`), where she sails slowest, steering to the angle and centring the rudder like any other (#231).
+/// She holds just outside the no-go zone (`holdMargin`), where she sails slowest with the sail drawing, steering to the
+/// angle and centring the rudder like any other (#231): inside it she would stop dead, and held there by hand she
+/// starts seconds behind and can't tack out (the #276 brief's physics).
 ///
 /// Each decision she times the run from her class's polar, her speed and the wind at her (`secondsToLine`):
 /// sheeted in once sailing at her spot at full speed would bring her bow to the line only as the gun goes
 /// (`startArrival`); with Ease while that would be early and holding isn't; and while even holding would be
 /// early, she bears away with Ease and lets the time run (`wait`). A spot she can't fetch on starboard she sails
-/// round to first (`approachPoint`). Nothing is remembered between decisions, so she starts the same way from any
-/// pre-gun state.
+/// round to first (`approachPoint`). Within the plan nothing is remembered between decisions, so she sails it the same
+/// way from any pre-gun state; only which strategy she sails, and a live bot's late read of the favoured end
+/// (`lateEndSpot`), are remembered (#276).
 extension BotBrain {
     /// How far outside the no-go zone she holds with Ease: the slowest she sails with the sail drawing.
     static let holdMargin = deg2rad(3)
@@ -41,7 +44,7 @@ extension BotBrain {
     static let trafficAllowance = 0.6
     /// Seconds a tack onto starboard takes her, on port, before she can sail at her spot.
     static let tackSeconds = 4.0
-    /// The same for `view`'s class, timing her tack onto starboard for her run in (`startAim`):
+    /// The same for `view`'s class, timing her tack onto starboard for her run in (`starboardHoldAim`):
     /// `HandTackTable.startTackSeconds` on one she tacks by hand (#461).
     static func tackSeconds(_ view: SeatView) -> Double { turnsByHand(view) ? HandTackTable.startTackSeconds : tackSeconds }
     /// Waiting along the line, how far away from it past parallel she sails.
@@ -94,15 +97,26 @@ extension BotBrain {
     /// the end she wrongly favours.
     ///
     /// The tactician (#105, `Tactics.startsAtFavouredEnd`) sets up at the spot she reads the line's bias to favour
-    /// instead (`favouredEndSpot`, `readLineBias`), once she has read it.
+    /// instead (`favouredEndSpot`, `readLineBias`), once she has read it; any other live bot reads the favoured end late
+    /// (#276, `lateEndSpot`, `readEndLate`).
     func startPoint(_ c: CourseLayout) -> Vec2 {
         let line = c.startLine
-        if let favouredEndSpot {
-            return line.pin.position + (line.committee.position - line.pin.position) * favouredEndSpot
-        }
+        return line.pin.position + (line.committee.position - line.pin.position) * spotOnLine
+    }
+
+    /// Her spot on the start line as she reads it, 0 the pin … 1 the committee boat (`startPoint`): the tactician's
+    /// favoured-end spot, a live bot's late end read, or her style's moved by her misread.
+    var spotOnLine: Double {
+        if let favouredEndSpot { return favouredEndSpot }
+        if let lateEndSpot { return lateEndSpot }
+        return styleSpotOnLine
+    }
+
+    /// Her style's spot moved by her misread of the line's bias (`startPoint`).
+    var styleSpotOnLine: Double {
         let misread = weaknesses.lineBiasMisread * style.lineBiasDraw
         let spot = min(max(style.startSpot + Self.lineBiasShift * rad2deg(misread), 0.05), 0.95)
-        return line.pin.position + (line.committee.position - line.pin.position) * (misread == 0 ? style.startSpot : spot)
+        return misread == 0 ? style.startSpot : spot
     }
 
     /// The share of the line she moves her spot for each degree she misreads its bias by.
@@ -142,8 +156,8 @@ extension BotBrain {
         -view.time + max(Self.earliestLead, Self.startLead + style.timingSlack * weaknesses.startTiming)
     }
 
-    /// Before her start: before the gun, or after it and not started yet.
-    mutating func startAim(_ b: SeatView.OwnBoat, _ view: SeatView) -> Aim {
+    /// `starboardHold` (#276), today's plan: before her start, before the gun or after it and not started yet.
+    mutating func starboardHoldAim(_ b: SeatView.OwnBoat, _ view: SeatView) -> Aim {
         readLineBias(b, view)
         let line = view.course.startLine
         // After the gun, back below the line running (she was OCS) or bearing away, she heads up on her own tack
@@ -217,7 +231,7 @@ extension BotBrain {
     /// Whether, before the gun, she is set up where she is: less time left than a tack takes (`tackSeconds`), too
     /// little to sail round anywhere, close below the line (`setUpDepthLengths`) and level with it between its ends.
     /// Her spot, a length or so off, swings round her as she slides along the line; wherever it bears she reads it as
-    /// fetched and not yet passed (`startAim`). Reading it passed, she bore away hard for her setup point with 1.7 s to
+    /// fetched and not yet passed (`starboardHoldAim`). Reading it passed, she bore away hard for her setup point with 1.7 s to
     /// the gun and swung her stern over the line (#350, seed 4 of `aBotTakingOverBeforeTheGunStarts`). Beyond an end
     /// she isn't: there she still sails to her setup point.
     func isSetUpWhereSheIs(_ b: SeatView.OwnBoat, _ view: SeatView, arrival: Double) -> Bool {
@@ -600,7 +614,7 @@ extension BotBrain {
         return along > clearOfEnds && along < line.length - clearOfEnds
     }
 
-    /// Over the line before the gun (`startAim`): with her centre more than half a beam below it, only a corner of her
+    /// Over the line before the gun (`starboardHoldAim`): with her centre more than half a beam below it, only a corner of her
     /// hull is over, luffed along the line with her bow up (#388): she bears away along the line on her own tack, a little
     /// off it (`waitOffLine`), with Ease, which swings it back below; otherwise she runs back (`returnAim`).
     mutating func overEarlyAim(_ b: SeatView.OwnBoat, _ view: SeatView) -> Aim {

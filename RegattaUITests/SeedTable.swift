@@ -4,12 +4,17 @@
 enum SeedTable {
     /// `ResultsUITests.testSheetAppearsAbout3sAfterFinishWhileSceneRenders`: the `-demo -laps 1 -startSeconds 10` race
     /// on which your boat finishes at least 1680 ticks (14 s at `-timescale 4`) before the close. Probed: she
-    /// finishes at tick 6302, the race closes at 9608 (ticks from the gun).
-    static let resultsSheet: UInt64 = 7
+    /// finishes at tick 7479, the race closes at 11079 (ticks from the gun).
+    static let resultsSheet: UInt64 = 8
     /// The tick, from the gun, your boat finishes at on `resultsSheet`: the test watches the race clock up to it.
-    static let resultsSheetFinishTick = 6302
+    static let resultsSheetFinishTick = 7479
     /// `RaceAssemblyUITests.testPracticeRaceOnTheNewCoreReachesTheGunAndAFirstRounding`: the `-demo` launch race on which
     /// your boat starts within 60 ticks of the gun and rounds the windward mark within 4200 ticks of it, with no rule
-    /// call against her. Probed: she starts at tick 19 and rounds at tick 3929.
-    static let firstRounding: UInt64 = 29
+    /// call against her. Probed: she starts at tick 11 and rounds at tick 4001.
+    static let firstRounding: UInt64 = 18
+    /// `EaseUITests.testEasingSlowsTheBoat`: the `-autostart` launch race on which your boat sails clear air in a steady
+    /// wind (no other boat's ribbons or backwind, her wind within 5 % of the start reading's) from the first tap to the
+    /// long ease's release, for a first tap anywhere from T-59 to T-40, the long ease at least 0.2 kn under the test's
+    /// bar. Probed: the least margin under the bar is 0.34 kn.
+    static let ease: UInt64 = 4
 }

@@ -31,9 +31,18 @@ public struct BotStyle: Hashable, Sendable {
     public var engagement: Double
     /// −1…1: which way, and how far, she misreads the start line's bias (`BotWeaknesses.lineBiasMisread`).
     public var lineBiasDraw: Double
+    /// −1…1 each: how much she likes each named start strategy over the plain hold (#276), her style's say in the
+    /// chooser beside the situation's once there is more than one strategy (PR 3). No named personalities (#102): each
+    /// is its own draw. Drawn now, read by nothing yet.
+    public var boatEndDraw: Double
+    public var outAndInReachingDraw: Double
+    public var vanderbiltDraw: Double
+    public var portApproachDraw: Double
 
     public init(skill: Double, startSpot: Double, finishSpot: Double, timingSlack: Double, penaltyDirection: Double,
-                favouredSide: Double = 0, tackWillingness: Double = 0.5, engagement: Double = 0.5, lineBiasDraw: Double = 0) {
+                favouredSide: Double = 0, tackWillingness: Double = 0.5, engagement: Double = 0.5, lineBiasDraw: Double = 0,
+                boatEndDraw: Double = 0, outAndInReachingDraw: Double = 0, vanderbiltDraw: Double = 0,
+                portApproachDraw: Double = 0) {
         self.skill = skill
         self.startSpot = startSpot
         self.finishSpot = finishSpot
@@ -43,6 +52,10 @@ public struct BotStyle: Hashable, Sendable {
         self.tackWillingness = tackWillingness
         self.engagement = engagement
         self.lineBiasDraw = lineBiasDraw
+        self.boatEndDraw = boatEndDraw
+        self.outAndInReachingDraw = outAndInReachingDraw
+        self.vanderbiltDraw = vanderbiltDraw
+        self.portApproachDraw = portApproachDraw
     }
 
     /// A style drawn from `rng` (the bot's own seed), sailing at `skill`.
@@ -61,6 +74,11 @@ public struct BotStyle: Hashable, Sendable {
         tackWillingness = rng.unit()
         engagement = rng.unit()
         lineBiasDraw = rng.range(-1, 1)
+        // #276: appended, so every draw above keeps its place.
+        boatEndDraw = rng.range(-1, 1)
+        outAndInReachingDraw = rng.range(-1, 1)
+        vanderbiltDraw = rng.range(-1, 1)
+        portApproachDraw = rng.range(-1, 1)
     }
 }
 
@@ -130,6 +148,21 @@ struct BotBrain: Sendable {
     /// The tactician's spot on the start line as she reads its bias (#105, `Tactics.startsAtFavouredEnd`, `readLineBias`),
     /// 0 the pin … 1 the committee boat; nil until she has read it, or for any other bot.
     var favouredEndSpot: Double?
+    /// A live bot's spot on the start line as she reads its favoured end late (#276, `readEndLate`), 0 the pin … 1 the
+    /// committee boat; nil until she has read it, and for the tactician (`favouredEndSpot`) or any other bot.
+    var lateEndSpot: Double?
+    /// The late read's last ask (#276, `readEndLate`): her style's spot then, and the shift along the line, a share of it,
+    /// that the bias asked for before her reach capped it. Report-only (the suite's delivery ratio).
+    var lateEndAsk: (styleSpot: Double, shift: Double)?
+    /// Her start strategy (#276, `chooseStartStrategy`), remembered from her choice: nil before she has chosen, and
+    /// after a takeover (`adopt`), which chooses fresh.
+    var startStrategy: StartChoice?
+    /// The times she has chosen her start strategy again since she first chose it, her plan's trigger failed (the
+    /// suite's count).
+    var startStrategySwitches = 0
+    /// Whether she is a live bot: neither a bot-suite profile nor the cautious bot (#276). Only a live bot chooses a start
+    /// strategy and reads the end late; the others sail `starboardHoldAim` as they always have.
+    let isLive: Bool
     var lastTackTime = -1_000.0
     /// The fleet tactic (#234) that last turned her plan to the other tack (`upwindTack`), and when: her tap then is
     /// that play's (`BotDecision.play`, for the suite's count, #337).
@@ -302,6 +335,7 @@ struct BotBrain: Sendable {
          weaknesses: BotWeaknesses? = nil, caution: Caution? = nil) {
         self.style = style
         self.caution = caution
+        isLive = profile == nil && caution == nil
         self.weaknesses = weaknesses ?? profile?.weaknesses(skill: style.skill)
             ?? BotWeaknesses(skill: style.skill, handling: handling)
         tactics = Tactics(profile: profile, skill: style.skill, style: style, weaknesses: self.weaknesses)
@@ -378,6 +412,8 @@ struct BotBrain: Sendable {
             takingOver = false
             adopt(view)
         }
+        // #276: a live bot chooses her start strategy at her first decision from T−45, whatever this one sails.
+        if isLive { chooseStartStrategy(boat, view) }
         // Her latched side is the scorer's of this decision only if it makes one, and on the tack it was latched on.
         if keepClearLatchTack != boat.tack { keepClearLatch = nil }
         var scorerDecided = false
@@ -829,6 +865,13 @@ struct BotBrain: Sendable {
             return steer(b, toHeading: clear.heading, view)
         }
         var way = turn
+        // "Pinned, bear away first": held to her proper course before the turn's first crossing, a turn chosen before
+        // she was (her way out held while a boat came up to windward) goes the bearing-away way.
+        if !locked, !owed.isStarted, let pinned = pinnedBearAwayFirst(b, view), pinned != way {
+            way = pinned
+            penaltyTurn = pinned
+            releaseEscape()
+        }
         // By hand, luffing slow into the wind before the turn's first crossing: she turns it the other way (#461), if
         // that way's sweep is clear (#486).
         if !locked, !owed.isStarted, nearestMark(b, view) == nil, let away = penaltyBearAwayFirst(b, view), away != way,
@@ -925,10 +968,12 @@ struct BotBrain: Sendable {
         }
         let soon = conflict.flatMap { $0.seconds < lookahead ? $0 : nil }
         guard soon != nil || towards != nil, latest > -Self.penaltyLateDodgeSeconds else { return .onward }
-        // The other way, if it is clear and hers to turn, with time for all it has left.
+        // The other way, if it is clear and hers to turn, with time for all it has left; held to her proper course, not
+        // the luff ("pinned, bear away first", `pinnedBearAwayFirst`).
         let other = -way
         let left = Double(owed.completeDeadlineTick - view.tick) * Self.tickStep
-        if latest > 0, !locked, left > penaltyTurnSeconds(b, view, owed, direction: other) + HandTackTable.penaltyTurn.margin,
+        if latest > 0, !locked, pinnedBearAwayFirst(b, view).map({ $0 == other }) ?? true,
+           left > penaltyTurnSeconds(b, view, owed, direction: other) + HandTackTable.penaltyTurn.margin,
            turnSweep(b, view, direction: other, angle: penaltyTurnLeft(b, owed, view, direction: other)) == nil,
            towards.map({ $0.away == other }) ?? true {
             penaltyTurn = other
@@ -1101,6 +1146,8 @@ struct BotBrain: Sendable {
     /// preferences break the tie: away from the nearest mark (`markAway`), else "bear away first" by hand when slow
     /// (`penaltyBearAwayFirst`), "luff first" with way on (`penaltyLuffFirst`), her own way
     /// (`BotStyle.penaltyDirection`).
+    /// Held to her proper course racing (`pinnedBearAwayFirst`), she bears away first, whatever the sweeps, unless a
+    /// mark near her says otherwise.
     /// With neither clear (she can put it off no longer, or doesn't, on the last leg or near her next mark): away from
     /// the mark, else bearing away first when slow, else the way a boat crosses later (by more than a sweep step), else
     /// away from the boat crossing first, the nearer if both cross as soon (#351's away from the nearest boat).
@@ -1109,6 +1156,7 @@ struct BotBrain: Sendable {
     private func penaltyWay(_ b: SeatView.OwnBoat, _ view: SeatView, _ owed: OwedPenalty, _ sweeps: PenaltySweeps,
                             markAway: Double?) -> Double {
         if let only = sweeps.only { return only }
+        if let pinned = pinnedBearAwayFirst(b, view) { return markAway ?? pinned }
         if Self.turnsByCrossings(view), sweeps.port == nil, sweeps.starboard == nil {
             return markAway ?? penaltyBearAwayFirst(b, view) ?? shorterPenaltyWay(b, view, owed)
         }

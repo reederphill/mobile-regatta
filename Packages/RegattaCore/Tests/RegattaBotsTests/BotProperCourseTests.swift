@@ -357,3 +357,38 @@ extension SeatViewTests {
         #expect(clear.race.seatView(for: 0).own.properCourse != nil)
     }
 }
+
+extension BotConductTests {
+    /// #276 PR 2, "pinned, bear away first" (`BotBrain.pinnedBearAwayFirst`, Fable's ruling of 2026-10-21): racing on
+    /// the beat, close-hauled with way on, owing one tack-and-gybe turn she hasn't started, her latest start 4 s gone
+    /// (no time left to dodge: she turns on) and her turn chosen luffing, a boat 1.1 hull lengths to windward abeam.
+    /// Held to her proper course against it (its rule 17 record, as if she had come up from astern), she turns it
+    /// bearing away, rudder and way; a luff there sails her above her proper course before her first crossing, while
+    /// she still has her rights: rule 17 (seed 2's mixed 10-boat race, seat 2). The same scene unrestricted she luffs
+    /// first, as before. Her first choice of way, pinned, bears away too.
+    @Test func pinnedUnderAWindwardBoatAPenaltyTurnBearsAwayFirst() throws {
+        for seed: UInt64 in [1, 2, 3] {
+            for restricted in [true, false] {
+                for held in [true, false] where held || restricted {
+                    let (race, luff) = try Self.lateStartScene(seed: seed, latest: -4, locked: false,
+                                                                [(ahead: 0, across: 1.1, running: false)])
+                    #expect(race.rules.raceFormat.penalty.turn == .tackAndGybe)
+                    if restricted {
+                        race.umpire?.setProperCourse(ProperCourseRecord(leeward: 0, windward: 1), for: SeatPair(0, 1))
+                    }
+                    let own = race.seatView(for: 0).own
+                    #expect((own.properCourse?.windward == [1]) == restricted, "seed \(seed): \(String(describing: own.properCourse))")
+                    #expect(own.speed > 0.8 * race.boatClass.polar.bestUpwind(tws: own.polarWindSpeed).speed, "seed \(seed): no way on")
+                    var pilot = Pilot(seat: 0, plannedTack: nil, race: race, skill: 1, weaknesses: BotWeaknesses(skill: 1))
+                    if held { pilot.brain.penaltyTurn = luff }
+                    let decided = pilot.drive(race)
+                    let decision = try #require(decided, "seed \(seed): no decision")
+                    let way = restricted ? -luff : luff
+                    let label = "seed \(seed) restricted \(restricted) held \(held)"
+                    #expect(pilot.brain.penaltyTurn == way, "\(label): her way \(String(describing: pilot.brain.penaltyTurn))")
+                    #expect(decision.input.rudderValue * way > 0, "\(label): rudder \(decision.input.rudderValue)")
+                }
+            }
+        }
+    }
+}
