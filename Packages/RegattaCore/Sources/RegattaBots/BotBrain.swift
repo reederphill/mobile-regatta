@@ -160,6 +160,8 @@ struct BotBrain: Sendable {
     /// The times she has chosen her start strategy again since she first chose it, her plan's trigger failed (the
     /// suite's count).
     var startStrategySwitches = 0
+    /// How far into her start strategy's plan she is (#276, `StartPlanProgress`): cleared at each choice.
+    var startPlan = StartPlanProgress()
     /// Whether she is a live bot: neither a bot-suite profile nor the cautious bot (#276). Only a live bot chooses a start
     /// strategy and reads the end late; the others sail `starboardHoldAim` as they always have.
     let isLive: Bool

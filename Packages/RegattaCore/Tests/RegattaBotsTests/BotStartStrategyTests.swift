@@ -140,4 +140,107 @@ import RegattaCore
             }
         }
     }
+
+    /// One live bot in open water sailing `plan` from T−45 (`StartChoice` set before her first decision, so the chooser
+    /// leaves it): on `conditions` at seed `seed`, placed on port 3 L below the middle of the line for an out-and-in, or on
+    /// starboard 5 L below and right of the middle for the boat end. Her start (ticks after the gun), whether she was
+    /// over at the gun, her speed at the gun of close-hauled in the wind there, the plans she sailed and the wind, knots.
+    /// The scripted fleet's size: a line and race area of a 10-boat fleet's (the start suite's); she sails alone, the
+    /// others placed well clear and left unsteered.
+    static let scriptedFleet = 10
+
+    static func sailStrategy(_ plan: StartStrategy, conditions id: String, seed: UInt64) throws
+        -> (start: Int?, overAtGun: Bool, speed: Double, plans: [StartStrategy], knots: Double, feasible: Bool) {
+        let conditions = try ConditionsFile.bundled(id: id, version: 7)
+        let venue = try VenueFile.bundled(id: "dev-venue", version: 7)
+        let setup = try RaceSetup(raceSeed: RaceSeed(seed), seats: Array(repeating: .bot, count: Self.scriptedFleet), laps: 1, startSequenceTicks: 55 * Race.tickRate,
+                                  boatClass: BotConductTests.waterClass, venue: venue.ref, conditions: conditions.ref)
+        let race = try Race(setup: setup, files: RaceFiles(resolving: setup),
+                            mode: .authoritative(windSeed: WindSeed(seed &* 0x9E37_79B9_7F4A_7C15 &+ 1)))
+        // An out-and-in from T−30, when its round trip fits the race area below her (`StartStrategyAbort.roundTripFits`);
+        // the boat end from T−45.
+        let from = plan == .vanderbilt ? 25 : plan.isOutAndIn ? 30 : 45
+        for _ in 0..<((55 - from) * Race.tickRate) { race.step() }
+        let c = race.course
+        let length = race.boatClass.hull.length
+        let port = plan.isOutAndIn
+        let depth = plan == .vanderbilt ? 1.5 : port ? 3 : 5
+        let at = c.startLine.centre - c.upwind * (length * depth) + c.right * (length * (port ? 0 : 4))
+        let wind = race.groundWind(at: at)
+        let polar = race.boatClass.polar
+        var snapshot = race.exportSnapshot()
+        for seat in 0..<Self.scriptedFleet {
+            let out = plan == .vanderbilt ? BotBrain.vanderbiltOutAngle : BotBrain.reachingOutAngle
+            let heading = port && seat == 0 ? wind.direction + out : wind.direction - polar.bestUpwind(tws: wind.speed).twa
+            snapshot.seats[seat].boat.position = seat == 0 ? at : at + c.right * 400 - c.upwind * (20 * Double(seat))
+            snapshot.seats[seat].boat.heading = heading
+            snapshot.seats[seat].boat.speed = port && seat == 0 ? polar.speed(twa: out, tws: wind.speed) : 2
+            snapshot.seats[seat].boat.boomSide = wrapAngle(wind.direction - heading) >= 0 ? .port : .starboard
+            snapshot.seats[seat].boat.autohelm = Autohelm(target: .angle(abs(wrapAngle(wind.direction - heading))))
+        }
+        try race.importSnapshot(snapshot)
+        var pilot = BotConductTests.Pilot(seat: 0, plannedTack: port ? .port : .starboard, race: race,
+                                          weaknesses: .none(skill: 1), helm: false)
+        if plan == .boatEnd {
+            var style = pilot.brain.style
+            style.startSpot = 0.85
+            pilot.brain = BotBrain(style: style, seed: 1, weaknesses: .none(skill: 1))
+            pilot.brain.tactics = Tactics(profile: nil, skill: BotTier.national.skillBand.lowerBound, style: style,
+                                          weaknesses: pilot.brain.weaknesses)
+            pilot.brain.plannedTack = .starboard
+        }
+        let first = race.seatView(for: 0)
+        let feasible = pilot.brain.isFeasible(plan, first.own, first)
+        pilot.brain.startStrategy = StartChoice(plan: plan, time: -Double(from))
+        pilot.steerByHand()
+        var plans: [StartStrategy] = [plan]
+        var start: Int?
+        var over = false
+        var speed = 0.0
+        while race.tick < 10 * Race.tickRate, !race.isOver {
+            _ = pilot.drive(race)
+            race.step()
+            if let sailed = pilot.brain.startStrategy?.plan, plans.last != sailed { plans.append(sailed) }
+            if ProcessInfo.processInfo.environment["T276_TRACE"] == "\(plan.rawValue)-\(id)-\(seed)", race.tick % Race.tickRate == 0 {
+                let view = race.seatView(for: 0)
+                let b = view.own
+                let line = c.startLine
+                let along = (b.position - line.pin.position).dot((line.committee.position - line.pin.position).normalized) / line.length
+                let trip = pilot.brain.outAndInPlan(plan, b, view)
+                print(String(format: "TRACE t %5.1f %@ ang %6.1f ease %d depth %5.2f L along %5.2f speed %4.2f arr %5.1f out %@ turning %d turned %d",
+                             Double(race.tick) / Double(Race.tickRate), b.tack == .port ? "P" : "S", rad2deg(pilot.brain.sailingAngle(b)),
+                             b.ease ? 1 : 0, -line.side(b.position) / length, along, b.speed / polar.bestUpwind(tws: b.polarWindSpeed).speed,
+                             pilot.brain.startArrival(view), trip.map { String(format: "%.0f/%.1f/%d inset %.1f room %.1f", $0.outSeconds, $0.lateBy, $0.capped ? 1 : 0, c.raceArea.inset(b.position) / length, (pilot.brain.maxHoldDepth(view, at: b.position) + line.side(b.position)) / length) } ?? "-",
+                             pilot.brain.startPlan.turning ? 1 : 0, pilot.brain.startPlan.turned ? 1 : 0))
+            }
+            if race.tick == 0 {
+                let boat = race.boats[0]
+                over = boat.status != .prestart
+                speed = boat.speed / polar.bestUpwind(tws: race.groundWind(at: boat.position).speed).speed
+            }
+            if start == nil, race.boats[0].status == .racing { start = race.tick }
+        }
+        return (start, over, speed, plans, knots(metresPerSecond: wind.speed), feasible)
+    }
+
+    /// Each named plan, sailed alone in open water from T−45 on light, classic and gusty winds (about 6 to 20 kn on
+    /// skiff@9): on the line within 3 s of the gun and not over it; the out-and-ins at speed.
+    @Test(arguments: [StartStrategy.outAndInReaching, .vanderbilt, .boatEnd])
+    func eachStrategyReachesTheLineAtTheGun(_ plan: StartStrategy) throws {
+        var lines: [String] = []
+        var failures = 0
+        for id in ["light-and-patchy", "classic-oscillating", "gusty-offshore"] {
+            for seed: UInt64 in 1...4 {
+                let r = try Self.sailStrategy(plan, conditions: id, seed: seed)
+                let ok = r.feasible && !r.overAtGun && (r.start.map { $0 <= 3 * Race.tickRate } ?? false) && r.plans == [plan]
+                    && (!plan.isOutAndIn || r.speed >= 0.85)
+                if !ok { failures += 1 }
+                lines.append(String(format: "%@ %@ s%d %.1f kn: feasible %@, start %@ s, over %@, speed %.2f, plans %@", plan.rawValue, id, seed,
+                                    r.knots, "\(r.feasible)", r.start.map { String(format: "%.1f", Double($0) / Double(Race.tickRate)) } ?? "-",
+                                    "\(r.overAtGun)", r.speed, "\(r.plans.map(\.rawValue))"))
+            }
+        }
+        print(lines.joined(separator: "\n"))
+        #expect(failures == 0, "\(lines.joined(separator: "\n"))")
+    }
 }
