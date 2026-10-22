@@ -865,6 +865,13 @@ struct BotBrain: Sendable {
             return steer(b, toHeading: clear.heading, view)
         }
         var way = turn
+        // "Pinned, bear away first": held to her proper course before the turn's first crossing, a turn chosen before
+        // she was (her way out held while a boat came up to windward) goes the bearing-away way.
+        if !locked, !owed.isStarted, let pinned = pinnedBearAwayFirst(b, view), pinned != way {
+            way = pinned
+            penaltyTurn = pinned
+            releaseEscape()
+        }
         // By hand, luffing slow into the wind before the turn's first crossing: she turns it the other way (#461), if
         // that way's sweep is clear (#486).
         if !locked, !owed.isStarted, nearestMark(b, view) == nil, let away = penaltyBearAwayFirst(b, view), away != way,
@@ -961,10 +968,12 @@ struct BotBrain: Sendable {
         }
         let soon = conflict.flatMap { $0.seconds < lookahead ? $0 : nil }
         guard soon != nil || towards != nil, latest > -Self.penaltyLateDodgeSeconds else { return .onward }
-        // The other way, if it is clear and hers to turn, with time for all it has left.
+        // The other way, if it is clear and hers to turn, with time for all it has left; held to her proper course, not
+        // the luff ("pinned, bear away first", `pinnedBearAwayFirst`).
         let other = -way
         let left = Double(owed.completeDeadlineTick - view.tick) * Self.tickStep
-        if latest > 0, !locked, left > penaltyTurnSeconds(b, view, owed, direction: other) + HandTackTable.penaltyTurn.margin,
+        if latest > 0, !locked, pinnedBearAwayFirst(b, view).map({ $0 == other }) ?? true,
+           left > penaltyTurnSeconds(b, view, owed, direction: other) + HandTackTable.penaltyTurn.margin,
            turnSweep(b, view, direction: other, angle: penaltyTurnLeft(b, owed, view, direction: other)) == nil,
            towards.map({ $0.away == other }) ?? true {
             penaltyTurn = other
@@ -1137,6 +1146,8 @@ struct BotBrain: Sendable {
     /// preferences break the tie: away from the nearest mark (`markAway`), else "bear away first" by hand when slow
     /// (`penaltyBearAwayFirst`), "luff first" with way on (`penaltyLuffFirst`), her own way
     /// (`BotStyle.penaltyDirection`).
+    /// Held to her proper course racing (`pinnedBearAwayFirst`), she bears away first, whatever the sweeps, unless a
+    /// mark near her says otherwise.
     /// With neither clear (she can put it off no longer, or doesn't, on the last leg or near her next mark): away from
     /// the mark, else bearing away first when slow, else the way a boat crosses later (by more than a sweep step), else
     /// away from the boat crossing first, the nearer if both cross as soon (#351's away from the nearest boat).
@@ -1145,6 +1156,7 @@ struct BotBrain: Sendable {
     private func penaltyWay(_ b: SeatView.OwnBoat, _ view: SeatView, _ owed: OwedPenalty, _ sweeps: PenaltySweeps,
                             markAway: Double?) -> Double {
         if let only = sweeps.only { return only }
+        if let pinned = pinnedBearAwayFirst(b, view) { return markAway ?? pinned }
         if Self.turnsByCrossings(view), sweeps.port == nil, sweeps.starboard == nil {
             return markAway ?? penaltyBearAwayFirst(b, view) ?? shorterPenaltyWay(b, view, owed)
         }
