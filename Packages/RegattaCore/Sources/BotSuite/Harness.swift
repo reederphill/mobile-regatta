@@ -148,6 +148,8 @@ public enum BotRaceHarness {
         var heldOffTackCalls = Array(repeating: 0, count: tiers.count)
         // #276: the start-strategy rows' samples, once a second before the gun (report-only).
         var startStrategy = StartStrategyTally(race: race)
+        // #379: the lanes rows' samples, once a second after the gun (report-only).
+        var lanes = LaneTally(race: race)
         let lastTick = cell.capSecondsAfterGun * Race.tickRate
         var tickMs: [Double] = []
         tickMs.reserveCapacity(setup.startSequenceTicks + lastTick)
@@ -164,6 +166,7 @@ public enum BotRaceHarness {
             hunts?.record(race, events: drained, controllers: controllers)
             crosses?.record(race)
             startStrategy.record(race, events: drained)
+            lanes.record(race)
             for event in drained {
                 guard case .ruleCall(let call) = event.kind, call.turnsOwed > 0, call.rule == .portStarboard, race.tick < 0,
                       controllers[call.offender].driver?.heldOffTack == true else { continue }
@@ -227,6 +230,7 @@ public enum BotRaceHarness {
         result.lineBiasAtGunDegrees = biasBeforeGun.first
         result.lineBiasBeforeGunDegrees = biasBeforeGun.isEmpty ? nil : biasBeforeGun
         result.preGunCallSpots = startStrategy.callSpots
+        result.lanes = lanes.lanes(controllers)
         result.skillGap?.startGainLengths = crosses?.meanLead
         return result
     }

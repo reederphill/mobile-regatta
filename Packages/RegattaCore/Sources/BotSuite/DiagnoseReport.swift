@@ -38,6 +38,8 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
     /// The start-strategy rows (#276, report-only), over the run's races; nil in a report from before them. Set by
     /// `BotSuite.run`, which has the races.
     public var startStrategies: StartStrategySummary? = nil
+    /// The lanes rows (#379, report-only), over the run's races; nil in a report from before them. Set by `BotSuite.run`.
+    public var lanes: LanesSummary? = nil
 
     /// `tier`'s boats before the gun (#477, `StartPlanObservation`; the held-off rows from `SeatMetrics`, bot seats only).
     public struct StartPlanRow: Codable, Hashable, Sendable {
@@ -631,6 +633,7 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
                 })
         }
         if let startStrategies { lines += startStrategies.lines }
+        if let lanes { lines += lanes.lines }
         lines.append("non-finishers by cause: per 1000 boats (boats; median metres to go)")
         var finishRows: [[String]] = [["cause"] + tiers]
         for (key, label) in NonFinishCause.allCases.map({ ($0.rawValue, $0.label) }) + [(Self.all, Self.all)] {

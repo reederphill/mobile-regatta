@@ -436,6 +436,9 @@ public struct RaceResult: Codable, Hashable, Sendable {
     public var lineBiasAtGunDegrees: Double? = nil
     public var lineBiasBeforeGunDegrees: [Double]? = nil
     public var preGunCallSpots: [Double]? = nil
+    /// Who had whom in her air after the gun, and the chances to (#379, `LaneTally`, report-only); nil in a race the
+    /// harness didn't watch.
+    public var lanes: RaceLanes? = nil
 
     /// `ranks`: each seat's place in the race's order at the end (`Race.place(of:)`), finished or not.
     init(cell: BotRaceCell, finalTick: Int, capped: Bool, tideStateAtGun: Double?, seats: [SeatMetrics],
