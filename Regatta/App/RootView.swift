@@ -240,6 +240,15 @@ struct RootView: View {
                 }
             case .lastRace: model.sheet = .lastRace
             case .raceEnded: FakeRaceDirector.current?.endQuietly()
+            case .boatCard:
+                let linesBy = ContinuousClock.now + .seconds(10)
+                func firstOther() -> LobbyAuthor? {
+                    guard let lobby = onlineStatus?.lobby else { return nil }
+                    return lobby.feed.lines.lazy.compactMap { lobby.opensCard($0.message) }.first
+                }
+                while firstOther() == nil, ContinuousClock.now < linesBy { try? await Task.sleep(for: .milliseconds(100)) }
+                if let author = firstOther() { model.sheet = .boatCard(author) }
+            case .blockedPlayers: model.path = [.settings, .blockedPlayers]
             case .home:
                 let homeBy = ContinuousClock.now + .seconds(300)
                 while model.phase != .home, ContinuousClock.now < homeBy { try? await Task.sleep(for: .milliseconds(100)) }

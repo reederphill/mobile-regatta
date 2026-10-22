@@ -123,7 +123,7 @@ import RegattaServices
             + "signed-out, underage, communication-restricted, multiplayer-restricted, offline, queued, cancelled-race, "
             + "online-results, online-results-unrated, terms-bump, suspended, suspended-permanent, cooldown, cannot-race, "
             + "update-required, terms-save-failed, session-failed, unreachable, connecting, joinable, joinable-alone, joinable-hold, "
-            + "rejoinable, race-gone, profile-established"])
+            + "rejoinable, race-gone, profile-established, lobby-free-text, lobby-muted, lobby-banned"])
         let missing = parse("-fakeServices", "-autostart")
         #expect(missing.fakeServices == nil && missing.autostart)
         #expect(missing.problems == ["-fakeServices needs a value"])
@@ -220,12 +220,16 @@ import RegattaServices
             == [.raceOnline, .race, .done, .raceHome, .raceAgain, .rejoin, .leaderboard, .lastRace, .raceEnded])
         // The profile page (#139), for the design gate's screenshots.
         #expect(parse("-fakeServices", "profile-established", "-tap", "profile").taps == [.profile])
+        // The lobby's (#142).
+        #expect(parse("-fakeServices", "joinable", "-tap", "boat-card").taps == [.boatCard])
+        #expect(parse("-tap", "blocked-players").taps == [.blockedPlayers])
         #expect(parse("-fakeServices", "rejoinable", "-raceSeconds", "90").raceSeconds == 90)
         let bad = parse("-tap", "race-online,practice")
         #expect(bad.taps.isEmpty)
         #expect(bad.problems == ["-tap race-online,practice: expected race-online, terms-agree, settings, practice-setup, "
             + "profile, start-practice, ready, takeover, briefing-leave, home, connection-lost, connection-regained, race, gun, done, "
-            + "race-menu, race-leave, confirm-leave, race-home, race-again, rejoin, leaderboard, last-race, race-ended, "
+            + "race-menu, race-leave, confirm-leave, race-home, race-again, rejoin, leaderboard, last-race, race-ended, boat-card, "
+            + "blocked-players, "
             + "separated by commas"])
     }
 

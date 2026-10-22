@@ -19,6 +19,8 @@ final class AppModel {
     /// Pages pushed on the home screen.
     enum Page: Hashable {
         case practiceSetup, myBoat, profile, help, settings
+        /// Settings → Blocked players (#110, #142).
+        case blockedPlayers
         #if DEBUG
         /// The debug tuning panel (#232): Debug builds only.
         case tuning
@@ -26,15 +28,27 @@ final class AppModel {
     }
 
     /// Sheets are only for small, brief things (#25).
-    enum Sheet: String, Identifiable {
+    enum Sheet: Identifiable, Equatable {
         /// The Terms of Use (#34, #138): after Game Center sign-in, and reopened from the lobby area.
         case terms
-        /// A lobby player's boat card.
-        case boatCard
+        /// A lobby player's boat card (#142), from her chip or name on a line: the line's author.
+        case boatCard(LobbyAuthor)
         /// Your last race's results, reopened from home's Last race (#24, #132): large, with Close only.
         case lastRace
 
-        var id: Self { self }
+        /// One per sheet, and one per sailor's card (T8).
+        var id: String {
+            if case .boatCard(let author) = self { "boatCard-\(author.gamePlayerID.rawValue)" } else { name }
+        }
+
+        /// The sheet's kind: `sheet-<name>` is its accessibility id.
+        var name: String {
+            switch self {
+            case .terms: "terms"
+            case .boatCard: "boatCard"
+            case .lastRace: "lastRace"
+            }
+        }
     }
 
     /// What the race sequence shows.
