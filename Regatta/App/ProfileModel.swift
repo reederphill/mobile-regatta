@@ -23,11 +23,16 @@ final class ProfileModel {
     /// `OnlineStatus.mayAskService`: with a session the server closes the connection on a profile call from a player
     /// short of the terms or the multiplayer restriction.
     private let mayAskService: () -> Bool
+    /// Told the server's count of her completed races at each read (`AppModel.adoptServerCount`), so My boat's
+    /// "n / N races" matches the page's.
+    private let adoptCount: (Int) -> Void
 
     /// With no service (previews, a page with no `OnlineStatus`) nothing is ever read.
-    init(profile: (any ProfileService)?, mayAskService: @escaping () -> Bool = { true }) {
+    init(profile: (any ProfileService)?, mayAskService: @escaping () -> Bool = { true },
+         adoptCount: @escaping (Int) -> Void = { _ in }) {
         self.profile = profile
         self.mayAskService = mayAskService
+        self.adoptCount = adoptCount
     }
 
     /// Reads the profile, when it may be asked; otherwise it waits as pending.
@@ -47,6 +52,7 @@ final class ProfileModel {
         // A newer read (the gate moved meanwhile) replaces this one.
         guard !Task.isCancelled else { return }
         read = result
+        if case .loaded(let loaded) = result { adoptCount(loaded.completedRaces) }
     }
 
     /// The page's state now, from the services' state and this read.

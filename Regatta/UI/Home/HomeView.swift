@@ -221,12 +221,34 @@ struct HomeView: View {
             .accessibilityAddTraits(.isHeader)
         }
         ToolbarItem(placement: .topBarLeading) {
-            pageButton(.profile, "Profile", systemImage: "person.crop.circle", id: "toolbar-profile")
+            profileButton
         }
         ToolbarItemGroup(placement: .topBarTrailing) {
             pageButton(.myBoat, "My boat", systemImage: "sailboat", id: "toolbar-myboat")
             pageButton(.help, "Help", systemImage: "questionmark.circle", id: "toolbar-help")
             pageButton(.settings, "Settings", systemImage: "gearshape", id: "toolbar-settings")
+        }
+    }
+
+    /// Profile, as her Game Center photo once it's loaded (#25, #139 G6); the symbol until then, or with none.
+    @ViewBuilder private var profileButton: some View {
+        if let photo = onlineStatus?.playerPhoto {
+            Button {
+                model.path.append(.profile)
+            } label: {
+                Label {
+                    Text("Profile")
+                } icon: {
+                    Image(uiImage: photo)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 28, height: 28)
+                        .clipShape(.circle)
+                }
+            }
+            .accessibilityIdentifier("toolbar-profile")
+        } else {
+            pageButton(.profile, "Profile", systemImage: "person.crop.circle", id: "toolbar-profile")
         }
     }
 

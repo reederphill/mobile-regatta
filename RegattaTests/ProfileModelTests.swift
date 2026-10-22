@@ -114,6 +114,29 @@ import Testing
         #expect(ProfileModel.suspensionText(Self.profile(races: 0, next: 10)) == nil)
     }
 
+    /// Each read hands the server's count to My boat (#139, T3); a failed read hands nothing.
+    @Test func eachReadAdoptsTheServerCount() async throws {
+        let service = Counting(Self.profile(races: 32, next: 50))
+        var adopted: [Int] = []
+        let model = ProfileModel(profile: service, adoptCount: { adopted.append($0) })
+        await model.refresh()
+        #expect(adopted == [32])
+        service.result = nil
+        await model.refresh()
+        #expect(adopted == [32] && model.read == .failed)
+
+        // Through the page's wiring, on an app model: My boat reads the profile's count.
+        let suite = "ProfileModelTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let app = AppModel(launchOptions: LaunchOptions(arguments: ["/path/to/Regatta"]), defaults: defaults)
+        let wired = ProfileModel(profile: Counting(Self.profile(races: 32, next: 50)),
+                                 adoptCount: { [weak app] in app?.adoptServerCount($0) })
+        await wired.refresh()
+        #expect(app.myBoat.completedRaces == 32)
+        #expect(CompletedRacesStore(defaults: app.myBoatDefaults).count == 32)
+    }
+
     /// With a session, the profile isn't asked of a player short of the gate: the server would close the connection.
     @Test func nothingIsReadWhileTheServiceMayNotBeAsked() async {
         let service = Counting(Self.profile(races: 0, next: 10))

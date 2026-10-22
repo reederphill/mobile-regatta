@@ -22,7 +22,8 @@ struct ProfileView: View {
         self.status = status
         self.online = online
         _profile = State(initialValue: ProfileModel(profile: status?.services.profile,
-                                                    mayAskService: { [weak status] in status?.mayAskService ?? false }))
+                                                    mayAskService: { [weak status] in status?.mayAskService ?? false },
+                                                    adoptCount: { [weak model] in model?.adoptServerCount($0) }))
     }
 
     /// What reads the profile again: the page appearing, the gate moving (sign-in, the terms, the session), Try again.

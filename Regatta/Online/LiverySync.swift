@@ -9,6 +9,8 @@ protocol LiveryHost: AnyObject {
     var isLiveryLocked: Bool { get }
     /// Where My boat keeps its state (`MyBoatDefaults`): the sync's one flag lives beside the livery.
     var myBoatDefaults: UserDefaults { get }
+    /// The server's count of her completed online races, read with its livery (#139): My boat's count follows it.
+    func adoptServerCount(_ count: Int)
 }
 
 extension AppModel: LiveryHost {}
@@ -60,14 +62,15 @@ final class LiverySync {
     }
 
     /// A session opened for a player through the gate: a save that is waiting goes up; otherwise the server's copy
-    /// comes down, with no save echoed back.
+    /// comes down, with no save echoed back, and its count of her completed races with it (#139).
     func sessionOpened() async {
         guard isLive, let host, mayAskService(), !host.isLiveryLocked else { return }
         if awaitsUpload { return await upload(host.myLivery) }
-        guard let stored = try? await profile.profile().livery else { return }
+        guard let read = try? await profile.profile() else { return }
+        host.adoptServerCount(read.completedRaces)
         // A save, or a fleet lock, while the server was answering: that one stands.
-        guard !awaitsUpload, !host.isLiveryLocked, stored != host.myLivery else { return }
-        host.myLivery = stored
+        guard !awaitsUpload, !host.isLiveryLocked, read.livery != host.myLivery else { return }
+        host.myLivery = read.livery
     }
 
     private func upload(_ livery: Livery) async {
