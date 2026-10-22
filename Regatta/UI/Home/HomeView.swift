@@ -75,7 +75,7 @@ struct HomeView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbar }
             .navigationDestination(for: AppModel.Page.self) { page in
-                MenuPageView(page: page, model: model)
+                MenuPageView(page: page, model: model, online: online)
             }
         }
         // Outside the stack, so every pushed page has it, above the navigation bar; a half-height sheet sits below it.
@@ -368,15 +368,28 @@ private struct LobbyPanel: View {
     }
 }
 
-/// A notice at the top of the home screen, such as an update or maintenance message.
-private struct NoticeRow: View {
-    let notice: AppModel.Notice
+/// A notice at the top of the home screen, such as an update or maintenance message, or of the profile (its racing
+/// suspension, #139).
+struct NoticeRow: View {
+    let title: String
+    var message = ""
+    var id = "home-notice"
+
+    init(notice: AppModel.Notice) {
+        self.init(title: notice.title, message: notice.message)
+    }
+
+    init(title: String, message: String = "", id: String = "home-notice") {
+        self.title = title
+        self.message = message
+        self.id = id
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(notice.title).font(MenuFont.heading(.headline))
-            if !notice.message.isEmpty {
-                Text(notice.message).font(MenuFont.body(.subheadline)).foregroundStyle(.secondary)
+            Text(title).font(MenuFont.heading(.headline))
+            if !message.isEmpty {
+                Text(message).font(MenuFont.body(.subheadline)).foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -389,7 +402,7 @@ private struct NoticeRow: View {
                 .frame(width: 6)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("home-notice")
+        .accessibilityIdentifier(id)
     }
 }
 

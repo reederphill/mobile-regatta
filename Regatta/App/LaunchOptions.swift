@@ -65,7 +65,7 @@ import RegattaServices
 /// - `-tap race-online[,terms-agree]` (Debug builds) taps Home's Race online at launch, then the Terms of Use sheet's
 ///   I agree once it is up: for a local screenshot of a state only a tap reaches (#161: the spinner, an unreachable
 ///   server, a save that failed), where `simctl` can't tap. The queue's (#140): `settings` and `practice-setup` push
-///   a page, `start-practice` and `ready` start a practice race, `takeover` waits for fleet lock, then
+///   a page (and #139's `profile`), `start-practice` and `ready` start a practice race, `takeover` waits for fleet lock, then
 ///   `briefing-leave` taps the briefing's Leave or `home` waits for the race sequence to end, and `connection-lost`
 ///   and `connection-regained` drop the connection and bring it back. The scripted queue plays a state a second at
 ///   `-timescale` (a join answered within 2 s). The race sequence's (#141): `race`, `gun` and `done` wait for the
@@ -115,6 +115,8 @@ struct LaunchOptions: Equatable {
         /// Leave and lost connection, each waiting for `takeover`.
         case settings
         case practiceSetup = "practice-setup"
+        /// The profile page (#139), pushed for the design gate's screenshots.
+        case profile
         case startPractice = "start-practice"
         case ready
         case takeover

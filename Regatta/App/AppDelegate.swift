@@ -21,6 +21,10 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     /// Opens a hand-off's race connection (#141): `/race` on the services' host with a session (#162), the Debug fake
     /// race host on the fakes; with neither (no endpoint) nothing answers.
     let raceConnector: RaceConnector
+    /// The profile's Game Center photo and leaderboard (#139): GameKit's where the identity is Game Center's, else
+    /// no photo and a leaderboard that only counts its taps.
+    let playerPhotos: any PlayerPhotoSource
+    let leaderboard: any LeaderboardPresenter
 
     override init() {
         var (services, online, connector) = AppDelegate.makeServices(launchOptions: .current)
@@ -32,6 +36,11 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         }
         #endif
         (self.services, self.online, raceConnector) = (services, online, connector)
+        if AppDelegate.usesGameCenter(.current) {
+            (playerPhotos, leaderboard) = (GameKitPlayerPhoto(), GameKitLeaderboardPresenter())
+        } else {
+            (playerPhotos, leaderboard) = (NoPlayerPhoto(), RecordingLeaderboardPresenter())
+        }
         super.init()
     }
     /// Usage analytics (#128), one for the app over its one set of `analytics.` keys: every scene logs to it. Sent at

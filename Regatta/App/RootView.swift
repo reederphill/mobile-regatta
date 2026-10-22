@@ -218,6 +218,7 @@ struct RootView: View {
                 if model.sheet == .terms { agreeToTerms() }
             case .settings: model.path = [.settings]
             case .practiceSetup: model.path = [.practiceSetup]
+            case .profile: model.path = [.profile]
             case .startPractice: model.beginPractice()
             case .ready: model.finishBriefing()
             case .takeover:
