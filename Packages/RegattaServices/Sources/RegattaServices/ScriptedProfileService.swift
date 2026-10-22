@@ -22,23 +22,33 @@ public struct ProfileScenario: Sendable {
     }
 }
 
-/// A `ProfileService` that keeps the stored livery in memory.
+/// A `ProfileService` that keeps the stored livery in memory. Given an identity, it follows that identity's Game
+/// Center state (#139): signed out, it throws `notSignedIn` whatever the scenario's profile, and once `signIn()` gives
+/// a player the scenario's profile is hers, as a real session's read would be after the sign-in.
 public actor ScriptedProfileService: ProfileService {
     private var stored: Profile?
     private let scenario: ProfileScenario
+    private let identity: (any IdentityService)?
 
-    public init(_ scenario: ProfileScenario) {
+    public init(_ scenario: ProfileScenario, signedInWith identity: (any IdentityService)? = nil) {
         self.scenario = scenario
+        self.identity = identity
         stored = scenario.profile
     }
 
-    public func profile() throws -> Profile {
+    /// The stored profile while the identity (if any) has a player.
+    private func signedInProfile() async throws -> Profile {
+        if let identity, await identity.state().player == nil { throw ProfileError.notSignedIn }
         guard let stored else { throw ProfileError.notSignedIn }
         return stored
     }
 
-    public func saveLivery(_ livery: Livery) throws -> Livery {
-        guard stored != nil else { throw ProfileError.notSignedIn }
+    public func profile() async throws -> Profile {
+        try await signedInProfile()
+    }
+
+    public func saveLivery(_ livery: Livery) async throws -> Livery {
+        _ = try await signedInProfile()
         guard !scenario.isLiveryLocked else { throw ProfileError.liveryLocked }
         do {
             try scenario.catalogue.validate(livery, boatClass: scenario.boatClass)

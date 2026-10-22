@@ -123,7 +123,7 @@ import RegattaServices
             + "signed-out, underage, communication-restricted, multiplayer-restricted, offline, queued, cancelled-race, "
             + "online-results, online-results-unrated, terms-bump, suspended, suspended-permanent, cooldown, cannot-race, "
             + "update-required, terms-save-failed, session-failed, unreachable, connecting, joinable, joinable-alone, joinable-hold, "
-            + "rejoinable, race-gone"])
+            + "rejoinable, race-gone, profile-established"])
         let missing = parse("-fakeServices", "-autostart")
         #expect(missing.fakeServices == nil && missing.autostart)
         #expect(missing.problems == ["-fakeServices needs a value"])

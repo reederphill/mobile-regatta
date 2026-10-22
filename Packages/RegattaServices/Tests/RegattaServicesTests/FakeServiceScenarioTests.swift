@@ -15,7 +15,7 @@ import Testing
             "signed-out", "underage", "communication-restricted", "multiplayer-restricted", "offline", "queued", "cancelled-race",
             "online-results", "online-results-unrated", "terms-bump", "suspended", "suspended-permanent", "cooldown", "cannot-race",
             "update-required", "terms-save-failed", "session-failed", "unreachable", "connecting", "joinable", "joinable-alone",
-            "joinable-hold", "rejoinable", "race-gone",
+            "joinable-hold", "rejoinable", "race-gone", "profile-established",
         ])
         for scenario in FakeServiceScenario.allCases {
             let services = ServiceSet.fake(scenario)
@@ -79,7 +79,7 @@ import Testing
                 #expect(try await services.raceSession.handOff().raceID == RaceID("fake-race"))
                 #expect(try await services.raceSession.handOff().briefing == FakeServiceScenario.briefing())
             // The queue from a tap to fleet lock (#140): idle, and a join plays the wait.
-            case .joinable, .joinableAlone, .joinableHold, .rejoinable, .raceGone:
+            case .joinable, .joinableAlone, .joinableHold, .rejoinable, .raceGone, .profileEstablished:
                 #expect(queue == .idle)
                 await #expect(throws: QueueError.notQueued) { try await services.queue.leave() }
                 try await services.queue.join()
@@ -145,6 +145,50 @@ import Testing
                 #expect(lobby == .closed(.notSignedIn))
                 #expect(await services.identity.signIn().player == nil, "no service signs her in")
             }
+        }
+    }
+
+    /// The profile each scenario's server keeps (#139): a new player's, but for `profile-established`'s.
+    @Test func everySignedInScenarioHasANewPlayersProfileButTheEstablishedOne() async throws {
+        for scenario in FakeServiceScenario.allCases where scenario.startsSignedIn {
+            let profile = try await ServiceSet.fake(scenario).profile.profile()
+            #expect(profile.nickname == "Sailor", "\(scenario)")
+            if scenario == .profileEstablished {
+                #expect(profile.rating == Rating(value: 1586, isProvisional: false))
+                #expect(profile.completedRaces == 32 && profile.wins == 4)
+                #expect(profile.progress == EarnedProgress(
+                    earned: [DesignID("skiff-earned-10")], next: EarnedMilestone(design: DesignID("skiff-earned-50"), completedRaces: 50)),
+                    "32 / 50 races")
+            } else {
+                #expect(profile.rating == Rating(value: 1500, isProvisional: true), "\(scenario): a new player")
+                #expect(profile.completedRaces == 0 && profile.wins == 0, "\(scenario)")
+                #expect(profile.progress == EarnedProgress(
+                    earned: [], next: EarnedMilestone(design: DesignID("skiff-earned-10"), completedRaces: 10)), "\(scenario): 0 / 10 races")
+            }
+            switch scenario {
+            case .suspended: #expect(profile.suspension == RacingSuspension(until: FakeServiceScenario.suspendedUntil))
+            case .suspendedPermanent: #expect(profile.suspension == RacingSuspension(until: nil))
+            default: #expect(profile.suspension == nil, "\(scenario): no suspension")
+            }
+        }
+    }
+
+    /// The profile follows Game Center (#139): `signed-out`'s comes in with the sign-in, and a scenario whose
+    /// sign-in gives nobody never has one.
+    @Test func theProfileFollowsTheSignIn() async throws {
+        let signedOut = ServiceSet.fake(.signedOut)
+        await #expect(throws: ProfileError.notSignedIn) { try await signedOut.profile.profile() }
+        await #expect(throws: ProfileError.notSignedIn) { try await signedOut.profile.saveLivery(Livery(
+            design: DesignID("skiff-plain"), colours: [SwatchID("sky-blue"), SwatchID("white")], sailNumber: 207)) }
+        let player = try #require(await signedOut.identity.signIn().player)
+        let profile = try await signedOut.profile.profile()
+        #expect(profile.gamePlayerID == player.gamePlayerID)
+        #expect(profile.rating == Rating(value: 1500, isProvisional: true) && profile.completedRaces == 0)
+
+        for scenario in FakeServiceScenario.allCases where scenario.playsSession {
+            let services = ServiceSet.fake(scenario)
+            _ = await services.identity.signIn()
+            await #expect(throws: ProfileError.notSignedIn, "\(scenario)") { try await services.profile.profile() }
         }
     }
 
