@@ -182,6 +182,15 @@ import Testing
         #expect(ProfileModel.progressText(loaded) == "0 / 10 races")
     }
 
+    /// The gallery fixture (#139, G9) is `profile-established`'s player on a livery the catalogue takes.
+    @Test func theGalleryShowsTheEstablishedProfile() throws {
+        #expect(try RenderFixture.gallery(named: "profile", in: RenderFixtureTests.fixtures) == .profile)
+        let shown = ProfileFixture.established
+        #expect(shown.rating == Rating(value: 1586, isProvisional: false) && shown.completedRaces == 32 && shown.wins == 4)
+        #expect(ProfileModel.progressText(shown) == "32 / 50 races")
+        try LiveryCatalogue.bundled.validate(shown.livery, boatClass: "skiff")
+    }
+
     /// The fakes' leaderboard only counts its taps (T4); the fakes have no photo.
     @Test func theFakesRecordTheLeaderboardAndHaveNoPhoto() async throws {
         let leaderboard = RecordingLeaderboardPresenter()

@@ -16,11 +16,14 @@ struct ProfileView: View {
     @State private var profile: ProfileModel
     /// Try again's taps: each reads the profile again.
     @State private var attempts = 0
+    /// A render fixture's profile (#139, G9): shown as read, with its own livery, and no services.
+    private let fixture: Profile?
 
-    init(model: AppModel, status: OnlineStatus?, online: HomeOnlineActions) {
+    init(model: AppModel, status: OnlineStatus?, online: HomeOnlineActions, fixture: Profile? = nil) {
         self.model = model
         self.status = status
         self.online = online
+        self.fixture = fixture
         _profile = State(initialValue: ProfileModel(profile: status?.services.profile,
                                                     mayAskService: { [weak status] in status?.mayAskService ?? false },
                                                     adoptCount: { [weak model] in model?.adoptServerCount($0) }))
@@ -42,7 +45,7 @@ struct ProfileView: View {
     }
 
     private var state: ProfilePageState {
-        guard let status else { return .signIn }
+        guard let status else { return fixture.map(ProfilePageState.loaded) ?? .signIn }
         return profile.state(isOnline: status.isOnline, status: status.lobbyStatus, retryLine: status.lobbyRetryLine)
     }
 
@@ -220,7 +223,7 @@ struct ProfileView: View {
     private func boat(_ loaded: Profile) -> some View {
         VStack(spacing: 0) {
             Button { openMyBoat(trying: nil) } label: {
-                LiveryRenderView(livery: model.myBoat.saved)
+                LiveryRenderView(livery: fixture?.livery ?? model.myBoat.saved)
                     .frame(maxWidth: .infinity)
                     .padding(16)
                     .contentShape(.rect)
@@ -275,4 +278,15 @@ struct ProfileView: View {
         model.myBoat.open(trying: design)
         model.path.append(.myBoat)
     }
+}
+
+/// What a render fixture shows on the profile (#139, G9): `profile-established`'s player (32 races, 4 wins, 1586
+/// established, next design at 50) on a fixed livery, so the render never reads the device's.
+enum ProfileFixture {
+    static let established = Profile(
+        gamePlayerID: GamePlayerID("G:fake-1"), nickname: "Sailor", rating: Rating(value: 1586, isProvisional: false),
+        completedRaces: 32, wins: 4, suspension: nil,
+        progress: EarnedProgress(earned: [DesignID("skiff-earned-10")],
+                                 next: EarnedMilestone(design: DesignID("skiff-earned-50"), completedRaces: 50)),
+        livery: Livery(design: DesignID("skiff-plain"), colours: [SwatchID("sky-blue"), SwatchID("white")], sailNumber: 207))
 }

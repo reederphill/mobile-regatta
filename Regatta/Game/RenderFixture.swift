@@ -155,6 +155,8 @@ struct RenderFixture: Codable, Equatable {
         case rejoin
         /// Home with a Last race row whose rating is in (#141): `{ "gallery": "lastRaceRating" }`.
         case lastRaceRating
+        /// The profile of an established player (#139, `ProfileFixture.established`): `{ "gallery": "profile" }`.
+        case profile
         /// The results sheet on a sample race (#132): `{ "gallery": "results", "results": "live" }` or `"closed"`
         /// (`ResultsGalleryView`), with practice rivals (#235) if the file gives a `"rivalSkill"`.
         case results(ResultsStage, rivalSkill: Double? = nil)
@@ -270,7 +272,8 @@ struct RenderFixture: Codable, Equatable {
 
     private struct GalleryFile: Decodable {
         enum Kind: String, Decodable {
-            case livery, briefing, briefingLocked, queueBar, practiceSetup, pauseMenu, results, myBoat, help, rejoin, lastRaceRating
+            case livery, briefing, briefingLocked, queueBar, practiceSetup, pauseMenu, results, myBoat, help, rejoin, lastRaceRating,
+                 profile
         }
 
         var gallery: Kind?
@@ -302,6 +305,7 @@ struct RenderFixture: Codable, Equatable {
             case .pauseMenu?: return .pauseMenu
             case .rejoin?: return .rejoin
             case .lastRaceRating?: return .lastRaceRating
+            case .profile?: return .profile
             case .results?:
                 guard let stage = decoded.results else { throw GalleryError.resultsStageMissing }
                 return .results(stage, rivalSkill: decoded.rivalSkill)
