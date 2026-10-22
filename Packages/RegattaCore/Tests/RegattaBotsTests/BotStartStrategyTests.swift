@@ -8,7 +8,7 @@ import RegattaCore
 /// start-strategy rows); these follow single bots.
 @Suite struct BotStartStrategyTests {
     /// The chooser chooses at her first decision from T−45 and remembers it: in a fleet of live bots every bot chooses
-    /// once, then, and the same race chooses the same. A takeover (`adopt`) clears it, and she chooses fresh at her
+    /// then, again only on a named abort (`StartStrategyAbort`), and the same race chooses the same. A takeover (`adopt`) clears it, and she chooses fresh at her
     /// first decision.
     @Test func chooserIsDeterministicAndSticky() throws {
         let window = Double(BotDriver.decisionInterval) / Double(Race.tickRate)
@@ -30,7 +30,9 @@ import RegattaCore
             let seen = choices(seed: seed)
             #expect(seen == choices(seed: seed), "seed \(seed): the same race chose alike")
             for (seat, list) in seen.enumerated() {
-                #expect(list.count == 1, "seed \(seed) seat \(seat): chose \(list)")
+                // Chosen again only on a named abort, and never back to the plan it left.
+                #expect(!list.isEmpty && list.dropFirst().allSatisfy { $0.abort != nil }, "seed \(seed) seat \(seat): chose \(list)")
+                #expect(zip(list, list.dropFirst()).allSatisfy { $0.plan != $1.plan }, "seed \(seed) seat \(seat): chose \(list)")
                 let time = list.first?.time ?? -.infinity
                 #expect(time >= -BotBrain.chooseFromSeconds && time < -BotBrain.chooseFromSeconds + window,
                         "seed \(seed) seat \(seat): chose at \(time)")
@@ -139,5 +141,87 @@ import RegattaCore
                 #expect((favoured - tactician.brain.style.startSpot) * bias > 0, "bias \(bias) seed \(seed): tactician at \(favoured)")
             }
         }
+    }
+
+    /// The scripted fleet's size: a line and race area of a 10-boat fleet's (the start suite's); she sails alone, the
+    /// others placed well clear and left unsteered.
+    static let scriptedFleet = 10
+
+    /// One live bot in open water sailing the boat end from T−45 (`StartChoice` set before her first decision, so the
+    /// chooser leaves it), on starboard 5 L below and 4 L right of the middle of the line, her style's spot 0.85: on
+    /// `conditions` at seed `seed`, her start (ticks after the gun), whether she was over at the gun, her speed at the
+    /// gun of close-hauled in the wind there, the plans she sailed, the wind in knots, and whether the boat end was
+    /// feasible at her first decision (`isFeasible`).
+    static func sailBoatEnd(conditions id: String, seed: UInt64) throws
+        -> (start: Int?, overAtGun: Bool, speed: Double, plans: [StartStrategy], knots: Double, feasible: Bool) {
+        let conditions = try ConditionsFile.bundled(id: id, version: 7)
+        let venue = try VenueFile.bundled(id: "dev-venue", version: 7)
+        let setup = try RaceSetup(raceSeed: RaceSeed(seed), seats: Array(repeating: .bot, count: Self.scriptedFleet), laps: 1,
+                                  startSequenceTicks: 55 * Race.tickRate, boatClass: BotConductTests.waterClass,
+                                  venue: venue.ref, conditions: conditions.ref)
+        let race = try Race(setup: setup, files: RaceFiles(resolving: setup),
+                            mode: .authoritative(windSeed: WindSeed(seed &* 0x9E37_79B9_7F4A_7C15 &+ 1)))
+        for _ in 0..<(10 * Race.tickRate) { race.step() }
+        let c = race.course
+        let length = race.boatClass.hull.length
+        let at = c.startLine.centre - c.upwind * (length * 5) + c.right * (length * 4)
+        let wind = race.groundWind(at: at)
+        let polar = race.boatClass.polar
+        var snapshot = race.exportSnapshot()
+        for seat in 0..<Self.scriptedFleet {
+            let heading = wind.direction - polar.bestUpwind(tws: wind.speed).twa
+            snapshot.seats[seat].boat.position = seat == 0 ? at : at + c.right * 400 - c.upwind * (20 * Double(seat))
+            snapshot.seats[seat].boat.heading = heading
+            snapshot.seats[seat].boat.speed = 2
+            snapshot.seats[seat].boat.boomSide = wrapAngle(wind.direction - heading) >= 0 ? .port : .starboard
+            snapshot.seats[seat].boat.autohelm = Autohelm(target: .angle(abs(wrapAngle(wind.direction - heading))))
+        }
+        try race.importSnapshot(snapshot)
+        var pilot = BotConductTests.Pilot(seat: 0, plannedTack: .starboard, race: race, weaknesses: .none(skill: 1), helm: false)
+        var style = pilot.brain.style
+        style.startSpot = 0.85
+        pilot.brain = BotBrain(style: style, seed: 1, weaknesses: .none(skill: 1))
+        pilot.brain.tactics = Tactics(profile: nil, skill: BotTier.national.skillBand.lowerBound, style: style,
+                                      weaknesses: pilot.brain.weaknesses)
+        pilot.brain.plannedTack = .starboard
+        let first = race.seatView(for: 0)
+        let feasible = pilot.brain.isFeasible(.boatEnd, first.own, first)
+        pilot.brain.startStrategy = StartChoice(plan: .boatEnd, time: -45)
+        pilot.steerByHand()
+        var plans: [StartStrategy] = [.boatEnd]
+        var start: Int?
+        var over = false
+        var speed = 0.0
+        while race.tick < 10 * Race.tickRate, !race.isOver {
+            _ = pilot.drive(race)
+            race.step()
+            if let sailed = pilot.brain.startStrategy?.plan, plans.last != sailed { plans.append(sailed) }
+            if race.tick == 0 {
+                let boat = race.boats[0]
+                over = boat.status != .prestart
+                speed = boat.speed / polar.bestUpwind(tws: race.groundWind(at: boat.position).speed).speed
+            }
+            if start == nil, race.boats[0].status == .racing { start = race.tick }
+        }
+        return (start, over, speed, plans, knots(metresPerSecond: wind.speed), feasible)
+    }
+
+    /// "Starboard boat-end" (owner G1′), sailed alone in open water from T−45 on light, classic and gusty winds (about 6
+    /// to 20 kn on skiff@9): feasible, on the line within 3 s of the gun and not over it, on her plan throughout.
+    @Test func boatEndReachesTheLineAtTheGun() throws {
+        var lines: [String] = []
+        var failures = 0
+        for id in ["light-and-patchy", "classic-oscillating", "gusty-offshore"] {
+            for seed: UInt64 in 1...4 {
+                let r = try Self.sailBoatEnd(conditions: id, seed: seed)
+                let ok = r.feasible && !r.overAtGun && (r.start.map { $0 <= 3 * Race.tickRate } ?? false) && r.plans == [.boatEnd]
+                if !ok { failures += 1 }
+                lines.append(String(format: "%@ s%d %.1f kn: feasible %@, start %@ s, over %@, speed %.2f, plans %@", id, seed,
+                                    r.knots, "\(r.feasible)",
+                                    r.start.map { String(format: "%.1f", Double($0) / Double(Race.tickRate)) } ?? "-",
+                                    "\(r.overAtGun)", r.speed, "\(r.plans.map(\.rawValue))"))
+            }
+        }
+        #expect(failures == 0, "\(lines.joined(separator: "\n"))")
     }
 }
