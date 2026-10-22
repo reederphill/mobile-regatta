@@ -57,7 +57,8 @@ import RegattaServices
 ///   `cancelled-race`, `online-results`, `online-results-unrated`, `terms-bump`, and #161's `suspended`,
 ///   `suspended-permanent`, `cooldown`, `cannot-race`, `update-required`, `terms-save-failed`, `session-failed`,
 ///   `unreachable` or `connecting`, #140's `joinable`, `joinable-alone` or `joinable-hold`, #141's `rejoinable` or
-///   `race-gone`, and #139's `profile-established` (`FakeServiceScenario`).
+///   `race-gone`, #139's `profile-established`, and #142's `lobby-free-text`, `lobby-muted` or `lobby-banned`
+///   (`FakeServiceScenario`).
 ///   Every scenario whose player gets past Race online's gate has a queue to join, to fleet lock and its briefing
 ///   (#140). The `joinable` ones, `signed-out`, `cancelled-race`, `race-gone` and `rejoinable` go on into a fake race
 ///   (#141, `FakeRaceDirector`): the gun 75 s after fleet lock, at `-timescale`. Debug builds only (#314): other builds don't know it, so a
