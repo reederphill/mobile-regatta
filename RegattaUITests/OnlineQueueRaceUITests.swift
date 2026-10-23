@@ -67,7 +67,7 @@ final class OnlineQueueRaceUITests: XCTestCase {
         XCTAssertTrue(app.buttons["race-online"].waitForExistence(timeout: 30), "no Race online")
         // Past the gates: the lobby's own panels (before #164 a session's lobby can't be reached, so "Can't reach the
         // lobby"), never Sign in or the terms.
-        let pastTheGates = app.descendants(matching: .any).matching(NSPredicate(format: "identifier IN %@", ["lobby-feed", "lobby-unreachable"]))
+        let pastTheGates = app.descendants(matching: .any).matching(NSPredicate(format: "identifier IN %@", ["lobby-feed", "lobby-unreachable", "lobby-loading"]))
         XCTAssertTrue(pastTheGates.firstMatch.waitForExistence(timeout: 30), "no session for a player with the terms accepted")
     }
 

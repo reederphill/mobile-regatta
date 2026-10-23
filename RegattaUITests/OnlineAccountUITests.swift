@@ -161,9 +161,9 @@ final class OnlineAccountUITests: XCTestCase {
         let raceOnline = app.buttons["race-online"]
         XCTAssertTrue(raceOnline.waitForExistence(timeout: 30), "no Race online")
         // The session is open, the terms accepted: the lobby area asks for nothing.
-        // Past the gates: the lobby's own panels (before #164 a session's lobby can't be reached, so "Can't reach the
-        // lobby"), never Sign in or the terms.
-        let pastTheGates = app.descendants(matching: .any).matching(NSPredicate(format: "identifier IN %@", ["lobby-feed", "lobby-unreachable"]))
+        // Past the gates: the lobby's own panels, never Sign in or the terms. Before #164 a session's lobby isn't
+        // reached, so it may stay loading or say "Can't reach the lobby"; both come only after the gates.
+        let pastTheGates = app.descendants(matching: .any).matching(NSPredicate(format: "identifier IN %@", ["lobby-feed", "lobby-unreachable", "lobby-loading"]))
         XCTAssertTrue(pastTheGates.firstMatch.waitForExistence(timeout: 30), "no session for a player with the terms accepted")
 
         try await arrange(host: host, player: player, service: "QueueService", situation: "cooldown")
