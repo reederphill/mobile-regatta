@@ -197,7 +197,7 @@ private struct PrimaryLabel: View {
 /// One boat's row (#24): place, livery chip and sail number, the bot glyph and name, "Rival" for a practice rival
 /// (#235), ⚑, the result. On a rival's row the name keeps priority over the word at 375 pt; other rows lay out as
 /// they always have.
-private struct ResultRowView: View {
+struct ResultRowView: View {
     let row: RaceResultViewModel.Row
     /// Your rating, under your row online (#133); nil leaves the row as practice draws it.
     var rating: RaceResultViewModel.RatingCell? = nil
@@ -264,7 +264,8 @@ private struct ResultRowView: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .frame(width: 36, alignment: .leading)
-                .accessibilityLabel("Sail number \(row.livery.sailNumber)")
+                // Verbatim: a localized key would group the digits ("3,097") under a row that shows 3097 (#163).
+                .accessibilityLabel(Text(verbatim: "Sail number \(row.livery.sailNumber)"))
             if row.isBot {
                 Image(systemName: BotGlyph.symbolName)
                     .foregroundStyle(.secondary)
