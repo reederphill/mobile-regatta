@@ -152,8 +152,11 @@ struct BotBrain: Sendable {
     /// Her last plan: when she made it, the tack she was on, and whether turning paid; she holds it
     /// `BotPlanner.replanSeconds`.
     var lastPlan: (time: Double, tack: Tack, gain: Double)?
-    /// Plans she has made (#583: the planner's cost, `BotPlanner.steps` each).
+    /// Plans she has made (#583: the planner's cost, `BotPlanner.steps` each), and the last one's inputs.
     var plans = 0
+    var lastPlanRequest: BotPlanner.Request?
+    /// The steady polars her planner has worked out (`SteadyPolars`), kept for her next plan.
+    var steadyPolars = SteadyPolars()
     var plannedTack: Tack = .starboard
     /// The tactician's spot on the start line as she reads its bias (#105, `Tactics.startsAtFavouredEnd`, `readLineBias`),
     /// 0 the pin … 1 the committee boat; nil until she has read it, or for any other bot.

@@ -143,13 +143,14 @@ struct BotPlanner: Sendable, Equatable {
         return Sailed(state: state, seconds: t)
     }
 
-    /// Seconds from `sailed` to `target`: what it took, plus the polar's best she can hold (`SteadyPolar`) from where it
+    /// Seconds from `sailed` to `target`: what it took, plus the polar's best she can hold (`SteadyPolars`) from where it
     /// left her in the wind she sees there (two tacks or gybes where it can't be fetched), plus what her speed below
     /// her target there costs to make up.
-    static func seconds(_ sailed: Sailed, to target: Vec2, wind: PerceivedWind, boatClass: BoatClass) -> Double {
+    static func seconds(_ sailed: Sailed, to target: Vec2, wind: PerceivedWind, boatClass: BoatClass,
+                        polars: inout SteadyPolars) -> Double {
         // The rest of the leg in the wind she expects for it: the mean's, where her shift fades.
         let w = wind.at(sailed.state.position, after: wind.reversion > 0 ? 1e9 : sailed.seconds)
-        let polar = SteadyPolar(boatClass: boatClass, tws: w.speed)
+        let polar = polars.polar(tws: w.speed, boatClass: boatClass)
         let run = target - sailed.state.position
         let distance = run.length
         let off = abs(wrapAngle(w.direction - run.bearing))
@@ -172,10 +173,33 @@ struct BotPlanner: Sendable, Equatable {
         return sailed.seconds + rest + deficit
     }
 
-    /// Seconds turning now gains on holding on, to `target`, for her in `view` sailing `twa` (her groove's angle on
-    /// either side), at `depth`, seeing out to `range` metres: positive, the turn gets her there sooner.
-    static func turnGain(_ view: SeatView, twa: Double, isPlaning: Bool, target: Vec2, depth: Depth,
-                         range: Double, reversion: Double = 0) -> Double {
+    /// One plan (#583 stage 3): her view now, the groove's angle `twa` she sails on either side, whether she planes, where
+    /// she sails for, her depth, how far she sees (`Tactics.puffRange`) and how fast she expects her shift to fade, and
+    /// the steady polars she has worked out so far. Kept as her last plan (`BotBrain.lastPlanRequest`), so the budget test
+    /// (`PlannerTests.plannerStaysWithinTheTickBudget`) can time it again, outside the bot, which reads no clock.
+    struct Request: Sendable {
+        let view: SeatView
+        let twa: Double
+        let isPlaning: Bool
+        let target: Vec2
+        let depth: Depth
+        let range: Double
+        let reversion: Double
+        let polars: SteadyPolars
+
+        /// The seconds turning now gains on holding on, to `target`: positive, the turn gets her there sooner.
+        func gain() -> Double { run().gain }
+
+        /// `gain()`, and the steady polars with any it worked out added, for her next plan.
+        func run() -> (gain: Double, polars: SteadyPolars) {
+            BotPlanner.gain(self)
+        }
+    }
+
+    private static func gain(_ request: Request) -> (gain: Double, polars: SteadyPolars) {
+        let (view, twa, isPlaning, target, depth) = (request.view, request.twa, request.isPlaning, request.target, request.depth)
+        let (range, reversion) = (request.range, request.reversion)
+        var polars = request.polars
         let b = view.own
         let wind = PerceivedWind(view, range: range, reversion: reversion)
         let kite: Spinnaker = view.boatClass.spinnaker.map { b.twa >= $0.hoistAboveTWA ? .up : .down } ?? .down
@@ -183,7 +207,8 @@ struct BotPlanner: Sendable, Equatable {
                                        boomSide: b.boomSide, isPlaning: isPlaning, spinnaker: kite)
         let hold = sail(start, side: b.boomSide, twa: twa, for: depth.horizon, wind: wind, boatClass: view.boatClass)
         let turn = sail(start, side: b.boomSide.opposite, twa: twa, for: depth.horizon, wind: wind, boatClass: view.boatClass)
-        return seconds(hold, to: target, wind: wind, boatClass: view.boatClass)
-            - seconds(turn, to: target, wind: wind, boatClass: view.boatClass)
+        let gain = seconds(hold, to: target, wind: wind, boatClass: view.boatClass, polars: &polars)
+            - seconds(turn, to: target, wind: wind, boatClass: view.boatClass, polars: &polars)
+        return (gain, polars)
     }
 }

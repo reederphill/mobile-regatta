@@ -402,8 +402,13 @@ extension BotBrain {
         if let last = lastPlan, last.tack == tack, view.time - last.time < BotPlanner.replanSeconds {
             gain = last.gain
         } else {
-            gain = BotPlanner.turnGain(view, twa: grooveAngle(groove, b, view), isPlaning: senses.planing, target: target,
-                                       depth: planning, range: tactics.puffRange, reversion: tunables.plannerShiftReversion)
+            let request = BotPlanner.Request(view: view, twa: grooveAngle(groove, b, view), isPlaning: senses.planing,
+                                             target: target, depth: planning, range: tactics.puffRange,
+                                             reversion: tunables.plannerShiftReversion, polars: steadyPolars)
+            let plan = request.run()
+            gain = plan.gain
+            steadyPolars = plan.polars
+            lastPlanRequest = request
             lastPlan = (view.time, tack, gain)
             plans += 1
         }

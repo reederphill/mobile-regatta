@@ -48,3 +48,20 @@ public struct SteadyPolar: Sendable {
         return speeds[low] * (1 - share) + speeds[low + 1] * share
     }
 }
+
+/// Steady polars by wind speed (#583 stage 3): each worked out once a tenth of a metre a second of wind and kept, for a
+/// bot's planner, whose every plan would otherwise work out two. Read by key only, never iterated.
+public struct SteadyPolars: Sendable {
+    private var byTenth: [Int: SteadyPolar] = [:]
+
+    public init() {}
+
+    /// The polar at `tws`, to the nearest tenth of a metre a second.
+    public mutating func polar(tws: Double, boatClass: BoatClass) -> SteadyPolar {
+        let key = Int((tws * 10).rounded())
+        if let known = byTenth[key] { return known }
+        let polar = SteadyPolar(boatClass: boatClass, tws: Double(key) / 10)
+        byTenth[key] = polar
+        return polar
+    }
+}

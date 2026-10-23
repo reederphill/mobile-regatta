@@ -157,6 +157,10 @@ public struct BotDriver: Sendable {
 
     /// How far ahead she plans her tacks and gybes (#583 stage 3), in seconds; nil, she doesn't plan.
     public var planningHorizon: Double? { brain.planning?.horizon }
+    /// Plans she has made so far (#583), and the last one's inputs: what the budget test times again.
+    var plans: Int { brain.plans }
+    var lastPlanRequest: BotPlanner.Request? { brain.lastPlanRequest }
+
     /// The forward-sail steps her plans have cost so far (#583: `BotPlanner.steps` a plan).
     public var planningSteps: Int { brain.planning.map { brain.plans * BotPlanner.steps($0) } ?? 0 }
 
