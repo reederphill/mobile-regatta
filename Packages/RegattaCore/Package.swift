@@ -9,6 +9,7 @@ let package = Package(
         .library(name: "RegattaBots", targets: ["RegattaBots"]),
         .executable(name: "regatta-replay", targets: ["regatta-replay"]),
         .executable(name: "regatta-botsuite", targets: ["regatta-botsuite"]),
+        .executable(name: "regatta-timetrial", targets: ["regatta-timetrial"]),
         .executable(name: "regatta-venue-png", targets: ["regatta-venue-png"]),
     ],
     dependencies: [
@@ -56,6 +57,8 @@ let package = Package(
         ),
         // A thin command line over BotSuite, and the UI tests' seed probe (#404) over RegattaBots.
         .executableTarget(name: "regatta-botsuite", dependencies: ["BotSuite", "RegattaBots", "RegattaCore"]),
+        // The oracle time trial (#583): one boat, the fastest lap a search finds, and where each bot loses time to it.
+        .executableTarget(name: "regatta-timetrial", dependencies: ["BotSuite"]),
         // regatta-botsuite is a dependency so `swift test` builds it: the gate tests run it as its own process.
         .testTarget(name: "BotSuiteTests", dependencies: ["BotSuite", "regatta-botsuite", "RegattaCore", "RegattaBots"]),
     ]
