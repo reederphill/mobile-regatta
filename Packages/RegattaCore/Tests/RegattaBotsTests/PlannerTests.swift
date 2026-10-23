@@ -6,12 +6,33 @@ import Testing
 /// #583 stage 3: the National helm plans her tacks and gybes (`BotPlanner`) on what her seat sees and nothing more, and
 /// within a per-tick budget.
 @Suite struct PlannerTests {
-    /// The bundled tunables with the planner on at the ticket's horizon: 20 s at the top of the National band.
+    /// The bundled tunables with the planner on at the ticket's horizon, 20 s at the top of the National band, from
+    /// halfway through the Regional band at 8 s: whatever the bundled file plans.
     static let planning: BotTunables = {
         var tunables = BotTunables.bundled
         tunables.plannerHorizon = 20
+        tunables.plannerStartHorizon = 8
+        tunables.plannerStart = 0.5
         return tunables
     }()
+
+    /// What ships (`bot-tunables@2`): every National bot plans, deeper the higher in the band; Club, Regional and the
+    /// suite's profiles keep the heuristics (planning Regional too slowed it on the validation seeds, #583).
+    @Test func theBundledSetPlansForNationalOnly() {
+        let national = BotTier.national.skillBand
+        let bottom = BotPlanner.depth(skill: national.lowerBound, tunables: .bundled)
+        let top = BotPlanner.depth(skill: national.upperBound, tunables: .bundled)
+        #expect(bottom != nil && top != nil)
+        #expect((bottom?.horizon ?? 99) < (top?.horizon ?? 0))
+        #expect(BotPlanner.depth(skill: BotTier.regional.skillBand.upperBound - 0.001, tunables: .bundled) == nil)
+        for seat in 0..<8 {
+            let raceSeed = RaceSeed(UInt64(seat) + 1)
+            #expect(BotDriver(seat: seat, raceSeed: raceSeed, tier: .national).planningHorizon != nil)
+            #expect(BotDriver(seat: seat, raceSeed: raceSeed, tier: .regional).planningHorizon == nil)
+            #expect(BotDriver(seat: seat, raceSeed: raceSeed, tier: .club).planningHorizon == nil)
+            #expect(BotDriver(seat: seat, raceSeed: raceSeed, skill: 1, profile: .tactician).planningHorizon == nil)
+        }
+    }
 
     /// #583 ("Information, not foresight"): two keys-only races holding every key from the start, the same through
     /// window k and different after it, sailed by planning National bots. Until window k + 1's wind reaches a view,

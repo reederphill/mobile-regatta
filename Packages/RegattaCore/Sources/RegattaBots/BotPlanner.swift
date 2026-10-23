@@ -17,9 +17,9 @@ import RegattaCore
 /// Rules and the fleet stay the heuristics' (`upwindTack`'s tack interval, fleet tactics, cover, laylines and corridor,
 /// and everything off the open beat and run): the planner is asked only where they would weigh the shift.
 ///
-/// Skill is depth (`Depth`): a live bot plans from part way through the Regional band, her horizon growing through it
-/// and the National band (`depth(skill:tunables:)`, its numbers `BotTunables`'); below it, and for the suite's profiles,
-/// she keeps the heuristics.
+/// Skill is depth (`Depth`): a live bot plans from `BotTunables.plannerStart` through the Regional band (the bundled file:
+/// its top, so every National bot and no Regional one), her horizon growing to the top of the National band
+/// (`depth(skill:tunables:)`); below it, and for the suite's profiles, she keeps the heuristics.
 struct BotPlanner: Sendable, Equatable {
     /// How far ahead she plans.
     struct Depth: Sendable, Equatable {
