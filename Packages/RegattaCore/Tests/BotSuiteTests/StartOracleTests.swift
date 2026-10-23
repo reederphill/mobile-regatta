@@ -41,14 +41,19 @@ import Testing
         #expect(replay.digest == trial.oracleDigest, "and is the trial's start, to the bit")
     }
 
-    /// #584: the oracle's start is never over the line at the gun, and it crosses within a second after it.
-    @Test func oracleIsNeverOCSAndCrossesWithinASecondOfTheGun() {
+    /// The latest after the gun the oracle may start. The T+60 score may rank a start a little late in better air above
+    /// one on time, and the owner keeps those (#584, 2026-10-23): the full search crossed later than a second on 22 of the
+    /// pool's 200 seeds and 4 of the 40 hold-outs, 3.4 s at the latest. Later than this is a search gone wrong.
+    static let latestStartSeconds = 5.0
+
+    /// #584: the oracle's start is never over the line at the gun, and it crosses soon after it.
+    @Test func oracleIsNeverOCSAndStartsSoonAfterTheGun() {
         #expect(Self.report.seeds.count == 4)
         for trial in Self.report.seeds {
             let oracle = trial.oracle
             #expect(!oracle.ocs, "\(trial.seed.name): the oracle was over at the gun")
             let start = oracle.startSeconds ?? .infinity
-            #expect(start >= 0 && start <= 1, "\(trial.seed.name) \(trial.seed.trial.conditions): the oracle started at \(start) s")
+            #expect(start >= 0 && start <= Self.latestStartSeconds, "\(trial.seed.name) \(trial.seed.trial.conditions): the oracle started at \(start) s")
         }
     }
 
