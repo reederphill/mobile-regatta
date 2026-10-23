@@ -1,3 +1,5 @@
+import RegattaCore
+
 // The lobby on the wire (#17, #34, #241): its state and mute notices, the history, the feed, posting free text and
 // quick-chat, blocking and reporting.
 
@@ -181,6 +183,33 @@ public struct WireBlockedPlayer: Equatable, Sendable {
     }
 }
 
+/// A lobby player's boat card (#25, #142): her current livery with its sail number, nickname and rating.
+public struct WireBoatCard: Equatable, Sendable {
+    public var gamePlayerID: String
+    public var nickname: String
+    public var rating: WireRating
+    public var livery: Livery
+
+    public init(gamePlayerID: String, nickname: String, rating: WireRating, livery: Livery) {
+        self.gamePlayerID = gamePlayerID
+        self.nickname = nickname
+        self.rating = rating
+        self.livery = livery
+    }
+
+    func encode(to w: inout WireWriter) throws {
+        try w.text(gamePlayerID, "gamePlayerID")
+        try w.text(nickname, "nickname")
+        rating.encode(to: &w)
+        try livery.encode(to: &w)
+    }
+
+    init(from r: inout WireReader) throws {
+        self.init(gamePlayerID: try r.text("gamePlayerID"), nickname: try r.text("nickname"), rating: try WireRating(from: &r),
+                  livery: try Livery(from: &r))
+    }
+}
+
 public enum WireLobbyError: Equatable, Sendable {
     case closed(WireLobbyClosure)
     case freeTextLocked
@@ -192,6 +221,8 @@ public enum WireLobbyError: Equatable, Sendable {
     case unknownMessage
     case notReportable
     case cannotBlockSelf
+    /// No boat card: a player the lobby doesn't know, a blocked pair either way, or herself (#142).
+    case unknownPlayer
 }
 
 public enum LobbyCall: Equatable, Sendable {
@@ -207,6 +238,8 @@ public enum LobbyCall: Equatable, Sendable {
     case reportMessage(messageID: String)
     case reportPlayer(gamePlayerID: String)
     case reportRace(raceID: String, seat: Int, reason: WireRaceReportReason)
+    /// Another player's boat card (#142).
+    case boatCard(gamePlayerID: String)
 
     func encode(to w: inout WireWriter) throws {
         switch self {
@@ -237,6 +270,9 @@ public enum LobbyCall: Equatable, Sendable {
             try w.text(raceID, "raceID")
             try w.index(seat, "seat")
             w.u8(reason.rawValue)
+        case .boatCard(let id):
+            w.u8(11)
+            try w.text(id, "gamePlayerID")
         }
     }
 
@@ -253,6 +289,7 @@ public enum LobbyCall: Equatable, Sendable {
         case 8: self = .reportMessage(messageID: try r.text("messageID"))
         case 9: self = .reportPlayer(gamePlayerID: try r.text("gamePlayerID"))
         case 10: self = .reportRace(raceID: try r.text("raceID"), seat: try r.index(), reason: try r.code("reason"))
+        case 11: self = .boatCard(gamePlayerID: try r.text("gamePlayerID"))
         default: throw WireError.invalidValue("lobbyCall")
         }
     }
@@ -269,6 +306,7 @@ public enum LobbyResult: Equatable, Sendable {
     case done
     case blockedPlayers([WireBlockedPlayer])
     case failure(WireLobbyError)
+    case boatCard(WireBoatCard)
 
     func encode(to w: inout WireWriter) throws {
         switch self {
@@ -318,7 +356,11 @@ public enum LobbyResult: Equatable, Sendable {
             case .unknownMessage: w.u8(7)
             case .notReportable: w.u8(8)
             case .cannotBlockSelf: w.u8(9)
+            case .unknownPlayer: w.u8(10)
             }
+        case .boatCard(let card):
+            w.u8(9)
+            try card.encode(to: &w)
         }
     }
 
@@ -348,9 +390,11 @@ public enum LobbyResult: Equatable, Sendable {
             case 7: error = .unknownMessage
             case 8: error = .notReportable
             case 9: error = .cannotBlockSelf
+            case 10: error = .unknownPlayer
             default: throw WireError.invalidValue("lobbyError")
             }
             self = .failure(error)
+        case 9: self = .boatCard(try WireBoatCard(from: &r))
         default: throw WireError.invalidValue("lobbyResult")
         }
     }

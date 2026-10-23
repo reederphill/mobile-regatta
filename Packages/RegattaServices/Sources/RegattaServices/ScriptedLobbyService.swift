@@ -285,7 +285,7 @@ public actor ScriptedLobbyService: LobbyService {
     public func boatCard(_ other: GamePlayerID) async throws -> BoatCard {
         if case .closed(let closure) = await live(current).access { throw LobbyError.closed(closure) }
         guard other != player.gamePlayerID, !blocked.contains(where: { $0.gamePlayerID == other }), let card = cards[other] else {
-            throw LobbyError.unknownMessage
+            throw LobbyError.unknownPlayer
         }
         return card
     }

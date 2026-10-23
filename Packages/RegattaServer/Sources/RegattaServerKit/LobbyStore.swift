@@ -160,6 +160,8 @@ public protocol LobbyModeration: Sendable {
     func report(line: ReportedLine, by playerID: String) async throws
     func report(player: LobbyPlayerRef, by playerID: String) async throws
     func report(race: RaceID, seat: Int, reason: RaceReportReason, by playerID: String) async throws
+    /// Whether the player shows as "Sailor" and her sail number (#34): her boat card's name.
+    func nicknameOverridden(_ playerID: String) async throws -> Bool
 }
 
 /// No moderation: the hub's default, for tests of the chat alone (the server runs `Moderation`, #153). Everyone stands clear and nothing can be
@@ -179,4 +181,5 @@ public final class NoModeration: LobbyModeration {
     public func report(line: ReportedLine, by playerID: String) async throws { throw LobbyError.notReportable }
     public func report(player: LobbyPlayerRef, by playerID: String) async throws { throw LobbyError.notReportable }
     public func report(race: RaceID, seat: Int, reason: RaceReportReason, by playerID: String) async throws { throw LobbyError.notReportable }
+    public func nicknameOverridden(_ playerID: String) async throws -> Bool { false }
 }

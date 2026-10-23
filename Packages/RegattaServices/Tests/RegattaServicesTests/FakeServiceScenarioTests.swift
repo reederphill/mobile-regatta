@@ -346,10 +346,10 @@ import Testing
         #expect(card.livery.sailNumber == 112)
         let author = try #require(try await lobby.history().compactMap(\.post?.author).first { $0.gamePlayerID == wren })
         #expect(author.chip == LiveryChip(deck: card.livery.colours[0], sail: card.livery.colours[1]), "the chip is the card's livery")
-        await #expect(throws: LobbyError.unknownMessage) { try await lobby.boatCard(GamePlayerID("G:fake-1")) }
-        await #expect(throws: LobbyError.unknownMessage) { try await lobby.boatCard(GamePlayerID("G:nobody")) }
+        await #expect(throws: LobbyError.unknownPlayer) { try await lobby.boatCard(GamePlayerID("G:fake-1")) }
+        await #expect(throws: LobbyError.unknownPlayer) { try await lobby.boatCard(GamePlayerID("G:nobody")) }
         try await lobby.block(wren)
-        await #expect(throws: LobbyError.unknownMessage) { try await lobby.boatCard(wren) }
+        await #expect(throws: LobbyError.unknownPlayer) { try await lobby.boatCard(wren) }
         await #expect(throws: LobbyError.closed(.notSignedIn)) { try await ServiceSet.fake(.signedOut).lobby.boatCard(wren) }
     }
 

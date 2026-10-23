@@ -762,4 +762,5 @@ struct ClosedLobbyService: LobbyService {
     func report(message: MessageID) throws { throw LobbyError.closed(closure) }
     func report(player: GamePlayerID) throws { throw LobbyError.closed(closure) }
     func report(race: RaceID, seat: Int, reason: RaceReportReason) throws { throw LobbyError.closed(closure) }
+    func boatCard(_ player: GamePlayerID) throws -> BoatCard { throw LobbyError.closed(closure) }
 }

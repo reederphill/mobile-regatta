@@ -63,4 +63,5 @@ private struct FailingBlockedList: LobbyService {
     func report(message: MessageID) async throws {}
     func report(player: GamePlayerID) async throws {}
     func report(race: RaceID, seat: Int, reason: RaceReportReason) async throws {}
+    func boatCard(_ player: GamePlayerID) async throws -> BoatCard { try await base.boatCard(player) }
 }

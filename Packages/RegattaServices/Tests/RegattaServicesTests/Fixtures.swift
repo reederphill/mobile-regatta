@@ -150,7 +150,9 @@ extension Fixtures {
             LobbyScenario(
                 player: me, state: state, history: lobbyHistory, background: background,
                 filteredWords: [LobbyServiceContract.filteredText],
-                races: [LobbyServiceContract.race: [.player, .human(wren.gamePlayerID), .bot]])
+                races: [LobbyServiceContract.race: [.player, .human(wren.gamePlayerID), .bot]],
+                cards: [wren.gamePlayerID: BoatCard(gamePlayerID: wren.gamePlayerID, nickname: wren.nickname, rating: wren.rating,
+                                                    livery: Livery(design: DesignID("plain"), colours: [], sailNumber: 207))])
         }
         let open = LobbyState(access: .open, canPostFreeText: true)
         return switch situation {

@@ -205,6 +205,8 @@ public enum LobbyError: Error, Equatable, Sendable {
     case notReportable
     /// Blocking yourself.
     case cannotBlockSelf
+    /// No boat card: a player the lobby doesn't know, a blocked pair either way, or herself (#142).
+    case unknownPlayer
 }
 
 public enum LobbyLimits {
@@ -251,9 +253,3 @@ public protocol LobbyService: Sendable {
     func boatCard(_ player: GamePlayerID) async throws -> BoatCard
 }
 
-extension LobbyService {
-    /// No card until the lobby call carries one (#142's S1): the sheet shows the line's own fields.
-    public func boatCard(_ player: GamePlayerID) async throws -> BoatCard {
-        throw LobbyError.unknownMessage
-    }
-}

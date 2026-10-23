@@ -82,6 +82,8 @@ public struct LobbyCounters: Sendable, Equatable {
 
 /// The chip beside a player's lines.
 public typealias LobbyChipSource = @Sendable (AccountPlayer) async -> LiveryChip
+/// The livery on a player's boat card (#142): her current one, with its sail number.
+public typealias LobbyCardSource = @Sendable (AccountPlayer) async throws -> Livery
 
 public final class LobbyHub: LobbyRaceEvents, Sendable {
     typealias Continuation = AsyncStream<LobbyEvent>.Continuation
@@ -153,12 +155,14 @@ public final class LobbyHub: LobbyRaceEvents, Sendable {
     private let wordList: ChatWordList
     private let classifier: ClassifierGate?
     private let chip: LobbyChipSource
+    private let card: LobbyCardSource
     private let now: @Sendable () -> Date
     private let state: Mutex<State>
 
     public init(settings: LobbySettings = LobbySettings(), store: any LobbyStore = InMemoryLobbyStore(), ratings: any RatingBook,
                 moderation: any LobbyModeration = NoModeration(), wordList: ChatWordList, classifier: ClassifierGate? = nil,
-                chip: @escaping LobbyChipSource = LobbyHub.starterChip, now: @escaping @Sendable () -> Date = { Date() }) {
+                chip: @escaping LobbyChipSource = LobbyHub.starterChip, card: @escaping LobbyCardSource = LobbyHub.starterCard,
+                now: @escaping @Sendable () -> Date = { Date() }) {
         self.settings = settings
         self.store = store
         self.ratings = ratings
@@ -166,6 +170,7 @@ public final class LobbyHub: LobbyRaceEvents, Sendable {
         self.wordList = wordList
         self.classifier = classifier
         self.chip = chip
+        self.card = card
         self.now = now
         state = Mutex(State(roomTokens: settings.roomBurst))
     }
@@ -181,6 +186,10 @@ public final class LobbyHub: LobbyRaceEvents, Sendable {
         }
         return LiveryChip(deck: colour(.deck) ?? fallback.deck, sail: colour(.sail) ?? fallback.sail)
     }
+
+    /// The starter livery the briefing shows for her: a player who stored none, and tests. The server's cards read
+    /// `StoredLiveries.livery(of:)`.
+    public static let starterCard: LobbyCardSource = { try await StarterLiveries().livery(of: $0) }
 
     public var counters: LobbyCounters { state.withLock { $0.counters } }
     /// Feeds open now.
@@ -668,6 +677,30 @@ public final class LobbyHub: LobbyRaceEvents, Sendable {
         let store = store
         return try await withDeadline(settings.storeDeadline) { try await store.blockedPlayers(of: player) }
             .map { BlockedPlayer(gamePlayerID: GamePlayerID($0.gamePlayerID), nickname: $0.nickname) }
+    }
+
+    // MARK: Boat cards (#142)
+
+    /// Another player's boat card: her current livery and sail number, her name and rating now (not her lines'
+    /// snapshot), "Sailor N" under a nickname override (#34). Refused while she is silenced, as the other calls; no card
+    /// for herself, a gamePlayerID nobody has, or a blocked pair either way.
+    public func boatCard(_ target: GamePlayerID, for player: AccountPlayer) async throws -> BoatCard {
+        guard target.rawValue != player.gamePlayerID else { throw LobbyError.unknownPlayer }
+        try await ensureLoaded()
+        let id = player.teamPlayerID
+        if state.withLock({ $0.isSilenced(id, at: now(), limit: settings.silenceLimit) }) { throw LobbyError.closed(.racing) }
+        guard let other = try await resolve(target.rawValue), other.teamPlayerID != id,
+              !state.withLock({ $0.blocks[id]?.contains(other.teamPlayerID) == true || $0.blocks[other.teamPlayerID]?.contains(id) == true })
+        else { throw LobbyError.unknownPlayer }
+        let ratings = ratings, moderation = moderation, card = card
+        let account = AccountPlayer(teamPlayerID: other.teamPlayerID, gamePlayerID: other.gamePlayerID, alias: other.nickname)
+        let rated = try await withDeadline(settings.storeDeadline) { try await ratings.standing(of: other.teamPlayerID) ?? PlayerStanding() }
+        let livery = try await withDeadline(settings.storeDeadline) { try await card(account) }
+        let overridden = try await withDeadline(settings.standingDeadline) { try await moderation.nicknameOverridden(other.teamPlayerID) }
+        let rating = rated.rating ?? PlayerRating(settings.rating)
+        return BoatCard(gamePlayerID: GamePlayerID(other.gamePlayerID),
+                        nickname: overridden ? Moderation.overriddenNickname(sailNumber: livery.sailNumber) : rated.displayName ?? other.nickname,
+                        rating: Rating(value: rating.displayed, isProvisional: rating.isProvisional), livery: livery)
     }
 
     // MARK: Reports (#153 decides; the lobby checks what it knows)
