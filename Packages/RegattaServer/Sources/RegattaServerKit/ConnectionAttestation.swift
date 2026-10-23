@@ -42,6 +42,8 @@ public enum UnattestedReason: Equatable, Sendable, CustomStringConvertible {
     case storeUnavailable
     /// A session call named a player the proof doesn't bind.
     case bindingMismatch
+    /// An attestation for a key the server already registered.
+    case attestationReplayed
 
     public var description: String {
         switch self {
@@ -53,6 +55,7 @@ public enum UnattestedReason: Equatable, Sendable, CustomStringConvertible {
         case .malformed: "malformed proof"
         case .storeUnavailable: "key store unavailable"
         case .bindingMismatch: "the session call's player isn't the one the proof binds"
+        case .attestationReplayed: "attestation of a key already registered"
         }
     }
 }
@@ -102,7 +105,9 @@ public struct ConnectionAttestation: Sendable {
             guard clientData.purpose == purpose else { return .unattested(.malformed) }
             do {
                 let key = try await verifier.verifyAttestation(object, keyID: keyID, clientDataHash: clientData.hash)
-                guard try await keys.register(key, at: now()) else { return .unattested(.failed(.keyIDMismatch)) }
+                // An attestation is a key's first use, once: a known key's again is a replay.
+                guard try await keys.key(keyID) == nil else { return .unattested(.attestationReplayed) }
+                guard try await keys.register(key, at: now()) else { return .unattested(.attestationReplayed) }
                 return .verified(binding: clientData.binding)
             } catch let error as AppAttestError {
                 return .unattested(.failed(error))

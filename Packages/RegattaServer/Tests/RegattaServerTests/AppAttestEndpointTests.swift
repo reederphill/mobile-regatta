@@ -213,7 +213,10 @@ struct AttestingDevice: Sendable {
             return link.ack?.attestation
         }
         // 1: verified, the attestation and then an assertion.
-        #expect(try await status(try rig.device.attestation(for: wren)) == .verified)
+        let attestation = try rig.device.attestation(for: wren)
+        #expect(try await status(attestation) == .verified)
+        // 4: the attestation again is a replay.
+        #expect(try await status(attestation) == .failed)
         let first = try rig.device.assertion(for: wren, counter: 1)
         #expect(try await status(first) == .verified)
         // 4: the same assertion replayed, an older counter, a broken attestation, unsupported and unavailable.

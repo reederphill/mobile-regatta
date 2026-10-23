@@ -29,6 +29,43 @@ import Testing
         #expect(await rig.session.identity.state() == .signedIn(SessionRig.wren.player))
     }
 
+    /// #158: each Hello carries the attester's proof, bound to the player the session call then names; the first is an
+    /// attestation, the next connection's an assertion. Without an attester the Hello carries none.
+    @Test func helloCarriesAProofBoundToTheSessionCallsPlayer() async throws {
+        let device = FakeAppAttestor()
+        let rig = SessionRig(attester: ConnectionAttester(attestor: device, store: InMemoryAttestationKeyStore(), nonce: Nonces.next))
+        rig.server.script { $0.hello = .helloAck(HelloAck(serverBuild: "fake", attestation: .verified)) }
+        await rig.opened()
+        let first = try AttestationProof(payload: try #require(rig.server.hellos.items.first))
+        let player = try #require(rig.server.sessionPlayers.items.first)
+        guard case .attestation(_, _, let clientData) = first else { Issue.record("not an attestation: \(first)"); return }
+        #expect(clientData.binding == player.attestationBinding)
+        rig.server.dropLink()
+        await rig.opens(2)
+        guard case .assertion(_, _, let next) = try AttestationProof(payload: rig.server.hellos.items[1]) else {
+            Issue.record("not an assertion"); return
+        }
+        #expect(next.binding == rig.server.sessionPlayers.items[1].attestationBinding)
+        #expect(device.attested == 1 && device.asserted == 1)
+
+        let plain = SessionRig()
+        await plain.opened()
+        #expect(plain.server.hellos.items == [.none])
+    }
+
+    /// A failed assertion reconnects once at once with a fresh one, then the connection stays (unattested).
+    @Test func aFailedAssertionReconnectsOnce() async throws {
+        let device = FakeAppAttestor()
+        let rig = SessionRig(attester: ConnectionAttester(attestor: device, store: InMemoryAttestationKeyStore(), nonce: Nonces.next))
+        rig.server.script { $0.hello = .helloAck(HelloAck(serverBuild: "fake", attestation: .verified)) }
+        await rig.opened()
+        rig.server.script { $0.hello = .helloAck(HelloAck(serverBuild: "fake", attestation: .failed)) }
+        rig.server.dropLink()
+        await rig.opens(2)
+        #expect(rig.server.hellos.items.count == 3)
+        #expect(device.asserted == 2)
+    }
+
     @Test func theSignatureIsFetchedBeforeTheSocketOpens() async throws {
         let rig = SessionRig()
         await rig.opened()
