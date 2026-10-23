@@ -99,7 +99,7 @@ enum RetentionScenario {
         let ingest = AnalyticsIngest(store: store)
         let endpoint = ServiceEndpoint(config: ServiceEndpointConfig(), sessions: SessionAuthority(store: InMemoryAccountStore(), verifier: StubVerifier()),
                                        backends: ServiceBackends(analytics: { ingest.service(for: $0) }),
-                                       analytics: ingest)
+                                       analytics: ingest, attestation: .devDefault())
         let (link, connection, _) = try await ServiceFixtures.signedIn(endpoint, "sailor")
         _ = try await RemoteTermsService(connection).accept(TermsVersion(1))
         let batch = AnalyticsBatch(installID: InstallID("device-1"), events: [

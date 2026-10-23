@@ -28,6 +28,17 @@ struct Gen {
         bool() ? .none : VersionedPayload(schema: UInt16(int(1...65_535)), bytes: bytes(0...64))
     }
 
+    /// A schema-1 attestation proof of every kind (#158).
+    mutating func attestationProof() -> AttestationProof {
+        let clientData = AttestationClientData(nonce: bytes(16...16), binding: bytes(32...32))
+        switch int(0...3) {
+        case 0: return .attestation(keyID: bytes(32...32), object: bytes(0...600), clientData: clientData)
+        case 1: return .assertion(keyID: bytes(32...32), assertion: bytes(0...200), clientData: clientData)
+        case 2: return .unsupported
+        default: return .unavailable
+        }
+    }
+
     mutating func fileRef() -> FileRef {
         let hex = bytes(32...32).map { byte in
             let s = String(byte, radix: 16)
@@ -291,7 +302,8 @@ struct Gen {
         case .leaveRace: message = .leaveRace
         case .rosterChange:
             message = .rosterChange(RosterChange(seat: int(0...15), entry: RosterEntry(name: string(), colorIndex: int(0...255), isBot: bool())))
-        case .helloAck: message = .helloAck(HelloAck(serverBuild: string()))
+        case .helloAck:
+            message = .helloAck(HelloAck(serverBuild: string(), attestation: AttestationStatus.allCases[int(0...(AttestationStatus.allCases.count - 1))]))
         case .updateRequired:
             // Any code: the known ones and codes from a newer server.
             message = .updateRequired(UpdateRequired(reason: UpdateRequired.Reason(code: UInt8(int(0...255))),

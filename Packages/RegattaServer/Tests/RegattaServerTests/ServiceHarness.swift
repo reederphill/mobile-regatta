@@ -16,6 +16,7 @@ final class InProcessServiceLink: ServiceLink, @unchecked Sendable {
     private struct State {
         var handshake: [[UInt8]]? = []
         var closeReason: String?
+        var ack: HelloAck?
     }
 
     let handler: ServiceConnectionHandler
@@ -53,11 +54,15 @@ final class InProcessServiceLink: ServiceLink, @unchecked Sendable {
             defer { state.handshake = nil }
             return state.handshake ?? []
         }
-        guard answered.count == 1, case .helloAck? = try? Frame(decoding: answered[0]).message else {
+        guard answered.count == 1, case .helloAck(let ack)? = try? Frame(decoding: answered[0]).message else {
             throw HandshakeRefused(frames: answered.compactMap { try? Frame(decoding: $0).message }, closed: link.closeReason != nil)
         }
+        link.state.withLock { $0.ack = ack }
         return link
     }
+
+    /// The server's `HelloAck`: what it made of the attestation (#158).
+    var ack: HelloAck? { state.withLock { $0.ack } }
 
     struct HandshakeRefused: Error {
         let frames: [Message]
@@ -119,7 +124,7 @@ enum ServiceFixtures {
         ServiceEndpoint(
             config: ServiceEndpointConfig(termsVersion: termsVersion, streamIdleTimeout: idle, frameCap: frameCap),
             sessions: SessionAuthority(store: store, verifier: StubVerifier()),
-            backends: ServiceBackends(queue: { _ in queue }))
+            backends: ServiceBackends(queue: { _ in queue }), attestation: .devDefault())
     }
 
     static func player(_ name: String, multiplayerRestricted: Bool = false, underage: Bool = false) -> GameCenterPlayer {

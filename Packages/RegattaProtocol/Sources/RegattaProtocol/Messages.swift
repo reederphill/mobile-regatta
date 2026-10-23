@@ -58,7 +58,8 @@ public struct Hello: Equatable, Sendable {
     public var simulationVersion: String
     /// The data files the client has (ADR 0004), each with its content hash.
     public var files: [FileRef]
-    /// The App Attest assertion. Placeholder until #158 defines schema 1: send `.none`.
+    /// The App Attest proof (#158): schema 1 is `AttestationProof`. `.none` (schema 0) is accepted only under the
+    /// server's dev bypass.
     public var attestation: VersionedPayload
 
     public init(protocolVersion: UInt16 = wireProtocolVersion, clientBuild: String, simulationVersion: String = RegattaCore.simulationVersion,
@@ -74,8 +75,13 @@ public struct Hello: Equatable, Sendable {
 /// Server → client: the client can sail here.
 public struct HelloAck: Equatable, Sendable {
     public var serverBuild: String
+    /// What the server made of `Hello.attestation` (#158). One byte after `serverBuild`.
+    public var attestation: AttestationStatus
 
-    public init(serverBuild: String) { self.serverBuild = serverBuild }
+    public init(serverBuild: String, attestation: AttestationStatus = .notChecked) {
+        self.serverBuild = serverBuild
+        self.attestation = attestation
+    }
 }
 
 /// Server → client: the client can't sail here until it updates (#18, #16). The connection closes after it.
@@ -589,8 +595,16 @@ extension Hello {
 }
 
 extension HelloAck {
-    func encode(to w: inout WireWriter) throws { try w.string(serverBuild, limit: WireLimit.string, "serverBuild") }
-    init(from r: inout WireReader) throws { serverBuild = try r.string(limit: WireLimit.string, "serverBuild") }
+    func encode(to w: inout WireWriter) throws {
+        try w.string(serverBuild, limit: WireLimit.string, "serverBuild")
+        w.u8(attestation.rawValue)
+    }
+
+    init(from r: inout WireReader) throws {
+        serverBuild = try r.string(limit: WireLimit.string, "serverBuild")
+        guard let status = AttestationStatus(rawValue: try r.u8()) else { throw WireError.invalidValue("helloAck.attestation") }
+        attestation = status
+    }
 }
 
 extension UpdateRequired {

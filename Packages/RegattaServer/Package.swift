@@ -16,6 +16,7 @@ let package = Package(
         .library(name: "Persistence", targets: ["Persistence"]),
         .library(name: "Ratings", targets: ["Ratings"]),
         .library(name: "GameCenterIdentity", targets: ["GameCenterIdentity"]),
+        .library(name: "AppAttest", targets: ["AppAttest"]),
         .executable(name: "RegattaServer", targets: ["RegattaServer"]),
         .executable(name: "regatta-loadclient", targets: ["regatta-loadclient"]),
         .executable(name: "regatta-bench", targets: ["regatta-bench"]),
@@ -64,6 +65,17 @@ let package = Package(
                 .product(name: "SwiftASN1", package: "swift-asn1"),
             ]
         ),
+        // App Attest verification (#158, ADR 0014): our own minimal CBOR decoder, the attestation's chain to Apple's
+        // embedded App Attestation root, the nonce, key id, App ID, environment and counter checks, and assertions.
+        // Pure, over an injectable clock: the key store is the server's.
+        .target(
+            name: "AppAttest",
+            dependencies: [
+                .product(name: "Crypto", package: "swift-crypto"),
+                .product(name: "X509", package: "swift-certificates"),
+                .product(name: "SwiftASN1", package: "swift-asn1"),
+            ]
+        ),
         // Ratings (#151, ADR 0012): Glicko-2 with weighted games and one race as its pairs. Pure, Foundation only; the
         // store applies it inside the transaction that closes a race.
         .target(name: "Ratings"),
@@ -83,6 +95,8 @@ let package = Package(
                 "RegattaDevAPI",
                 // Identity, sessions and the Terms of Use (#145).
                 "GameCenterIdentity",
+                // App Attest on each service connection (#158).
+                "AppAttest",
                 "Persistence",
                 "Ratings",
                 // The lobby's filter (#152).
@@ -174,6 +188,17 @@ let package = Package(
                 .product(name: "SwiftASN1", package: "swift-asn1"),
             ]
         ),
+        // The verifier against a chain and a device the tests make, the public real-device vector, and #175's capture
+        // when it's there. Fixtures are read from the source tree.
+        .testTarget(
+            name: "AppAttestTests",
+            dependencies: [
+                "AppAttest",
+                .product(name: "Crypto", package: "swift-crypto"),
+                .product(name: "X509", package: "swift-certificates"),
+                .product(name: "SwiftASN1", package: "swift-asn1"),
+            ]
+        ),
         .testTarget(
             name: "RaceHostTests",
             dependencies: [
@@ -202,6 +227,10 @@ let package = Package(
                 "RegattaServer",
                 // The service endpoint (#145): its clients, the contract runner, and Postgres for its persistence tests.
                 "GameCenterIdentity",
+                // App Attest on the service endpoint (#158).
+                "AppAttest",
+                .product(name: "X509", package: "swift-certificates"),
+                .product(name: "SwiftASN1", package: "swift-asn1"),
                 "Persistence",
                 "Ratings",
                 "ChatFilter",

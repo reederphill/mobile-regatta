@@ -34,7 +34,7 @@ import Testing
             sessions: SessionAuthority(store: InMemoryAccountStore(), verifier: StubVerifier()),
             backends: ServiceBackends(queue: { ServerQueueService(matchmaker: matchmaker, player: $0) },
                                       raceSession: { ServerRaceSessionService(matchmaker: matchmaker, player: $0) }),
-            matchmaker: matchmaker)
+            matchmaker: matchmaker, attestation: .devDefault())
     }
 
     /// Join, fleet lock, hand-off: the token is for the player's seat in the race the matchmaker launched.

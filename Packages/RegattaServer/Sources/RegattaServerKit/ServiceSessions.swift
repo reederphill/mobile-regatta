@@ -9,8 +9,9 @@ import RegattaServices
 // (32 random bytes; only its SHA-256 is stored) resumes it on later connections. Sessions slide: each sign-in or
 // resume moves the expiry to `sessionLifetime` from now, but never past `absoluteLifetime` from the first sign-in, and a
 // player holds at most `maxSessionsPerPlayer` (a new one ends the oldest); expired rows are swept (#146, R11). The restrictions Game Center reports are taken from the
-// client with each sign-in or resume and stored on the session; TODO(#158): they travel inside the App Attest–asserted
-// request once #158 lands, and are trusted only then.
+// client with each sign-in or resume and stored on the session. They ride in the App Attest–asserted request (#158,
+// ADR 0014): the connection's proof binds the session call's player, and the gate serves the queue, the lobby and races
+// only on an attested connection, so they are trusted only there.
 
 /// The connection's signed-in player.
 public struct SignedInSession: Sendable, Equatable {
