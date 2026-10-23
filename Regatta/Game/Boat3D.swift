@@ -9,7 +9,8 @@ import RegattaCore
 /// the screen, plus ambient; no cheaper tier (#597: within 2 fps and a draw of the flat fleet at 10 boats). The
 /// thermal tiers' sail cut (`SailDetail.farReduced`) drops a far boat's flutter, luff shiver and belly pump; her hull,
 /// heel, mast, boom and trim never change by tier. Units are world points (`GameScene.pointsPerMeter` a metre); the
-/// ground is XZ, Y up, screen-up is -Z.
+/// ground is XZ, Y up, screen-up is -Z. The flat buoy bodies and the committee boat's ellipse in `ChartLayer` stay as
+/// footprints under the standing shapes, and take the same `ChartMarks` tone.
 final class Fleet3D {
     let node: SK3DNode
     private let scene = SCNScene()
@@ -29,6 +30,9 @@ final class Fleet3D {
     private let ppm: CGFloat
     /// The tilt the camera is pitched to, radians off vertical.
     private var tilt: Double = .nan
+    /// The nodes the scene holds besides the boats and the buoys: the camera, the sun, the ambient light and the
+    /// committee boat's hull and cabin.
+    static let fixedNodeCount = 5
 
     init(boats roster: [Boat], colors: [UIColor], boatClass: BoatClass, course: CourseLayout, pointsPerMeter ppm: CGFloat,
          tiltDegrees: Double, sceneSize: CGSize) {
@@ -125,6 +129,11 @@ final class Fleet3D {
     /// Each buoy's colour as drawn, pin last, and the committee boat's, for tests.
     var buoyTones: [UIColor] { buoys.compactMap { $0.material.diffuse.contents as? UIColor } }
     var committeeColor: UIColor? { committee.geometry?.firstMaterial?.diffuse.contents as? UIColor }
+    /// Every node in the SceneKit scene, the root's descendants, for tests.
+    var sceneNodeCount: Int {
+        func count(_ node: SCNNode) -> Int { node.childNodes.reduce(0) { $0 + 1 + count($1) } }
+        return count(scene.rootNode)
+    }
 
     /// Places everything for the camera of this frame: `center` (world points), `rotation` (`CameraRig.cameraRotation`)
     /// `cameraScale` and `tiltDegrees`. `sailDetail` is the sails' tier (#127): at `.farReduced` a boat more than
@@ -134,8 +143,9 @@ final class Fleet3D {
                 cameraScale: CGFloat, tiltDegrees: Double, sceneSize: CGSize, sailDetail: SailDetail = .full,
                 hidesSails: Bool = false, time: Double, dt: Double, settled: Bool) {
         pitch(toDegrees: tiltDegrees)
-        node.viewportSize = sceneSize
-        camera.orthographicScale = Double(sceneSize.height / 2 * cameraScale)
+        if node.viewportSize != sceneSize { node.viewportSize = sceneSize }
+        let scale = Double(sceneSize.height / 2 * cameraScale)
+        if camera.orthographicScale != scale { camera.orthographicScale = scale }
         let rho = -rotation
         let c = cos(rho), s = sin(rho)
         func ground(_ w: CGPoint) -> (x: Float, z: Float) {
@@ -160,7 +170,8 @@ final class Fleet3D {
             buoy.node.position = SCNVector3(at.x, Float(0.6 * ppm), at.z)
             let tone = buoy.isPin ? lineTone
                 : ChartMarks.tone(of: buoy.mark, in: course, status: mine.status, legIndex: mine.legIndex).uiColor
-            buoy.material.diffuse.contents = tone
+            // Only when the tone changes (a leg rounded): a material write each frame dirties it for SceneKit.
+            if buoy.material.diffuse.contents as? UIColor != tone { buoy.material.diffuse.contents = tone }
         }
         let at = ground(committeePosition)
         committee.position = SCNVector3(at.x, Float(0.45 * ppm), at.z)
@@ -224,7 +235,7 @@ final class Boat3D {
                 }
                 indices += [base, base + 1, base + 2, base, base + 2, base + 3]
             }
-            return make(vertices, normals, indices, doubleSided: true)
+            return make(vertices, normals, indices)
         }
 
         /// A flat cap at `y`: a fan from the centroid, normal up.
@@ -238,7 +249,7 @@ final class Boat3D {
             for i in 0..<outline.count {
                 indices += [0, Int32(1 + i), Int32(1 + (i + 1) % outline.count)]
             }
-            return make(vertices, normals, indices, doubleSided: true)
+            return make(vertices, normals, indices)
         }
 
         /// The mainsail in the boom's frame: luff up the mast at z 0, foot along the boom to +z, a short head at the
@@ -263,17 +274,19 @@ final class Boat3D {
                     indices += [a, a + 2, a + 1, a + 1, a + 2, a + 3]
                 }
             }
-            return make(vertices, normals, indices, doubleSided: true)
+            return make(vertices, normals, indices)
         }
 
-        static func make(_ vertices: [SCNVector3], _ normals: [SCNVector3], _ indices: [Int32],
-                         doubleSided: Bool) -> SCNGeometry {
-            let geometry = SCNGeometry(sources: [SCNGeometrySource(vertices: vertices), SCNGeometrySource(normals: normals)],
-                                       elements: [SCNGeometryElement(indices: indices, primitiveType: .triangles)])
-            return geometry
+        /// Triangles from `vertices` and their `normals`; the materials say which faces draw (`isDoubleSided`).
+        static func make(_ vertices: [SCNVector3], _ normals: [SCNVector3], _ indices: [Int32]) -> SCNGeometry {
+            SCNGeometry(sources: [SCNGeometrySource(vertices: vertices), SCNGeometrySource(normals: normals)],
+                        elements: [SCNGeometryElement(indices: indices, primitiveType: .triangles)])
         }
     }
 
+    /// The SceneKit nodes one boat adds to the fleet's scene: `root`, `heelNode`, the hull, deck, cockpit and mast, the
+    /// boom pivot, the boom and the sail.
+    static let nodeCount = 9
     let root = SCNNode()
     private let heelNode = SCNNode()
     private let boomPivot = SCNNode()

@@ -3,8 +3,8 @@ import RegattaCore
 
 /// Draws what lies flat on the water under one boat (#117) from her pose (`BoatPose`): her heel's drop shadow, your
 /// boat's glow and her right-of-way glow, plus her wake and backwind (`BoatEffects`, #121) that live in the world's
-/// effects layer beneath the fleet. Her hull, rig and sail stand up in `Fleet3D` (#597), over these. No name and no badge: boat names are never shown on the water (#15), and
-/// penalties are #123's and #124's.
+/// effects layer beneath the fleet. Her hull, rig and sail stand up in `Fleet3D` (#597), over these. No name and no
+/// badge: boat names are never shown on the water (#15), and penalties are #123's and #124's.
 final class BoatNode: SKNode {
     /// Her wake and backwind: the scene adds `effects.nodes` to its effects layer.
     let effects: BoatEffects

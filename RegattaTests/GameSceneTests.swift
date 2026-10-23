@@ -67,6 +67,33 @@ import RegattaCore
         #expect(abs(vaneOnScreen.x - hull.x) < 0.01 && abs(vaneOnScreen.y - hull.y) < 0.01,
                 "vane at \(vaneOnScreen), hull at \(hull)")
     }
+
+    /// The land's rim is built once (#597): its path is the same object frame after frame, only its copies move, and
+    /// they move with the tilt, deeper the steeper the view. (`SKShapeNode.path` hands back a copy, so the scene's own
+    /// path is the one compared by identity, and each copy's by value.)
+    @Test func landRimIsBuiltOnceAndMovesWithTheTilt() throws {
+        let (scene, session) = try Self.scene(fixture: "chart-saltings-reach")
+        let layers = scene.landRimLayers
+        #expect(layers.count == GameScene.landRimSteps)
+        let path = try #require(scene.landRimPath)
+        func drawsThePath() -> Bool { layers.allSatisfy { $0.path == path } }
+        #expect(drawsThePath(), "every copy draws the rim's path")
+        let before = layers.map(\.position)
+        #expect(before.allSatisfy { $0 != .zero }, "every copy drops at 45°")
+
+        scene.update(1)
+        #expect(scene.landRimPath === path && drawsThePath(), "a second frame rebuilt the rim's path")
+        #expect(layers.map(\.position) == before)
+
+        session.controls.tilt = 20
+        scene.update(2)
+        #expect(scene.shownTilt == 20)
+        #expect(scene.landRimPath === path && drawsThePath(), "a tilt change rebuilt the rim's path")
+        let after = layers.map(\.position)
+        for (a, b) in zip(after, before) {
+            #expect(hypot(a.x, a.y) < hypot(b.x, b.y) - 1, "at 20° the rim drops less: \(a) vs \(b)")
+        }
+    }
 }
 
 extension GameSceneTests {
@@ -75,18 +102,19 @@ extension GameSceneTests {
         node.children.reduce(0) { $0 + 1 + nodeCount($1) }
     }
 
-    /// The scene's nodes (`nodeCount`) in the fleet fixture (8 boats, the largest fleet fixture) on main before #597
-    /// (4c7e1554): every boat drew a flat hull, outline and sail sprite besides today's shadow and glows, and the
-    /// scene had no tilt or rotor node, SK3DNode, glint or land rim. 746 today + 3 × 8 sprites − those 5 nodes.
-    static let flatFleetNodeCount = 765
-
-    /// The standing fleet costs the scene no more nodes than the flat one did, give or take two (#597): its one
-    /// SK3DNode holds every boat, buoy and the committee boat, and each boat drops three sprites.
+    /// The standing fleet adds one node to the SpriteKit scene, its SK3DNode (#597), whatever the fleet: every boat,
+    /// buoy and the committee boat is in its SceneKit scene, at `Boat3D.nodeCount` nodes a boat, a node a buoy and
+    /// `Fleet3D.fixedNodeCount` besides.
     @Test func tiltedFleetDrawsWithinBudget() throws {
         let (scene, session) = try Self.scene(fixture: "fleet")
         let boats = session.driver.currentFrame.boats.count
-        let count = Self.nodeCount(scene)
         #expect(boats == 8)
-        #expect(count <= Self.flatFleetNodeCount + 2, "\(count) nodes with \(boats) boats, flat \(Self.flatFleetNodeCount)")
+        let fleet = try #require(scene.standingFleet)
+        func all(_ node: SKNode) -> [SKNode] { node.children + node.children.flatMap(all) }
+        #expect(all(scene).filter { $0 is SK3DNode }.map(ObjectIdentifier.init) == [ObjectIdentifier(fleet.node)],
+                "one SK3DNode, the fleet's")
+        #expect(Self.nodeCount(fleet.node) == 0, "the SK3DNode holds no SpriteKit nodes")
+        let budget = Fleet3D.fixedNodeCount + fleet.buoyTones.count + boats * Boat3D.nodeCount
+        #expect(fleet.sceneNodeCount <= budget, "\(fleet.sceneNodeCount) SceneKit nodes, budget \(budget)")
     }
 }

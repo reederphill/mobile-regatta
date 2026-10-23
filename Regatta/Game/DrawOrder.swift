@@ -13,7 +13,7 @@ import CoreGraphics
 /// `standingFleet`: every hull, rig, buoy and the committee boat, #597), the rule cues (16) and the edge arrow (20).
 enum DrawOrder {
     /// A layer holds 10,000 slots below the next one's z. SpriteKit sorts z as a Float: at the scene's largest
-    /// z (your sail, about 14) a step is still ~100 of its ulps.
+    /// z (the fleet layer's top, about 14) a step is still ~100 of its ulps.
     static let step: CGFloat = 1e-4
 
     /// The standing fleet's z (#597): over every boat's flat shadow and glows, under the rule cues and edge arrow.

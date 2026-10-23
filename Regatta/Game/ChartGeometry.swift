@@ -4,10 +4,10 @@ import RegattaCore
 /// The chart's shapes (#115), pure geometry in metres with no SpriteKit: the race area's hatched band, the land's
 /// coasts and relief strips, and the shallows' tint weight from the depth grid.
 nonisolated enum ChartGeometry {
-    /// The oblique projection's squash (#596 prototype): the flat world seen `tiltDegrees` off vertical shows its
+    /// The oblique projection's squash (#596 prototype, #597): the flat world seen `tiltDegrees` off vertical shows its
     /// screen-up axis at `cos(tilt)` of its length. Every tilted layer reads it from here.
     static func obliqueSquash(tiltDegrees: Double) -> CGFloat { CGFloat(cos(tiltDegrees * .pi / 180)) }
-    /// How tall a standing height shows on screen at `tiltDegrees`, per point of height: `sin(tilt)`.
+    /// How tall a standing height shows on screen at `tiltDegrees`, per point of height: `sin(tilt)` (#596, #597).
     static func obliqueRise(tiltDegrees: Double) -> CGFloat { CGFloat(sin(tiltDegrees * .pi / 180)) }
 
     // MARK: - Race-area hatch

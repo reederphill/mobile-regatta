@@ -25,7 +25,8 @@ import RegattaServices
 /// - `-camera course|boat` overrides the device's camera as course-up or boat-up (#113).
 /// - `-tilt <deg>` overrides the device's tilt, 5…55 degrees off vertical (#597). A render fixture draws at the
 ///   default 45 without it, whatever the device's setting.
-/// - `-boats <n>` (dev) sails the launch race with `n` boats, 2…16, yours included (#596): for local previews.
+/// - `-boats <n>` sails the launch race with `n` boats, 2…16, yours included (#596): for local previews. Debug builds
+///   only, like `-tuning`.
 /// - `-online` starts an online race on the dev server's instant race at launch (#68, Debug builds).
 /// - `-onlineHost <host:port>` is the dev race server, instead of the Settings page's field (Debug builds).
 /// - `-raceSeconds <n>` closes an online dev race `n` seconds after the gun (the server's e2e override), and the
@@ -89,8 +90,8 @@ import RegattaServices
 ///   `RenderQualityPolicy`), whatever its own: for #172's device runs and the UI tests (Debug builds). A render
 ///   fixture or a UI test run draws at `-thermal`'s state, nominal without it, and never at the device's own state or
 ///   Low Power Mode, so references stay put.
-/// - `-cuesOnly` (with `-uitesting`) hides what the thermal tiers change, the ripple, whitecaps and glint, the wakes and the
-///   sails, so a UI test can compare the race cues alone across tiers (#127).
+/// - `-cuesOnly` (with `-uitesting`) hides what the thermal tiers change, the ripple, whitecaps and glint, the wakes
+///   and the sails, so a UI test can compare the race cues alone across tiers (#127).
 struct LaunchOptions: Equatable {
     enum SteeringScheme: String, CaseIterable {
         case halves, tiller
@@ -196,7 +197,7 @@ struct LaunchOptions: Equatable {
     var laps: Int?
     /// `-tilt <deg>` (#597): the race scene's tilt off vertical, 5…55, over Settings' Tilt.
     var tilt: Double?
-    /// `-boats <n>` (#596, dev): the launch race's fleet, 2…16.
+    /// `-boats <n>` (#596, Debug builds): the launch race's fleet, 2…16.
     var boats: Int?
     var hidesScene = false
     var appearance: Appearance?
@@ -255,12 +256,13 @@ struct LaunchOptions: Equatable {
             case "-tuning": tuning = true
             case "-fps120": fps120 = true
             case "-captureAppAttestFixture": captureAppAttestFixture = true
-            case "-fakeServices", "-referenceRace", "-beatMetres", "-devIdentity", "-devRestrictions", "-termsVersion", "-tap":
+            case "-fakeServices", "-referenceRace", "-beatMetres", "-devIdentity", "-devRestrictions", "-termsVersion", "-tap",
+                 "-boats":
                 guard let value = takeValue(of: argument, from: &rest) else { continue }
                 apply(argument, value)
             #endif
             case "-seed", "-fixture", "-fixtures", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps",
-                 "-tilt", "-boats",
+                 "-tilt",
                  "-appearance", "-vision", "-briefing", "-myBoat", "-completedRaces", "-thermal":
                 guard let value = takeValue(of: argument, from: &rest) else { continue }
                 apply(argument, value)
@@ -283,13 +285,13 @@ struct LaunchOptions: Equatable {
     private static let flags: Set<String> = {
         var flags: Set = ["-autostart", "-demo", "-perf", "-uitesting", "-resetSettings", "-online", "-hideScene", "-seed",
                           "-fixture", "-fixtures", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps",
-                          "-tilt", "-boats",
+                          "-tilt",
                           "-appearance", "-vision", "-briefing", "-myBoat", "-keepMyBoat", "-completedRaces",
                           "-thermal", "-cuesOnly",
                           "-onlineResults"]
         #if DEBUG
         flags.formUnion(["-tuning", "-fps120", "-captureAppAttestFixture", "-fakeServices", "-referenceRace", "-beatMetres", "-devIdentity", "-devRestrictions",
-                         "-termsVersion", "-tap"])
+                         "-termsVersion", "-tap", "-boats"])
         #endif
         return flags
     }()
@@ -480,7 +482,9 @@ struct LaunchOptions: Equatable {
         var config = raceConfig(from: config)
         config.botSailsYourBoat = demo || perf
         if perf { config.opponents = Self.perfFleetSize - 1 }
+        #if DEBUG
         if let boats { config.opponents = boats - 1 }
+        #endif
         return config
     }
 }

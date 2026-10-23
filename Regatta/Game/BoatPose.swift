@@ -226,8 +226,6 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
     /// Your glow's blur, points: soft, with no hard edge that would read as a ring (#15). Baked into the textures
     /// when the fleet is built, so the boats built after a change take it.
     var glowBlur = 5.0
-    /// Every hull's outline width, points, drawn inside her silhouette. Baked in when the fleet is built.
-    var outlineWidth = 1.0
 
     // MARK: Wake (#15, #220, #222, #121)
 
@@ -389,7 +387,7 @@ nonisolated extension BoatStyle {
             (.glowAlpha, \.glowAlpha), (.ghostAlpha, \.ghostAlpha),
             (.ghostSailBelly, \.ghostSailBelly), (.flapBellyLoss, \.flapBellyLoss),
             (.flutterSwingRate, \.flutterSwingRate), (.flapBellyRate, \.flapBellyRate),
-            (.flutterPhaseStep, \.flutterPhaseStep), (.glowBlur, \.glowBlur), (.outlineWidth, \.outlineWidth),
+            (.flutterPhaseStep, \.flutterPhaseStep), (.glowBlur, \.glowBlur),
             (.wakeFullSpeed, \.wakeFullSpeed), (.wakeMaxHulls, \.wakeMaxHulls),
             (.wakeSpreadDegrees, \.wakeSpreadDegrees), (.wakePressureFan, \.wakePressureFan),
             (.wakeAlpha, \.wakeAlpha), (.wakePlaningBoost, \.wakePlaningBoost),

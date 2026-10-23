@@ -121,8 +121,18 @@ final class GameScene: SKScene {
     private var fleet3D: Fleet3D?
     /// The standing fleet, for tests.
     var standingFleet: Fleet3D? { fleet3D }
-    /// The land's extruded rim (#596), a child of `tiltNode`.
-    private let landRim = SKShapeNode()
+    /// The land's extruded rim (#596), a child of `world` (so it turns with the camera): the land's silhouette, built
+    /// once, in `landRimSteps` copies sharing one path, each dropped a share of the rim's height down the screen.
+    private let landRim = SKNode()
+    /// The rim's drop in `world` space at the last frame drawn, so a still frame writes nothing.
+    private var landRimDrop: CGPoint?
+    /// How many copies of the silhouette sweep the rim: one alone leaves a notch where a coast runs straight down the
+    /// screen (the union of the land and its one dropped copy misses a triangle there), `1 / (2n)` of the drop deep.
+    static let landRimSteps = 3
+    /// The rim's one path, in world points, built once (`buildLandRim`); nil with no land.
+    private(set) var landRimPath: CGPath?
+    /// The rim's copies, nearest the land first, for tests.
+    var landRimLayers: [SKShapeNode] { landRim.children.compactMap { $0 as? SKShapeNode } }
     private let cam = SKCameraNode()
     private let water = WaterNode(pointsPerMeter: Double(GameScene.pointsPerMeter))
     private let effectsLayer = SKNode()
@@ -236,7 +246,7 @@ final class GameScene: SKScene {
         let fleet = Fleet3D(boats: frame.boats, colors: frame.boats.map { Palette.boat($0.colorIndex) },
                             boatClass: driver.boatClass, course: driver.course, pointsPerMeter: ppm,
                             tiltDegrees: tiltDegrees, sceneSize: size)
-        // Over the fleet layer's shadows and glows (global z ≈ 8…14), under the rule cues (16) and the edge arrow (20)
+        // Over the fleet layer's shadows and glows (global z 5…14), under the rule cues (16) and the edge arrow (20)
         // (`DrawOrder`).
         fleet.node.zPosition = DrawOrder.standingFleet
         fleet.node.name = "fleet3D"
@@ -244,13 +254,7 @@ final class GameScene: SKScene {
         cam.addChild(fleet.node)
         fleet3D = fleet
 
-        landRim.fillColor = ChartPalette.landmark.uiColor
-        landRim.strokeColor = .clear
-        landRim.lineWidth = 0
-        // Just under the land's top fill (`ChartLayer.landZ` = −2), over the water (−10) and shallows.
-        landRim.zPosition = -2.5
-        landRim.name = "landRim"
-        tiltNode.addChild(landRim)
+        buildLandRim()
 
         // The water's glint, on the camera: over the water (−10), under everything else.
         water.glint.zPosition = -9.5
@@ -258,27 +262,50 @@ final class GameScene: SKScene {
         cam.addChild(water.glint)
     }
 
-    /// The land's rim (#596): each coast edge's quad hanging `h` down the screen from it, in `rotor` space (before the
-    /// squash), so a coast facing the viewer shows a face and one facing away hides under the land's fill.
-    private func updateLandRim() {
+    /// The land's rim (#596), built once: every land polygon in one path in world points (pieces that share an edge,
+    /// Fellmere's, fill as one), drawn just under the land's top fill. Each frame only moves the copies
+    /// (`updateLandRim`): the sweep of the silhouette down the screen is the rim, so a coast facing the viewer shows a
+    /// face and one facing away hides under the land's fill.
+    private func buildLandRim() {
+        landRim.name = "landRim"
         let polygons = driver.venue.land.map(\.points)
         guard !polygons.isEmpty else { return }
-        let rho = -rig.cameraRotation, c = cos(rho), s = sin(rho)
-        let centre = rig.center
-        func turned(_ v: Vec2) -> CGPoint {
-            let dx = CGFloat(v.x) * ppm - centre.x, dy = CGFloat(v.y) * ppm - centre.y
-            return CGPoint(x: dx * c - dy * s, y: dx * s + dy * c)
-        }
-        // 6 m standing, shown sin(tilt) tall; the node is squashed by cos(tilt).
-        let drop = 6 * ppm * ChartGeometry.obliqueRise(tiltDegrees: tiltDegrees)
-            / ChartGeometry.obliqueSquash(tiltDegrees: tiltDegrees)
         let path = CGMutablePath()
-        for edge in ChartGeometry.coastEdges(of: polygons) {
-            let a = turned(edge.a), b = turned(edge.b)
-            path.addLines(between: [a, b, CGPoint(x: b.x, y: b.y - drop), CGPoint(x: a.x, y: a.y - drop)])
+        for points in polygons {
+            path.addLines(between: points.map(point))
             path.closeSubpath()
         }
-        landRim.path = path
+        landRimPath = path
+        for step in 0..<Self.landRimSteps {
+            let layer = SKShapeNode(path: path)
+            layer.fillColor = ChartPalette.landmark.uiColor
+            layer.strokeColor = .clear
+            layer.lineWidth = 0
+            // Just under the land's top fill (course layer 1 + `ChartLayer.landZ` −2 = −1), over the water (−10) and
+            // shallows; the deeper copies under the nearer, each its own z (`DrawOrder`).
+            layer.zPosition = -2.5 - 0.1 * CGFloat(step)
+            layer.name = "landRim-\(step + 1)"
+            landRim.addChild(layer)
+        }
+        world.addChild(landRim)
+    }
+
+    /// The rim's copies moved to this frame's drop: 6 m standing, shown `sin(tilt)` tall on screen, so
+    /// `6 · tan(tilt)` metres down the screen before the squash; screen-down turned into `world` space by the camera's
+    /// rotation. Copy `k` of `n` drops `k / n` of it. Written only when the drop changes.
+    private func updateLandRim() {
+        let drop = 6 * ppm * ChartGeometry.obliqueRise(tiltDegrees: tiltDegrees)
+            / ChartGeometry.obliqueSquash(tiltDegrees: tiltDegrees)
+        // `rotor` turns `world` by −rotation: screen-down (0, −drop) is (drop·sin θ, −drop·cos θ) in `world`.
+        let theta = rig.cameraRotation
+        let offset = CGPoint(x: drop * sin(theta), y: -drop * cos(theta))
+        guard offset != landRimDrop else { return }
+        landRimDrop = offset
+        let layers = landRimLayers
+        for (step, layer) in layers.enumerated() {
+            let share = CGFloat(step + 1) / CGFloat(layers.count)
+            layer.position = CGPoint(x: offset.x * share, y: offset.y * share)
+        }
     }
 
     private func buildCourse() {
@@ -312,7 +339,8 @@ final class GameScene: SKScene {
         edgeArrow.strokeColor = UIColor.black.withAlphaComponent(0.35)
         edgeArrow.lineWidth = 1
         edgeArrow.lineJoin = .round
-        // Over every world node: the fleet's top z is about 14 (`DrawOrder`).
+        // Over everything: the fleet layer tops out about 14, the standing fleet is 15 and the rule cues 16
+        // (`DrawOrder`).
         edgeArrow.zPosition = 20
         edgeArrow.isHidden = true
         cam.addChild(edgeArrow)
@@ -331,7 +359,7 @@ final class GameScene: SKScene {
             boatLayer.addChild(node)
             node.effects.nodes.forEach(effectsLayer.addChild)
         }
-        // Over the fleet, whose top z is about 14 (`DrawOrder`), under the edge arrow (20).
+        // Over the fleet layer (top z about 14) and the standing fleet (15), under the edge arrow (20) (`DrawOrder`).
         let rules = RuleCueLayer(pointsPerMeter: ppm)
         rules.zPosition = 16
         world.addChild(rules)
@@ -436,7 +464,7 @@ final class GameScene: SKScene {
                            cameraScale: rig.cameraScale, tiltDegrees: tiltDegrees, sceneSize: size,
                            sailDetail: sailDetail, hidesSails: drawsCuesOnly, time: world.time, dt: dt, settled: settled)
             updateLandRim()
-            water.glint.size = size
+            if water.glint.size != size { water.glint.size = size }
         }
 
         updateCues(world, dt: dt, settled: settled)
@@ -456,7 +484,9 @@ final class GameScene: SKScene {
         }
     }
 
-    /// Eases the shown tilt to the device's (#597), at `tiltEaseRate`; a settled frame snaps to it.
+    /// Eases the shown tilt to the device's (#597), at `tiltEaseRate`; a settled frame snaps to it. On the sim's `dt`,
+    /// as the camera eases: a paused race holds the tilt where it was, and a change made in Settings mid-pause lands
+    /// once the race runs again.
     private func easeTilt(dt: Double, settled: Bool) {
         let target = targetTilt
         if settled || shownTilt == nil {

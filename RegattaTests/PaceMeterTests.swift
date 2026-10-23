@@ -59,7 +59,7 @@ import RegattaCore
         return session
     }
 
-    /// The world (every layer, the water's included, under the tilt node with the land's rim, #597) and the camera
+    /// The world (every layer, the water's and the land's rim included, under the tilt node, #597) and the camera
     /// (the edge arrow) stop drawing, and come back.
     @Test func paintsWorldHidesTheWorldAndTheCamera() throws {
         let session = Self.presented()
@@ -69,7 +69,7 @@ import RegattaCore
         let tilt = try #require(world.parent?.parent)
         let cam = try #require(scene.camera)
         #expect(scene.children.contains(tilt) && scene.children.contains(cam))
-        #expect(tilt.childNode(withName: "landRim") != nil, "the land's rim is under the tilt node")
+        #expect(world.childNode(withName: "landRim") != nil, "the land's rim is in the world")
         #expect(scene.paintsWorld && !tilt.isHidden && !world.isHidden && !cam.isHidden, "a normal launch paints")
 
         scene.paintsWorld = false

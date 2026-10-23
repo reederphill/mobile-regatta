@@ -350,6 +350,7 @@ final class WaterNode: SKNode {
     /// The wave and glint for `quality` and `style` (#597).
     private func applyDepth() {
         rippleShader = quality == .full ? Self.waveShader : nil
+        Self.rippleAlpha.floatValue = Float(style.rippleAlpha)
         guard let shader = glint.shader else { return }
         shader.uniformNamed("u_twinkle")?.floatValue = quality == .full ? 1 : 0
         shader.uniformNamed("u_alpha")?.floatValue = Float(style.glintAlpha)
@@ -359,7 +360,8 @@ final class WaterNode: SKNode {
 
     /// The wave's and glint's clock: race seconds, wrapped at 600 (`setClock`), never SpriteKit's `u_time`, so a
     /// frozen render fixture draws the same water in every frame and a paused race holds still (as
-    /// `TurbulenceTrailLayer`'s `u_clock`). The wave's is shared, as its shader is; the glint's is its own.
+    /// `TurbulenceTrailLayer`'s `u_clock`). The wave's is shared, as its shader is; the glint's is its own. Static, so
+    /// it assumes one race scene drawing at a time: a second live scene's water would draw at whichever set it last.
     private static let waveClock = SKUniform(name: "u_clock", float: 0)
     /// Race time as the wave's and glint's shaders read it, for tests.
     var shaderClock: (wave: Float, glint: Float) {
@@ -372,15 +374,26 @@ final class WaterNode: SKNode {
         glint.shader?.uniformNamed("u_clock")?.floatValue = clock
     }
 
-    /// Shared by every water node: the ripple tiles batch on one shader.
+    /// The streaks' tint and strength as the wave shader draws them (`WaterStyle.rippleAlpha`): uniforms, not the
+    /// sprite's `v_color_mix`, whose colour comes premultiplied by the sprite's alpha, so reading both darkened the
+    /// streaks well past the plain sprite's look (#597, seen in a local preview). Static, as `waveClock` is.
+    private static let rippleTint: SKUniform = {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        ChartPalette.lull.uiColor.getRed(&r, green: &g, blue: &b, alpha: &a)
+        return SKUniform(name: "u_tint", vectorFloat3: SIMD3(Float(r), Float(g), Float(b)))
+    }()
+    private static let rippleAlpha = SKUniform(name: "u_ripple_alpha", float: Float(WaterStyle.standard.rippleAlpha))
+
+    /// Shared by every water node: the ripple tiles batch on one shader. Draws what the plain sprite draws (the lull
+    /// tint at the texture's coverage, `rippleAlpha` strong, premultiplied) with the texture swaying on the clock.
     private static let waveShader = SKShader(source: """
     void main() {
         vec2 uv = v_tex_coord;
         uv.y += 0.01 * sin(u_clock * 2.0 + uv.x * 12.0);
-        vec4 t = texture2D(u_texture, uv);
-        gl_FragColor = vec4(v_color_mix.rgb * t.a, t.a) * v_color_mix.a;
+        float a = texture2D(u_texture, uv).a * u_ripple_alpha;
+        gl_FragColor = vec4(u_tint * a, a);
     }
-    """, uniforms: [waveClock])
+    """, uniforms: [waveClock, rippleTint, rippleAlpha])
 
     /// The glint's own shader (its uniforms are this node's): a gaussian band at `u_band`, a haze along it and
     /// sparkles hashed per cell, each twinkling on its own rate while `u_twinkle` is 1, held at its phase at 0.
