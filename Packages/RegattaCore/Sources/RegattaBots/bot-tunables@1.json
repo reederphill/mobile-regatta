@@ -1,0 +1,32 @@
+{
+  "id" : "bot-tunables",
+  "notes" : "Version 1 (#583 stage 2): the constants as they were in code before they became data, unchanged, and no bot planning (plannerHorizonSeconds 0; the planner's other values are its first placeholders). Degrees, seconds, metres and shares; see BotTunables.",
+  "values" : {
+    "dirtyAirWeightDegrees" : 2,
+    "downwindShadowWeightDegrees" : 4,
+    "laneEdgePressure" : 0.1,
+    "laylineLeadMetres" : 15,
+    "liveHeaderThresholdDegrees" : 3,
+    "liveTackIntervalSeconds" : 15,
+    "lullHeatUpDegrees" : 12,
+    "luffStepDegrees" : 6,
+    "pinchAngleDegrees" : 38,
+    "pinchRangeMetres" : 60,
+    "plannerHorizonSeconds" : 0,
+    "plannerMarginSeconds" : 1,
+    "plannerSecondsPerDegree" : 1,
+    "plannerStart" : 0.5,
+    "plannerStartHorizonSeconds" : 8,
+    "pressureWeightDegrees" : 14,
+    "puffWeightDegrees" : 14,
+    "replaneStepDegrees" : 9,
+    "spotPressureWeightDegrees" : 30,
+    "tacticianAnticipationSeconds" : 6,
+    "tacticianCorridor" : 0.5,
+    "tacticianDownwindShiftDegrees" : 5,
+    "tacticianHeaderThresholdDegrees" : 4,
+    "tacticianTackIntervalSeconds" : 15,
+    "tackingSpeed" : 0.75
+  },
+  "version" : 1
+}

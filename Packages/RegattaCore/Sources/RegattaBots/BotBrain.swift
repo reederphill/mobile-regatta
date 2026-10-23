@@ -144,6 +144,16 @@ struct BotBrain: Sendable {
     /// What she plays beyond sailing the groove to the marks. Set once, at her making; a `var` only so the scripted
     /// encounter tests can sail a live bot without #366's National ramp (`BotConductTests.Pilot`).
     var tactics: Tactics
+    /// The constants her tactics read (#583 stage 2, `BotTunables`): the bundled file's unless a search sets them.
+    let tunables: BotTunables
+    /// How far ahead she plans her tacks and gybes (#583 stage 3, `BotPlanner`): a live bot's from the top of the
+    /// Regional band; nil, she weighs the shift by the heuristics.
+    let planning: BotPlanner.Depth?
+    /// Her last plan: when she made it, the tack she was on, and whether turning paid; she holds it
+    /// `BotPlanner.replanSeconds`.
+    var lastPlan: (time: Double, tack: Tack, gain: Double)?
+    /// Plans she has made (#583: the planner's cost, `BotPlanner.steps` each).
+    var plans = 0
     var plannedTack: Tack = .starboard
     /// The tactician's spot on the start line as she reads its bias (#105, `Tactics.startsAtFavouredEnd`, `readLineBias`),
     /// 0 the pin … 1 the committee boat; nil until she has read it, or for any other bot.
@@ -332,13 +342,15 @@ struct BotBrain: Sendable {
     /// `handling` is her handling skill (#443), which her hand steering's weaknesses scale with when neither `weaknesses`
     /// nor a profile sets them; nil steers as her skill would.
     init(style: BotStyle, profile: BotProfile? = nil, seed: UInt64 = 0, handling: Double? = nil,
-         weaknesses: BotWeaknesses? = nil, caution: Caution? = nil) {
+         weaknesses: BotWeaknesses? = nil, caution: Caution? = nil, tunables: BotTunables = .bundled) {
         self.style = style
+        self.tunables = tunables
+        planning = profile == nil && caution == nil ? BotPlanner.depth(skill: style.skill, tunables: tunables) : nil
         self.caution = caution
         isLive = profile == nil && caution == nil
         self.weaknesses = weaknesses ?? profile?.weaknesses(skill: style.skill)
             ?? BotWeaknesses(skill: style.skill, handling: handling)
-        tactics = Tactics(profile: profile, skill: style.skill, style: style, weaknesses: self.weaknesses)
+        tactics = Tactics(profile: profile, skill: style.skill, style: style, weaknesses: self.weaknesses, tunables: tunables)
         // #337: the cautious bot plays no fleet tactic (her engagement is 0) and fights for no spot: today's values.
         if caution != nil {
             tactics.tacticEngagement = nil
@@ -1421,7 +1433,7 @@ struct BotBrain: Sendable {
     static let tapInterval = 3.0
     /// She tacks (a tap with the wind forward of the beam) only at this share of her close-hauled speed or
     /// more: slower, the tap leaves her head to wind. A gybe keeps her sails full, so it needs none.
-    static let tackingSpeed = 0.75
+    static var tackingSpeed: Double { BotTunables.bundled.tackingSpeed }
     /// That share for a tack she steers by hand within `PlaningTable.markRange` of a mark or gate of her course
     /// (`isNearMarkOfHerLeg`, #508): slow out of a rounding or a layline tack and refused the next one, she sailed
     /// her groove away from the mark at speed until she had the 0.75. A tap's tack keeps `tackingSpeed`: slower, the
@@ -1466,7 +1478,7 @@ struct BotBrain: Sendable {
         guard view.time - lastTapTime >= Self.tapInterval, isClearToTurn(b, view) else { return false }
         guard abs(sailingAngle(b)) < .pi / 2 else { return hasGybeRoom(b, view) }
         let closeHauled = view.boatClass.polar.bestUpwind(tws: b.polarWindSpeed).speed * b.speedShadow
-        return b.speed >= closeHauled * (byHand && isNearMarkOfHerLeg(b, view) ? Self.nearMarkTackingSpeed : Self.tackingSpeed)
+        return b.speed >= closeHauled * (byHand && isNearMarkOfHerLeg(b, view) ? Self.nearMarkTackingSpeed : tunables.tackingSpeed)
     }
 
     /// Whether she is racing near a mark or gate she rounds: there a tack by hand goes from `nearMarkTackingSpeed`
@@ -1601,7 +1613,8 @@ struct BotBrain: Sendable {
                     return Self.windwardApproach(from: b.position, tack: b.tack, mark: m, room: room,
                                                  fetch: m + side * Self.windwardFetchOffset + approach * 4, wind: b.windDirection,
                                                  groove: grooveAngle(.upwind, b, view), upwind: c.upwind,
-                                                 overstand: Self.overstand + (laylineError.map { $0.leg == b.legIndex ? $0.error : 0 } ?? 0))
+                                                 overstand: Self.overstand + (laylineError.map { $0.leg == b.legIndex ? $0.error : 0 } ?? 0),
+                                                 laylineLead: tunables.laylineLead)
                 }
                 if b.roundingStage == 0 {
                     return detour(from: b.position, to: m + side * 6 + approach * 4, around: m,
@@ -1641,7 +1654,7 @@ struct BotBrain: Sendable {
 
     /// Metres down the starboard layline from the windward mark's fetch point to where a boat that can't
     /// fetch it yet sails first: far enough right of the mark that the port track there clears it.
-    static let laylineLead = 15.0
+    static var laylineLead: Double { BotTunables.bundled.laylineLead }
     /// Metres her track keeps off a mark beyond its radius and her beam (`avoidMarks`).
     static let markClearance = 1.0
     /// Metres more than that by which a starboard boat's close-hauled course must clear the windward mark
@@ -1668,7 +1681,8 @@ struct BotBrain: Sendable {
     /// for the rest of the race. She sails back below the mark first: to `belowRight` from its right, to `belowLeft`
     /// round its foot from its left; below it, the approach is the beat's.
     static func windwardApproach(from position: Vec2, tack: Tack, mark: Vec2, room: Double, fetch: Vec2,
-                                 wind w: Double, groove up: Double, upwind: Vec2, overstand: Double = overstand) -> Vec2 {
+                                 wind w: Double, groove up: Double, upwind: Vec2, overstand: Double = overstand,
+                                 laylineLead: Double = laylineLead) -> Vec2 {
         let fromMark = position - mark
         if fromMark.dot(upwind) > 0 {
             return fromMark.dot(upwind.rightPerp) >= 0 ? mark + upwind.rightPerp * belowRight.side - upwind * belowRight.down
@@ -1733,7 +1747,7 @@ struct BotBrain: Sendable {
                 tack = .starboard // on the starboard layline
             } else if distance > Self.tacticalRange {
                 // A fleet tactic's tack (#234) onto a board past its layline would only be tacked back.
-                tack = upwindTack(b, view, planned: tack) { other in
+                tack = upwindTack(b, view, planned: tack, target: target) { other in
                     other == .starboard ? relative >= up + overstand : relative <= -(up + overstand)
                 }
             }
@@ -1756,7 +1770,7 @@ struct BotBrain: Sendable {
             } else if gybe == .port && fromDeadDownwind >= .pi - down + overstand {
                 gybe = .starboard // on the starboard layline
             } else if distance > Self.tacticalRange {
-                gybe = downwindGybe(b, view, planned: gybe)
+                gybe = downwindGybe(b, view, planned: gybe, target: target)
             }
             setTack(gybe, view)
             let aim = Aim.groove(.downwind, tack: gybe, angle: down)

@@ -117,7 +117,8 @@ struct Tactics: Sendable, Equatable {
         return FleetTactics.startLuffUntilScale.at(e)
     }
 
-    init(profile: BotProfile?, skill: Double, style: BotStyle? = nil, weaknesses: BotWeaknesses? = nil) {
+    init(profile: BotProfile?, skill: Double, style: BotStyle? = nil, weaknesses: BotWeaknesses? = nil,
+         tunables: BotTunables = .bundled) {
         switch profile {
         case nil:
             // A live bot (#102): she plays the shifts, on smaller ones the more skilled and the more willing to tack
@@ -125,8 +126,9 @@ struct Tactics: Sendable, Equatable {
             // player would.
             let weaknesses = weaknesses ?? BotWeaknesses(skill: skill)
             let willingness = style?.tackWillingness ?? 0.5
-            let threshold = deg2rad(3 + 2 * (1 - willingness) + 12 * max(0, 0.75 - skill))
-            self.init(headerThreshold: threshold, tackInterval: 15 * (1.3 - 0.6 * willingness), replanes: true,
+            let threshold = tunables.liveHeaderThreshold + deg2rad(2 * (1 - willingness) + 12 * max(0, 0.75 - skill))
+            self.init(headerThreshold: threshold, tackInterval: tunables.liveTackInterval * (1.3 - 0.6 * willingness),
+                      replanes: true,
                       seeksPuffs: weaknesses.puffPerception > 0, seeksPressure: weaknesses.puffPerception > 0)
             puffRange = weaknesses.puffPerception
             corridorBias = 0.5 * (style?.favouredSide ?? 0)
@@ -140,7 +142,7 @@ struct Tactics: Sendable, Equatable {
             // #337: and how hard she plays each, and fights for her spot before her start.
             tacticEngagement = engagement
             startEngagement = engagement
-            rampToTheTactician(skill: skill)
+            rampToTheTactician(skill: skill, tunables: tunables)
         case .baseline, .clubSteering:
             // The groove only: headers past a threshold, the corridor, and nothing off the groove.
             self.init(headerThreshold: deg2rad(5), tackInterval: 15)
@@ -152,8 +154,9 @@ struct Tactics: Sendable, Equatable {
         case .tactician, .hunter, .tacticianClubExecution, .tacticianClubSteering:
             // #263: a corridor a little wider than the baseline's and her tacks as close together as hers, measured in
             // the fun pass: with skiff@3's tack cost and momentum, 0.8 and 20 s cost her the edge (#300 retunes).
-            self.init(headerThreshold: deg2rad(4), tackInterval: 15, anticipation: 6, corridor: 0.5,
-                      downwindShiftThreshold: deg2rad(5), replanes: true, pinchesToFetch: true,
+            self.init(headerThreshold: tunables.tacticianHeaderThreshold, tackInterval: tunables.tacticianTackInterval,
+                      anticipation: tunables.tacticianAnticipation, corridor: tunables.tacticianCorridor,
+                      downwindShiftThreshold: tunables.tacticianDownwindShift, replanes: true, pinchesToFetch: true,
                       seeksPuffs: true, seeksPressure: true, goesToThePressure: true, seeksClearAir: true, covers: true)
             // #234 (ruling 3): her cover stays #231's (`covers`) and she holds no lane. #234's first lee-bow and tack on
             // a boat's wind cost her fun-pass gain on 16 seeds (1.91 → 1.74 L/beat); with #329's forecast trigger and
@@ -195,11 +198,11 @@ struct Tactics: Sendable, Equatable {
     /// band nothing moves. Her style stays hers: her favoured side, tack interval and engagement (and the fleet tactics
     /// it floors), her skill's puff range and tactical quality; the tactician's pure cover (`covers`) stays the
     /// tactician's. Skill is an input, so nothing is drawn.
-    private mutating func rampToTheTactician(skill: Double) {
+    private mutating func rampToTheTactician(skill: Double, tunables: BotTunables) {
         let band = BotTier.national.skillBand
         let w = BotWeaknesses.ramp(skill, from: band.lowerBound, to: band.upperBound)
         guard w > 0 else { return }
-        let tactician = Tactics(profile: .tactician, skill: skill)
+        let tactician = Tactics(profile: .tactician, skill: skill, tunables: tunables)
         func lerp(_ a: Double, _ b: Double) -> Double { w >= 1 ? b : a + (b - a) * w }
         anticipation = lerp(anticipation, tactician.anticipation)
         corridor = lerp(corridor, tactician.corridor)
@@ -334,7 +337,10 @@ extension BotBrain {
     /// (past its layline, where navigating would tack her straight back), and only when she can tap now (`canTap`).
     /// Inside her tack interval only a lee-bow tacks her (#329, `FleetTactics.leeBowInsideTackInterval`): it answers a
     /// crossing, not a tack of her choosing.
-    mutating func upwindTack(_ b: SeatView.OwnBoat, _ view: SeatView, planned tack: Tack,
+    ///
+    /// A bot that plans (`BotBrain.planning`, #583 stage 3) asks her planner (`plannedTurn`) in place of the shift, puff
+    /// and pressure's degrees against her threshold, `target` being where she sails for; the rest stands.
+    mutating func upwindTack(_ b: SeatView.OwnBoat, _ view: SeatView, planned tack: Tack, target: Vec2? = nil,
                              overstood: (Tack) -> Bool = { _ in false }) -> Tack {
         // Only a play noted in this evaluation counts for her tap (`BotDecision.play`).
         lastFleetPlay = nil
@@ -357,7 +363,7 @@ extension BotBrain {
         let pressure = tactics.seeksPressure ? pressureAdvantage(b, view, over: tack) : 0
         if tactics.seeksPuffs { headed += puffAdvantage(b, view, over: tack) }
         headed += pressure
-        if tactics.seeksClearAir && tack == b.tack && b.shadow < Self.dirtyAir { headed += Self.dirtyAirWeight }
+        if tactics.seeksClearAir && tack == b.tack && b.shadow < Self.dirtyAir { headed += tunables.dirtyAirWeight }
         // Passing a boat ahead (#531 Q4): every tier at least considers a tack to clear air.
         if tack == b.tack, keepClearLatch?.lane != nil { headed += Self.overtakeWeight }
         if let play = fleetPlay(b, view, planned: tack, headed: shifted, lean: headed, threshold: threshold,
@@ -374,8 +380,33 @@ extension BotBrain {
         if tactics.covers, let rival = coverTarget(b, view), rival.tack != tack, headed > -threshold {
             return rival.tack
         }
+        if let target, let turns = plannedTurn(b, view, tack: tack, groove: .upwind, target: target) {
+            // Dirty air and a boat to pass are hers to see, not the planner's: worth their degrees off its margin.
+            let clearAir = headed - shifted - pressure - (tactics.seeksPuffs ? puffAdvantage(b, view, over: tack) : 0)
+            return turns(rad2deg(clearAir) * tunables.plannerSecondsPerDegree) && !overstood(tack.other) ? tack.other : tack
+        }
         let bar = tactics.goesToThePressure && neutral && pressure > threshold / 2 ? threshold / 2 : threshold
         return headed > bar ? tack.other : tack
+    }
+
+    /// Her planner's answer (#583 stage 3, `BotPlanner`) for turning off `tack` now, sailing `groove`'s angle, to
+    /// `target`: a test of the seconds the turn gains against its margin less `credit` seconds; nil when she doesn't plan
+    /// (no depth, or not on `tack`, or in a turn). She plans again `BotPlanner.replanSeconds` after her last plan, or
+    /// on a new tack, and holds the gain between.
+    mutating func plannedTurn(_ b: SeatView.OwnBoat, _ view: SeatView, tack: Tack, groove: Autohelm.Groove,
+                              target: Vec2) -> ((Double) -> Bool)? {
+        guard let planning, b.status == .racing, tack == b.tack, handTurn == nil else { return nil }
+        let gain: Double
+        if let last = lastPlan, last.tack == tack, view.time - last.time < BotPlanner.replanSeconds {
+            gain = last.gain
+        } else {
+            gain = BotPlanner.turnGain(view, twa: grooveAngle(groove, b, view), isPlaning: senses.planing, target: target,
+                                       depth: planning, range: tactics.puffRange)
+            lastPlan = (view.time, tack, gain)
+            plans += 1
+        }
+        let margin = tunables.plannerMargin
+        return { credit in gain > margin - credit }
     }
 
     /// Notes the fleet tactic that turns her plan to the other tack now (`lastFleetPlay`, #337).
@@ -387,10 +418,10 @@ extension BotBrain {
     /// Her wind shadow factor under which she is in another boat's dirty air.
     static let dirtyAir = 0.85
     /// Dirty air, worth this much header: enough to tack out of on a header short of her threshold.
-    static let dirtyAirWeight = deg2rad(2)
+    static var dirtyAirWeight: Double { BotTunables.bundled.dirtyAirWeight }
     /// A puff on the water ahead, per unit of its tone averaged along her track, is worth this much shift: a
     /// tenth more wind makes about 5% more VMG upwind, as about a degree and a half of shift does.
-    static let puffWeight = deg2rad(14)
+    static var puffWeight: Double { BotTunables.bundled.puffWeight }
     /// Hull lengths within which she covers a boat behind her.
     static let coverRange = 5.0
     /// How far ahead she looks along each tack for puffs, metres, in steps.
@@ -417,22 +448,22 @@ extension BotBrain {
             }
             return total / Double(Self.puffLookAhead.count)
         }
-        return (tone(tack.other) - tone(tack)) * Self.puffWeight
+        return (tone(tack.other) - tone(tack)) * tunables.puffWeight
     }
 
     /// More pressure ahead, per unit of the factor over hers, averaged along her track, is worth this much shift: as a
     /// puff's (`puffWeight`), a tenth more wind about a degree and a half. Weighed against the shift, so she plays the
     /// shifts first and leans to the pressure, rather than sailing off to it through them (#290's bot suite). The
     /// tactician's read (`Tactics.goesToThePressure`).
-    static let pressureWeight = deg2rad(14)
+    static var pressureWeight: Double { BotTunables.bundled.pressureWeight }
     /// More pressure at the best spot she sees on a tack, per unit of the factor over hers, is worth this much shift: a
     /// live bot's read. More than a puff's: the pressure lasts, and a boat in it keeps its gain for as long as she stays.
-    static let spotPressureWeight = deg2rad(30)
+    static var spotPressureWeight: Double { BotTunables.bundled.spotPressureWeight }
     /// How far ahead she reads the pressure along each tack, as shares of her `Tactics.puffRange`: out to twice it.
     static let pressureLookAhead: [Double] = [0.5, 1, 1.5, 2]
     /// The pressure over hers at which a place's bend counts in full: the edge of a pressure lane she'd sail into.
     /// Less, and its bend counts for that share; none, and not at all.
-    static let laneEdgePressure = 0.1
+    static var laneEdgePressure: Double { BotTunables.bundled.laneEdgePressure }
 
     /// How much better, as degrees of shift, the pressure ahead is on the other tack than on `tack` (#290), out as far
     /// as she sees it on each (`pressureLookAhead`): its pressure over hers, and its wind's turn from hers as a lift on
@@ -472,9 +503,9 @@ extension BotBrain {
                 let gain = there.factor - here.factor
                 let bend = lift * wrapAngle(there.turn - here.turn)
                 if alongTrack {
-                    total += gain * Self.pressureWeight + min(max(gain / Self.laneEdgePressure, 0), 1) * bend
+                    total += gain * tunables.pressureWeight + min(max(gain / tunables.laneEdgePressure, 0), 1) * bend
                 } else {
-                    let value = gain * Self.spotPressureWeight + bend
+                    let value = gain * tunables.spotPressureWeight + bend
                     best = max(best ?? value, value)
                 }
             }
@@ -506,17 +537,17 @@ extension BotBrain {
     }
 
     /// Metres from her mark inside which she pinches to fetch it.
-    static let pinchRange = 60.0
+    static var pinchRange: Double { BotTunables.bundled.pinchRange }
     /// The highest she pinches: this far off the wind, radians, well clear of the no-go zone.
-    static let pinchAngle = deg2rad(38)
+    static var pinchAngle: Double { BotTunables.bundled.pinchAngle }
 
     /// The upwind aim on `tack` for a target `distance` metres off, bearing `relative` to the wind (to the right
     /// positive): the groove, or for a tactician close to it and just below its layline, the pinch that fetches it.
     func upwindAim(_ b: SeatView.OwnBoat, _ view: SeatView, tack: Tack, relative: Double, distance: Double) -> Aim {
         let groove = upwindAim(b, view, tack: tack)
-        guard tactics.pinchesToFetch, distance < Self.pinchRange, tack == b.tack else { return groove }
+        guard tactics.pinchesToFetch, distance < tunables.pinchRange, tack == b.tack else { return groove }
         let off = tack == .starboard ? -relative : relative
-        guard off >= Self.pinchAngle && off < groove.angle - view.boatClass.steering.autohelm.upwindSnap else { return groove }
+        guard off >= tunables.pinchAngle && off < groove.angle - view.boatClass.steering.autohelm.upwindSnap else { return groove }
         return Aim(angle: off, tack: tack)
     }
 
@@ -530,19 +561,25 @@ extension BotBrain {
     /// The tactician (#105) weighs two things more, as the upwind beat weighs puffs and dirty air: the pressure ahead on
     /// each gybe (`Tactics.runsToPressure`, `downwindPressureAdvantage`), and the wind shadow of a boat behind her
     /// (`Tactics.gybesOutOfShadow`): on a run every boat shadowing her is astern of her, up the course.
-    mutating func downwindGybe(_ b: SeatView.OwnBoat, _ view: SeatView, planned gybe: Tack) -> Tack {
-        guard let threshold = tactics.downwindShiftThreshold, view.time - lastTackTime > tactics.tackInterval else { return gybe }
+    mutating func downwindGybe(_ b: SeatView.OwnBoat, _ view: SeatView, planned gybe: Tack, target: Vec2? = nil) -> Tack {
+        guard view.time - lastTackTime > tactics.tackInterval else { return gybe }
+        // A bot that plans (#583 stage 3) asks her planner, her shadow's degrees off its margin.
+        if let target, let turns = plannedTurn(b, view, tack: gybe, groove: .downwind, target: target) {
+            let shadow = tactics.gybesOutOfShadow && gybe == b.tack && b.shadow < Self.dirtyAir ? tunables.downwindShadowWeight : 0
+            return turns(rad2deg(shadow) * tunables.plannerSecondsPerDegree) ? gybe.other : gybe
+        }
+        guard let threshold = tactics.downwindShiftThreshold else { return gybe }
         let direction = (senses.direction ?? b.windDirection) + senses.directionRate * tactics.anticipation
         let shift = wrapAngle(direction - view.course.axis)
         var away = gybe == .starboard ? shift : -shift
         if tactics.runsToPressure { away += downwindPressureAdvantage(b, view, over: gybe) }
-        if tactics.gybesOutOfShadow && gybe == b.tack && b.shadow < Self.dirtyAir { away += Self.downwindShadowWeight }
+        if tactics.gybesOutOfShadow && gybe == b.tack && b.shadow < Self.dirtyAir { away += tunables.downwindShadowWeight }
         return away > threshold ? gybe.other : gybe
     }
 
     /// Downwind, the shadow of a boat behind her is worth this much shift (#105): with a degree of shift the way it
     /// swings her from her mark, enough to gybe out of past the tactician's 5° threshold. A tunable for #389.
-    static let downwindShadowWeight = deg2rad(4)
+    static var downwindShadowWeight: Double { BotTunables.bundled.downwindShadowWeight }
 
     /// "Read the lull at her boat" (#263, #484): where through National's handling band
     /// (`BotTier.national.handlingBand`, 0 at its bottom … 1 at its top) a hand reads the lulls (`heatsUpInLulls`). Her
@@ -557,7 +594,7 @@ extension BotBrain {
     }
 
     /// How far above the groove she sails in a lull to stay on the plane: past the downwind snap.
-    static let lullHeatUp = deg2rad(12)
+    static var lullHeatUp: Double { BotTunables.bundled.lullHeatUp }
     /// On the plane, she is in a lull when her speed is within this share above the class's off-plane speed.
     static let lullSpeedMargin = 1.25
     /// She heads up to plane at an angle where her speed off the plane reaches this share of the class's
@@ -586,7 +623,7 @@ extension BotBrain {
         // "Heats up in a lull, not in a shadow" (#263): a boat's wind shadow slows her whatever angle she sails
         // (`speedShadow`), so heading up there only sails her further.
         if heatsUpInLulls && b.speed < planing.offSpeed * Self.lullSpeedMargin && b.speedShadow >= 1 {
-            return aim.offset(by: -Self.lullHeatUp, tolerance: deg2rad(3))
+            return aim.offset(by: -tunables.lullHeatUp, tolerance: deg2rad(3))
         }
         return aim
     }

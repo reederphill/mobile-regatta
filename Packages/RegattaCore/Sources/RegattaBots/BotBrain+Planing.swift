@@ -79,9 +79,9 @@ public enum PlaningTable {
     /// where she is (`good` at `noticeHandling.good` or better, to `poor`), `luffStep` radians a decision: little
     /// enough rudder that it costs her no speed, enough that the class does not count it centred.
     public static let reflexMargin = (good: metresPerSecond(knots: 0.6), poor: metresPerSecond(knots: 0.1))
-    public static let luffStep = deg2rad(6)
+    public static var luffStep: Double { BotTunables.bundled.luffStep }
     /// Luffing to plane again she turns this far a decision at most, radians.
-    public static let replaneStep = deg2rad(9)
+    public static var replaneStep: Double { BotTunables.bundled.replaneStep }
 
     /// Switches for measuring each heuristic by itself (#462's build order); all on in play.
     public static let headsUpAfterAFall = true
@@ -193,7 +193,7 @@ extension BotBrain {
             guard target < aim.angle else { return aim }
             // She luffs to it a step a decision: hard over, the rudder takes the speed she is luffing for.
             let actual = abs(sailingAngle(b))
-            let step = aim.tack == b.tack && target < actual ? max(target, actual - PlaningTable.replaneStep) : target
+            let step = aim.tack == b.tack && target < actual ? max(target, actual - tunables.replaneStep) : target
             return Aim(angle: step, tack: aim.tack, tolerance: deg2rad(3))
         }
         guard var state = replane, let held = state.angle else {
@@ -301,7 +301,7 @@ extension BotBrain {
                 BoatClass.PlaningTuning.apparentWindSpeed(twa: actual, speed: b.speed, tws: now) < $0.offSpeed(tws: now) + margin
             } ?? false
             if soft || !fast(actual) {
-                var luff = Aim(angle: max(min(aim.angle, actual - PlaningTable.luffStep), highest), tack: aim.tack, tolerance: deg2rad(1))
+                var luff = Aim(angle: max(min(aim.angle, actual - tunables.luffStep), highest), tack: aim.tack, tolerance: deg2rad(1))
                 luff.insists = true
                 return luff
             }
@@ -311,7 +311,7 @@ extension BotBrain {
         if held {
             while angle > highest, !keeps(angle) { angle -= PlaningTable.floorStep }
             // No further up from where she is than a step: she holds what she has while she gathers speed.
-            if angle < actual { angle = min(aim.angle, max(angle, actual - PlaningTable.luffStep)) }
+            if angle < actual { angle = min(aim.angle, max(angle, actual - tunables.luffStep)) }
             angle = max(angle, highest)
         }
         // Inside her own hand: the same angle wherever her hand has her now, or she would give it up just as it

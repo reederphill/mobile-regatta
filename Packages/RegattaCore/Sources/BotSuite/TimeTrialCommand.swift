@@ -19,6 +19,19 @@ public struct TimeTrialOptions: Hashable, Sendable {
     public var tiers: [BotTier] = []
     public var profiles: [BotProfile] = []
     public var oracle = Oracle.Options()
+    /// `--oracle-from <report.json>`: the oracle's laps from an earlier report of the same seeds, not searched again.
+    public var oracleFrom: String?
+    /// `--tunables <file>`: the bots read this tunables file (`BotTunables`) in place of the bundled one.
+    public var tunablesPath: String?
+    /// `--tune <out.json>` (#583 stage 2): search the tunables for the least mean time behind the oracle of the sailors,
+    /// from `tunablesPath`'s or the bundled ones, and write the best as a tunables file there.
+    public var tuneOut: String?
+    /// `--tune-rounds <n>`: rounds of the search, each a pass over every tunable at the round's step.
+    public var tuneRounds = 4
+    /// `--tune-only <prefix>`: search only the tunables whose names start so (repeatable); all when empty.
+    public var tuneOnly: [String] = []
+    /// `--tune-skip <prefix>`: leave the tunables whose names start so as they are (repeatable).
+    public var tuneSkip: [String] = []
     public var jobs: Int?
     /// Where to write the JSON report; `-` for stdout (the text report then goes to stderr).
     public var jsonPath: String?
@@ -42,6 +55,13 @@ public struct TimeTrialOptions: Hashable, Sendable {
                                  its checkpoint)
           --checkpoint <s>       seconds between the oracle's checkpoints (default 2)
           --no-event-checkpoints checkpoint on the clock only, not on marks, laylines, shifts and puffs
+          --oracle-from <json>   take the oracle's laps from an earlier --json report of the same seeds
+          --tunables <file>      the bots read this tunables file (bot-tunables@n.json's form) in place of the bundled
+          --tune <out.json>      search the bots' tunables for the least mean time behind the oracle of the sailors
+                                 (coordinate descent; needs --oracle-from) and write the best set there
+          --tune-rounds <n>      rounds of the search, each step half the last (default 4)
+          --tune-only <prefix>   search only the tunables whose names start so, e.g. planner (repeatable)
+          --tune-skip <prefix>   leave the tunables whose names start so as they are (repeatable)
           --json <path|->        write the JSON report there (- for stdout)
           --jobs <n>             seeds sailed at once (default: the performance cores)
         One boat, no fleet: from a fixed start at the gun, the oracle searches for the fastest lap of each seed's
@@ -89,14 +109,47 @@ public struct TimeTrialOptions: Hashable, Sendable {
             case "--checkpoint": oracle.checkpointSeconds = try seconds(flag)
             case "--no-event-checkpoints": oracle.eventCheckpoints = false
             case "--json": jsonPath = try value(flag)
+            case "--oracle-from": oracleFrom = try value(flag)
+            case "--tunables": tunablesPath = try value(flag)
+            case "--tune": tuneOut = try value(flag)
+            case "--tune-rounds": tuneRounds = try number(flag)
+            case "--tune-only": tuneOnly.append(try value(flag))
+            case "--tune-skip": tuneSkip.append(try value(flag))
             case "--jobs": jobs = try number(flag)
             case "-h", "--help": help = true
             default: throw BotSuiteError.usage("unknown argument: \(flag)")
             }
         }
+        if tuneOut != nil && oracleFrom == nil { throw BotSuiteError.usage("--tune needs --oracle-from") }
         if oracle.checkpointSeconds < Oracle.minimumSegmentSeconds {
             throw BotSuiteError.usage("--checkpoint: at least \(Oracle.minimumSegmentSeconds) s")
         }
+    }
+
+    /// The tunables `--tune` searches: `--tune-only`'s, less `--tune-skip`'s.
+    public func tuneParameters() throws -> [BotTunables.Parameter] {
+        let chosen = BotTunables.parameters.filter { parameter in
+            (tuneOnly.isEmpty || tuneOnly.contains { parameter.name.hasPrefix($0) })
+                && !tuneSkip.contains { parameter.name.hasPrefix($0) }
+        }
+        guard !chosen.isEmpty else { throw BotSuiteError.usage("--tune-only/--tune-skip leave nothing to tune") }
+        return chosen
+    }
+
+    /// The tunables file `--tunables` names, if any.
+    public func tunables() throws -> BotTunables? {
+        try tunablesPath.map { try BotTunables.decode(Data(contentsOf: URL(fileURLWithPath: $0))) }
+    }
+
+    /// The oracle's laps `--oracle-from` names: every seed of the run must be in it.
+    public func knownOracle() throws -> [TimeTrialSeedResult] {
+        guard let oracleFrom else { return [] }
+        let report = try JSONDecoder().decode(TimeTrialReport.self, from: Data(contentsOf: URL(fileURLWithPath: oracleFrom)))
+        let seeds = try seeds()
+        if let missing = seeds.first(where: { seed in !report.seeds.contains { $0.seed == seed } }) {
+            throw BotSuiteError.usage("--oracle-from: no lap of \(missing.name) (\(missing.laps) laps) in \(oracleFrom)")
+        }
+        return report.seeds
     }
 
     /// The sailors, oracle aside.
@@ -277,30 +330,40 @@ public struct TimeTrialReport: Codable, Hashable, Sendable {
 
 public enum TimeTrial {
     /// Sails `seed`: the oracle's search, its lap re-sailed under the ledger, and each of `sailors` alone.
-    public static func run(_ seed: TimeTrialSeed, sailors: [TimeTrialSailor], oracle options: Oracle.Options) throws
-        -> TimeTrialSeedResult {
+    /// Sails `seed`: the oracle's search, its lap re-sailed under the ledger, and each of `sailors` alone, reading
+    /// `tunables` if given. `known`, an earlier run of the seed, gives the oracle's lap instead of searching again
+    /// (`--oracle-from`): its search doesn't read the tunables' bots but through its actions, so a tuning run keeps one.
+    public static func run(_ seed: TimeTrialSeed, sailors: [TimeTrialSailor], oracle options: Oracle.Options,
+                           tunables: BotTunables? = nil, known: TimeTrialSeedResult? = nil) throws -> TimeTrialSeedResult {
         let course = try TimeTrialCourse(seed)
-        let oracle = Oracle(course: course, options: options)
-        let plan = try oracle.search()
-        let lap = try course.replay(plan.inputs)
         let segments = segmentKeys(course)
         func seconds(_ ledger: LapLedger) -> (segments: [Double], causes: [Double]) {
             let bySegment = ledger.bySegment
             let byCause = ledger.byCause
             return (segments.map { bySegment[$0] ?? 0 }, LapLedger.Cause.allCases.map { byCause[$0] ?? 0 })
         }
-        let oracleSeconds = seconds(lap.ledger)
-        let losses = try sailors.map { sailor -> TimeTrialLoss in
-            let run = try course.sail(sailor)
+        var result: TimeTrialSeedResult
+        if let known {
+            result = known
+            result.losses = []
+        } else {
+            let plan = try Oracle(course: course, options: options).search()
+            let lap = try course.replay(plan.inputs)
+            let oracle = seconds(lap.ledger)
+            result = TimeTrialSeedResult(seed: seed, oracleSeconds: lap.finishSeconds, oracleSegments: oracle.segments,
+                                         oracleCauses: oracle.causes, oracleManoeuvres: lap.ledger.manoeuvres,
+                                         oracleNodes: plan.nodes, oracleTicks: plan.ticks, oracleDigest: lap.digest, losses: [])
+        }
+        let oracleSailed = result.oracleSegments.reduce(0, +)
+        result.losses = try sailors.map { sailor -> TimeTrialLoss in
+            let run = try course.sail(sailor, tunables: tunables)
             let mine = seconds(run.ledger)
             return TimeTrialLoss(sailor: sailor.description, finishSeconds: run.finishSeconds,
-                                 gapSeconds: run.sailedSeconds - lap.sailedSeconds,
-                                 segments: zip(mine.segments, oracleSeconds.segments).map(-),
-                                 causes: zip(mine.causes, oracleSeconds.causes).map(-), manoeuvres: run.ledger.manoeuvres)
+                                 gapSeconds: run.sailedSeconds - oracleSailed,
+                                 segments: zip(mine.segments, result.oracleSegments).map(-),
+                                 causes: zip(mine.causes, result.oracleCauses).map(-), manoeuvres: run.ledger.manoeuvres)
         }
-        return TimeTrialSeedResult(seed: seed, oracleSeconds: lap.finishSeconds, oracleSegments: oracleSeconds.segments,
-                                   oracleCauses: oracleSeconds.causes, oracleManoeuvres: lap.ledger.manoeuvres,
-                                   oracleNodes: plan.nodes, oracleTicks: plan.ticks, oracleDigest: lap.digest, losses: losses)
+        return result
     }
 
     /// The ledger's segments in course order: the start, then each leg's sailing and its rounding.
@@ -341,8 +404,11 @@ public enum TimeTrial {
 
     /// `run(_:sailors:oracle:)` for each of `seeds`, up to `jobs` at once, in the seeds' order.
     public static func run(_ seeds: [TimeTrialSeed], sailors: [TimeTrialSailor], oracle options: Oracle.Options,
+                           tunables: BotTunables? = nil, known: [TimeTrialSeedResult] = [],
                            jobs: Int = BotSuite.defaultJobs) throws -> [TimeTrialSeedResult] {
-        try BotSuite.inParallel(seeds, jobs: jobs) { seed in try run(seed, sailors: sailors, oracle: options) }
+        try BotSuite.inParallel(seeds, jobs: jobs) { seed in
+            try run(seed, sailors: sailors, oracle: options, tunables: tunables, known: known.first { $0.seed == seed })
+        }
     }
 
     /// The whole time trial for `options`.
@@ -350,7 +416,8 @@ public enum TimeTrial {
         let seeds = try options.seeds()
         let sailors = options.sailors
         let settings = options.oracle
-        let results = try run(seeds, sailors: sailors, oracle: settings, jobs: options.jobs ?? BotSuite.defaultJobs)
+        let results = try run(seeds, sailors: sailors, oracle: settings, tunables: options.tunables(),
+                              known: options.knownOracle(), jobs: options.jobs ?? BotSuite.defaultJobs)
         let names = try seeds.first.map { segmentNames(try TimeTrialCourse($0)) } ?? []
         return TimeTrialReport(oracle: settings, segments: names, seeds: results)
     }
@@ -360,6 +427,10 @@ public enum TimeTrial {
             let options = try TimeTrialOptions(arguments: arguments)
             if options.help {
                 print(TimeTrialOptions.usage)
+                return 0
+            }
+            if let out = options.tuneOut {
+                try TimeTrialTuner.run(options, out: out) { print($0) }
                 return 0
             }
             let report = try run(options)

@@ -190,11 +190,13 @@ public final class TimeTrialCourse {
     /// The last tick she may sail to: the race's own time limit closes it first.
     public static let capTicks = BotMatrix.defaultCapSecondsAfterGun * Race.tickRate
 
-    /// Sails `sailor`, a bot, from the start to the close, the ledger watching every tick.
-    public func sail(_ sailor: TimeTrialSailor) throws -> TimeTrialRun {
-        guard var driver = sailor.driver(raceSeed: setup.raceSeed)?.takingOver() else {
+    /// Sails `sailor`, a bot, from the start to the close, the ledger watching every tick: reading `tunables` in place
+    /// of the bundled file's if given (#583 stage 2).
+    public func sail(_ sailor: TimeTrialSailor, tunables: BotTunables? = nil) throws -> TimeTrialRun {
+        guard let bot = sailor.driver(raceSeed: setup.raceSeed) else {
             preconditionFailure("the oracle sails through `Oracle`, not a driver")
         }
+        var driver = (tunables.map(bot.tuned) ?? bot).takingOver()
         let race = try race()
         var ledger = LapLedger(course: self)
         while !race.isOver && race.tick < Self.capTicks {
@@ -308,54 +310,6 @@ public final class TimeTrialCourse {
 
     /// Within this of a leg's mark, centre to centre, she is rounding it: the course's rule 18 zone.
     var roundingRadius: Double { course.zoneRadius }
-}
-
-/// The speeds a boat of the class can hold in one true wind speed (#583), by true wind angle: the polar's (on-plane,
-/// spinnaker up where it goes up) where she stays on the plane at that speed, else her off-plane speed. On skiff@9 she
-/// can't hold the plane sailed deep (the apparent wind falls away), so the polar's own best downwind angle is one she
-/// can't sail at its speed. The oracle's grooves and estimate, and the ledger's ideal, read this.
-public struct SteadyPolar: Sendable {
-    /// Metres a second by whole degree of true wind angle, 0…180.
-    public let speeds: [Double]
-    /// The best VMG upwind and downwind: the angle and the speed there.
-    public let up: (twa: Double, speed: Double)
-    public let down: (twa: Double, speed: Double)
-
-    init(boatClass: BoatClass, tws: Double) {
-        let polar = boatClass.polar
-        speeds = (0...180).map { degree in
-            let twa = deg2rad(Double(degree))
-            guard twa >= BoatDynamics.noGoAngle(polar) else { return 0 }
-            let kite: Spinnaker = boatClass.spinnaker.map { twa >= $0.hoistAboveTWA ? .up : .down } ?? .down
-            let on = BoatDynamics.polarTarget(relativeWind: twa, boomSide: .port, tws: tws, isPlaning: true, spinnaker: kite,
-                                              boatClass: boatClass)
-            if let planing = boatClass.planing,
-               !planing.isPlaning(was: true, twa: twa, speed: on, tws: tws, rudder: 0, polar: polar) {
-                return BoatDynamics.polarTarget(relativeWind: twa, boomSide: .port, tws: tws, isPlaning: false, spinnaker: kite,
-                                                boatClass: boatClass)
-            }
-            return on
-        }
-        var up = (twa: Double.pi / 4, speed: 0.0, vmg: 0.0)
-        var down = (twa: Double.pi * 3 / 4, speed: 0.0, vmg: 0.0)
-        for (degree, speed) in speeds.enumerated() {
-            let twa = deg2rad(Double(degree))
-            let vmg = speed * cos(twa)
-            if vmg > up.vmg { up = (twa, speed, vmg) }
-            if -vmg > down.vmg { down = (twa, speed, -vmg) }
-        }
-        self.up = (up.twa, up.speed)
-        self.down = (down.twa, down.speed)
-    }
-
-    /// The speed at `twa`, radians, between whole degrees.
-    public func speed(twa: Double) -> Double {
-        let degrees = min(max(rad2deg(abs(twa)), 0), 180)
-        let low = Int(degrees.rounded(.down))
-        guard low < 180 else { return speeds[180] }
-        let share = degrees - Double(low)
-        return speeds[low] * (1 - share) + speeds[low + 1] * share
-    }
 }
 
 /// One sailor's lap on a seed (#583): her finish, and her ledger.
