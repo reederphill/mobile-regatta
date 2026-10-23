@@ -30,6 +30,10 @@ protocol FleetLockHost: AnyObject {
     func keepHandOff(_ fleet: RaceFleet)
     /// `raceID`'s seat liveries as its briefing showed them, if this device kept them.
     func fleet(of raceID: RaceID) -> [Livery]?
+    /// Whether the service's last race, read as a session opens, replaces Home's Last race (#163, T4).
+    func adoptsLastRace(_ raceID: RaceID) -> Bool
+    /// An online race of hers closed and Home has its results (#163, T5): the server's race count is read again.
+    func onlineRaceClosed()
 }
 
 extension AppModel.Notice {

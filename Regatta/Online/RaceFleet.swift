@@ -8,10 +8,22 @@ import RegattaServices
 struct RaceFleet: Codable, Equatable {
     var raceID: String
     var liveries: [Livery]
+    /// Home has kept a practice race since this hand-off (#163, T4): the server naming this race no longer outranks
+    /// Home's Last race at the session's open.
+    var superseded = false
 
     init(raceID: RaceID, liveries: [Livery]) {
         self.raceID = raceID.rawValue
         self.liveries = liveries
+    }
+
+    private enum CodingKeys: CodingKey { case raceID, liveries, superseded }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        raceID = try container.decode(String.self, forKey: .raceID)
+        liveries = try container.decode([Livery].self, forKey: .liveries)
+        superseded = try container.decodeIfPresent(Bool.self, forKey: .superseded) ?? false
     }
 
     /// The fleet `briefing` shows for `raceID`.
@@ -24,7 +36,8 @@ struct RaceFleet: Codable, Equatable {
 }
 
 /// The last hand-off's race and its fleet (#163), as JSON in the practice defaults, so UI tests, which empty those at
-/// launch, start with none. A cold launch or a rejoin of that race wears its liveries again.
+/// launch, start with none. A cold launch or a rejoin of that race wears its liveries again, and the session-open
+/// fetch knows this device was handed that race (`AppModel.adoptsLastRace`).
 struct LastHandOffStore {
     let defaults: UserDefaults
     static let key = "lastHandOff"

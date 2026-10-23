@@ -132,8 +132,10 @@ struct RaceResultViewModel: Equatable, Codable {
         }
     }
 
-    /// Home's Last race keeps these results (#132): not a race you retired from, which is no result of yours.
-    var keepsAsLastRace: Bool { myRow.map { $0.result != .ret } ?? false }
+    /// Home's Last race keeps these results (#132): not a practice race you retired from, which is no result of yours.
+    /// An online race you retired from is (#163, G1): leaving after the gun is a retirement, rated as one, and Home has
+    /// it as her last race once it closes (#24, CONTEXT **Rejoin**).
+    var keepsAsLastRace: Bool { myRow.map { online != nil || $0.result != .ret } ?? false }
 
     /// The home screen's Last race summary: "3 of 8", or your code.
     // TODO-COPY (#171)

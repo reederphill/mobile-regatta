@@ -139,7 +139,7 @@ final class OnlineRaceController: OnlineSequence {
     static let reconnectingAfter: TimeInterval = 2
     /// The race link failing this long while the device is online: ask the service whether the race still runs.
     static let serverGoneAfter: TimeInterval = 60
-    /// How long the Last race row waits for its rating.
+    /// How long the race just left is followed to its close for Home's Last race (#163): the rating's wait.
     static let ratingWait: TimeInterval = 600
     /// A token ask the service didn't answer is tried again after this long, not every tick (#162).
     static let tokenRetryAfter: TimeInterval = 2
@@ -167,8 +167,8 @@ final class OnlineRaceController: OnlineSequence {
     @ObservationIgnored private var tokenRetryAt: Date?
     @ObservationIgnored private var askingRejoin = false
     @ObservationIgnored private var ticker: Task<Void, Never>?
-    @ObservationIgnored private var rating: Task<Void, Never>?
-    @ObservationIgnored private var ratingUntil: Date?
+    @ObservationIgnored private var follower: Task<Void, Never>?
+    @ObservationIgnored private var followUntil: Date?
     /// The last `LeaveRace` on its way: Race again waits for it before it joins the queue.
     @ObservationIgnored private(set) var leaving: Task<Void, Never>?
 
@@ -229,10 +229,10 @@ final class OnlineRaceController: OnlineSequence {
         phase = (link.tick ?? 0) < 0 ? .sequence : .racing
     }
 
-    /// The controller's clock moved. Runs every `tickInterval` while a race or a rating is pending; tests call it.
+    /// The controller's clock moved. Runs every `tickInterval` while a race runs or one is followed; tests call it.
     func tick() {
         let now = now()
-        if let ratingUntil, now >= ratingUntil { stopRating() }
+        if let followUntil, now >= followUntil { stopFollowing() }
         guard phase != .idle, let link else { return }
         link.pump(isShown: phase != .briefing)
         if link.status == .updateRequired { return end(.left, notice: .updateToRaceOnline) }
@@ -346,9 +346,10 @@ final class OnlineRaceController: OnlineSequence {
         }
         guard phase != .idle else { return }
         if let last, last.report.raceID == raceID {
+            stopFollowing()
             host?.keepLastRace(last.report, rating: last.rating?.outcome)
-            if last.rating == nil { awaitRating(raceID) }
-            end(.over, keepsResults: false)
+            host?.onlineRaceClosed()
+            end(.over, keepsResults: false, follows: last.rating == nil)
         } else {
             end(.cancelled, notice: .raceCancelled)
         }
@@ -371,10 +372,11 @@ final class OnlineRaceController: OnlineSequence {
     func stay() { isConfirmingLeave = false }
 
     /// "Leave the race?", confirmed (owner 2026-10-12: final, before and after the gun): `LeaveRace`, and Home. Before
-    /// the gun a bot takes the seat; after it she is scored RET.
+    /// the gun a bot takes the seat, and the race is no longer hers. After it she is scored RET, and the race is her
+    /// last once it closes (#163, G1): nothing is kept now, and the follower keeps the closed race.
     func leaveRace() {
         guard phase != .idle else { return }
-        end(.left, sendsLeave: true)
+        end(.left, sendsLeave: true, keepsResults: isBeforeGun, follows: !isBeforeGun)
     }
 
     /// The results' Home: done, she gives the seat up for good, so the queue is free.
@@ -390,13 +392,21 @@ final class OnlineRaceController: OnlineSequence {
         await queue?.join()
     }
 
+    /// `follows`: the race was hers past the gun and she hasn't seen it close; the follower keeps it once it does.
+    /// Results she was done in follow too while they aren't final or their rating is pending (Home or Race again
+    /// before the close).
     private func end(_ outcome: SequenceOutcome, notice: AppModel.Notice? = nil, sendsLeave: Bool = false,
-                     keepsResults: Bool = true) {
+                     keepsResults: Bool = true, follows: Bool = false) {
         guard phase != .idle else { return }
+        var follows = follows
         if keepsResults, let kept = link?.resultsToKeep(), kept.keepsAsLastRace, outcome != .cancelled {
+            // A newer race is Home's: the one before it is no longer followed.
+            stopFollowing()
             host?.keepLastRace(kept)
-            if let raceID = handOff?.raceID, kept.online?.rating == .pending { awaitRating(raceID) }
+            // Rows still sailing, or the rating not in: Home or Race again before the close.
+            if !kept.isFinal || kept.online?.rating == .pending { follows = true }
         }
+        if follows, let raceID = handOff?.raceID { follow(raceID) }
         if let link {
             if sendsLeave {
                 leaving = Task { await link.leave() }
@@ -436,16 +446,26 @@ final class OnlineRaceController: OnlineSequence {
     func fleetLockedWhileIdle() { ask(orTakeOver: true) }
 
     /// The online session opened for a player through the gate (#162): a race she dropped out of may still run, which a
-    /// cold launch learns here, before any scene change.
-    func sessionOpened() { ask(orTakeOver: true) }
+    /// cold launch learns here, before any scene change. Then her last race, from the service (#163).
+    func sessionOpened() { ask(orTakeOver: true, thenLastRace: true) }
 
-    private func ask(orTakeOver: Bool) {
+    private func ask(orTakeOver: Bool, thenLastRace: Bool = false) {
         guard phase == .idle, !askingRejoin, mayAskService() else { return }
         askingRejoin = true
         Task {
             await askForRejoin(orTakeOver: orTakeOver)
             askingRejoin = false
+            if thenLastRace { await adoptLastRace() }
         }
+    }
+
+    /// Her last race as the service has it, once, as a session opens (#163, T4): Home's Last race takes it by
+    /// `FleetLockHost.adoptsLastRace` (a relaunch, a reinstall or a second device has none; a frozen one is refreshed;
+    /// the app was killed in the race it was handed). A race whose rating isn't in is followed to it.
+    func adoptLastRace() async {
+        guard phase == .idle, mayAskService(), let last = try? await raceSession.lastRace(), phase == .idle, let host, host.adoptsLastRace(last.report.raceID) else { return }
+        host.keepLastRace(last.report, rating: last.rating?.outcome)
+        if last.rating == nil { follow(last.report.raceID) }
     }
 
     /// Asks the service once for a race in progress to take back: an offer puts Rejoin race on Home. `orTakeOver`
@@ -483,8 +503,10 @@ final class OnlineRaceController: OnlineSequence {
         // The race closed while she was away: its results are Home's Last race, with no notice.
         Task {
             guard let raceID, mayAskService(), let last = try? await raceSession.lastRace(), last.report.raceID == raceID else { return }
+            stopFollowing()
             host?.keepLastRace(last.report, rating: last.rating?.outcome)
-            if last.rating == nil { awaitRating(raceID) }
+            host?.onlineRaceClosed()
+            if last.rating == nil { follow(raceID) }
         }
     }
 
@@ -526,27 +548,47 @@ final class OnlineRaceController: OnlineSequence {
 
     // MARK: Inside
 
-    /// Listens for `raceID`'s rating after the cover is gone, for the Last race row's badge.
-    private func awaitRating(_ raceID: RaceID) {
-        stopRating()
-        ratingUntil = now().addingTimeInterval(Self.ratingWait)
-        rating = Task { [weak self, raceSession] in
+    /// The follower (#163, T3): the race just left, followed to its close after the cover is gone, for `ratingWait`.
+    /// The close pushes every player whose last race it becomes a rating change (`.rated` or `.unrated`, a post-gun
+    /// leaver's too), so the push is the close's signal; then the service's last race replaces Home's Last race with
+    /// the closed rows, her RET row included (G1), and the rating. Without that read the pushed rating is kept, and the
+    /// next session's open reads the race again (`adoptLastRace`). Not for a race she left before the gun.
+    private func follow(_ raceID: RaceID) {
+        stopFollowing()
+        followUntil = now().addingTimeInterval(Self.ratingWait)
+        follower = Task { [weak self, raceSession] in
             for await change in raceSession.ratingChanges() where change.raceID == raceID {
-                self?.host?.setLastRaceRating(change.outcome, raceID: raceID)
+                await self?.closed(raceID, change: change)
                 break
             }
-            self?.ratingUntil = nil
+            // A follower given up, or replaced by the next, leaves what follows it alone.
+            guard !Task.isCancelled else { return }
+            self?.follower = nil
+            self?.followUntil = nil
         }
         scheduleTick()
     }
 
-    private func stopRating() {
-        rating?.cancel()
-        rating = nil
-        ratingUntil = nil
+    private func closed(_ raceID: RaceID, change: RatingChange) async {
+        guard mayAskService(), let last = try? await raceSession.lastRace(), last.report.raceID == raceID else {
+            host?.setLastRaceRating(change.outcome, raceID: raceID)
+            return
+        }
+        host?.keepLastRace(last.report, rating: last.rating?.outcome ?? change.outcome)
+        host?.onlineRaceClosed()
     }
 
-    private var needsTicks: Bool { phase != .idle || ratingUntil != nil }
+    private func stopFollowing() {
+        follower?.cancel()
+        follower = nil
+        followUntil = nil
+    }
+
+    /// The race left is followed to its close (#163).
+    var isFollowing: Bool { follower != nil }
+
+    /// The controller's clock runs: a race, or a race followed to its close.
+    var needsTicks: Bool { phase != .idle || followUntil != nil }
 
     private func scheduleTick() {
         guard let tickInterval, ticker == nil, needsTicks else { return }

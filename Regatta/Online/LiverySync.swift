@@ -40,6 +40,9 @@ final class LiverySync {
     /// The app model whose livery is synced; My boat's saves come through here from now on.
     func attach(_ model: AppModel) {
         attach(host: model)
+        model.onOnlineRaceClosed = { [weak self] in
+            Task { await self?.raceClosed() }
+        }
         let keep = model.myBoat.onSave
         model.myBoat.onSave = { [weak self] livery in
             keep(livery)
@@ -71,6 +74,14 @@ final class LiverySync {
         // A save, or a fleet lock, while the server was answering: that one stands.
         guard !awaitsUpload, !host.isLiveryLocked, read.livery != host.myLivery else { return }
         host.myLivery = read.livery
+    }
+
+    /// An online race of hers closed (#163, T5): the server's count of her completed races, which the close moved, comes
+    /// down within a round trip, so My boat runs on the results' +1 only until then. It reads the profile while the
+    /// livery is still locked (the cover may be up), and never takes the livery: that is `sessionOpened`'s.
+    func raceClosed() async {
+        guard isLive, let host, mayAskService(), let read = try? await profile.profile() else { return }
+        host.adoptServerCount(read.completedRaces)
     }
 
     private func upload(_ livery: Livery) async {
