@@ -17,6 +17,10 @@ import RegattaServices
 // (deleting the player's online data needs only the sign-in). The lobby and the queue answer a refusal in the shape
 // the `OnlineAccess` contracts expect, and the profile answers `notSignedIn` to a signed-out connection (#159); the
 // rest close the connection.
+// App Attest (#158, ADR 0014): `Hello.attestation` is checked before `HelloAck`, which says what it came to. The queue,
+// the lobby and race sessions need an attested connection whose proof binds the player its session call names; an
+// unattested one is refused the queue (`attestationFailed`), sees the lobby closed as restricted and gets no race, but
+// keeps the profile, terms and deletion.
 // Until a session is signed in the connection's frames are capped at `preSignInFrameCap`, at the frame's header.
 
 /// What the endpoint is run with.
@@ -134,12 +138,16 @@ public struct ServiceEndpoint: Sendable {
     public let fairPlay: FairPlayJob?
     /// The measures (#157): what the queue and the race connections record, and the queries over it.
     public let measures: ServerMeasures?
+    /// App Attest on each connection (#158). By default a dev server's: the bypass on, keys in memory.
+    public let attestation: ConnectionAttestation
 
     public init(config: ServiceEndpointConfig, sessions: SessionAuthority, backends: ServiceBackends = .none,
                 matchmaker: QueueMatchmaker? = nil, lifecycle: RaceLifecycle? = nil, lobby: LobbyHub? = nil,
                 analytics: AnalyticsIngest? = nil, analyticsRetention: AnalyticsRetention? = nil, ratings: (any RatingBook)? = nil,
                 moderation: Moderation? = nil, deletion: OnlineDataDeletion? = nil, retention: RetentionJobs? = nil,
-                archive: (any RaceArchive)? = nil, fairPlay: FairPlayJob? = nil, measures: ServerMeasures? = nil) {
+                archive: (any RaceArchive)? = nil, fairPlay: FairPlayJob? = nil, measures: ServerMeasures? = nil,
+                attestation: ConnectionAttestation = .devDefault()) {
+        self.attestation = attestation
         self.config = config
         self.sessions = sessions
         self.backends = backends
@@ -196,6 +204,8 @@ public actor ServiceConnectionHandler {
     private var lastActivity = ContinuousClock.now
     /// What is left of the lobby call budget, and when it was last refilled.
     private var lobbyBudget: (tokens: Double, at: ContinuousClock.Instant)?
+    /// What `Hello.attestation` came to (#158), downgraded for good by a session call whose player its proof doesn't bind.
+    private var attestation = AttestationState.unattested(.none)
 
     /// The backend services for the signed-in player, made once per session.
     private struct Backends {
@@ -225,7 +235,7 @@ public actor ServiceConnectionHandler {
         lastActivity = .now
         switch phase {
         case .closed: return
-        case .awaitingHello: hello(bytes)
+        case .awaitingHello: await hello(bytes)
         case .open:
             let cap = isSignedIn ? endpoint.config.frameCap : endpoint.config.preSignInFrameCap
             guard bytes.count <= cap else { return close("frame over the cap") }
@@ -258,13 +268,15 @@ public actor ServiceConnectionHandler {
 
     // MARK: Handshake
 
-    private func hello(_ bytes: [UInt8]) {
+    private func hello(_ bytes: [UInt8]) async {
         guard let version = Frame.helloProtocolVersion(in: bytes) else { return close("expected Hello") }
         guard version == wireProtocolVersion else { return updateRequired(.protocolVersion) }
         guard let frame = try? Frame(decoding: bytes), case .hello(let hello) = frame.message else { return close("undecodable Hello") }
         guard SeatConnection.canSail(clientSimulationVersion: hello.simulationVersion) else { return updateRequired(.simulationVersion) }
+        attestation = await endpoint.attestation.check(hello.attestation, purpose: .service)
+        guard phase == .awaitingHello else { return }
         phase = .open
-        send(.helloAck(HelloAck(serverBuild: endpoint.config.serverBuild)))
+        send(.helloAck(HelloAck(serverBuild: endpoint.config.serverBuild, attestation: attestation.status)))
         armSignInDeadline()
         watchIdle()
     }
@@ -365,8 +377,17 @@ public actor ServiceConnectionHandler {
             }
             answer(await ServiceAnswers.lobby(request.call, service)) { .lobbyReply(ServiceReply(id: request.id, result: $0)) }
         case .raceSessionRequest(let request):
-            if let denial { return close("race session refused: \(denial)") }
-            guard let service = backends?.raceSession else { return close("no race session service") }
+            let service: any RaceSessionService
+            if let denial {
+                // Unattested, the race session answers as having no race rather than closing: a client that reconnected
+                // would only be refused again (#158).
+                guard case .notAttested = denial else { return close("race session refused: \(denial)") }
+                service = NoRaceSessionService()
+            } else if let raceSession = backends?.raceSession {
+                service = raceSession
+            } else {
+                return close("no race session service")
+            }
             switch request.call {
             case .openResults:
                 open(request.id, service.results()) { .raceSessionReply(ServiceReply(id: $0, result: .update($1.wire))) }
@@ -414,6 +435,10 @@ public actor ServiceConnectionHandler {
     }
 
     private func session(_ call: SessionCall) async -> SessionResult {
+        switch call {
+        case .signIn(_, let player), .resume(_, let player): bindAttestation(to: player)
+        case .signOut: break
+        }
         let outcome: SessionAuthority.Outcome
         switch call {
         case .signIn(let signature, let player): outcome = await endpoint.sessions.signIn(signature, player: player)
@@ -472,6 +497,24 @@ public actor ServiceConnectionHandler {
         return true
     }
 
+    // MARK: App Attest (#158)
+
+    /// Whether the connection's proof stands: verified (and binding every player its session calls named) or bypassed.
+    private var isAttested: Bool {
+        switch attestation {
+        case .verified, .bypassed: true
+        case .unattested: false
+        }
+    }
+
+    /// A verified proof binds one player: a session call naming any other (other flags, another alias) makes the
+    /// connection unattested for good.
+    private func bindAttestation(to player: WirePlayer) {
+        guard case .verified(let binding) = attestation, binding != player.attestationBinding else { return }
+        attestation = .unattested(.bindingMismatch)
+        ConnectionAttestation.log("unattested connection: \(UnattestedReason.bindingMismatch)")
+    }
+
     // MARK: The gate (#34, #145)
 
     private func termsAccepted(_ session: SignedInSession) async -> Bool {
@@ -481,11 +524,12 @@ public actor ServiceConnectionHandler {
 
     /// Why the gate turns a connection away.
     private enum Denial: CustomStringConvertible {
-        case notSignedIn, multiplayerRestricted, communicationRestricted, termsNotAccepted
+        case notSignedIn, notAttested, multiplayerRestricted, communicationRestricted, termsNotAccepted
 
         var queueRefusal: QueueRefusal? {
             switch self {
             case .notSignedIn: .notSignedIn
+            case .notAttested: .attestationFailed
             case .multiplayerRestricted: .multiplayerRestricted
             case .termsNotAccepted: .termsNotAccepted
             case .communicationRestricted: nil
@@ -495,7 +539,8 @@ public actor ServiceConnectionHandler {
         var lobbyClosure: LobbyClosure? {
             switch self {
             case .notSignedIn: .notSignedIn
-            case .communicationRestricted: .communicationRestricted
+            // Its restriction flags can't be trusted, so it sees the lobby as a restricted player does (O1).
+            case .notAttested, .communicationRestricted: .communicationRestricted
             case .termsNotAccepted: .termsNotAccepted
             case .multiplayerRestricted: nil
             }
@@ -504,6 +549,7 @@ public actor ServiceConnectionHandler {
         var description: String {
             switch self {
             case .notSignedIn: "not signed in"
+            case .notAttested: "not attested"
             case .multiplayerRestricted: "multiplayer restricted"
             case .communicationRestricted: "communication restricted"
             case .termsNotAccepted: "terms not accepted"
@@ -511,13 +557,21 @@ public actor ServiceConnectionHandler {
         }
     }
 
-    /// The gate in front of every service but identity, sessions and terms: signed in, then the restriction that
-    /// service has (multiplayer for the queue and races, communication for the lobby), then the current terms. A
+    /// The gate in front of every service but identity, sessions and terms: signed in, then (for the queue, races and
+    /// the lobby) an attested connection (#158), then the restriction that service has (multiplayer for the queue and
+    /// races, communication for the lobby: the flags are Apple's word only on an attested connection), then the
+    /// current terms. A
     /// call let through is the player online now (G8). Deleting the player's online data needs only the sign-in
     /// (owner ruling, 2026-10-08): no terms, no restrictions, and it isn't use.
     private func gate(_ type: MessageType) async -> Denial? {
         guard let session = await identity.signedIn else { return .notSignedIn }
         if type == .deletionRequest { return nil }
+        switch type {
+        case .queueRequest, .raceSessionRequest, .lobbyRequest:
+            if !isAttested { return .notAttested }
+        default:
+            break
+        }
         switch type {
         case .queueRequest, .raceSessionRequest:
             if session.restrictions.isMultiplayerGamingRestricted { return .multiplayerRestricted }
@@ -661,6 +715,16 @@ struct ClosedQueueService: QueueService {
 }
 
 /// The lobby to a connection the gate turns away: closed for `closure`, reading and posting both (#17, #34).
+/// The race sessions an unattested connection sees (#158): no race to hand off or rejoin, no last race, and streams that
+/// end at once.
+struct NoRaceSessionService: RaceSessionService {
+    func handOff() throws -> HandOff { throw RaceSessionError.noRace }
+    func rejoin() throws -> RejoinOffer { throw RaceSessionError.noRace }
+    func results() -> AsyncStream<RaceUpdate> { AsyncStream { $0.finish() } }
+    func ratingChanges() -> AsyncStream<RatingChange> { AsyncStream { $0.finish() } }
+    func lastRace() -> LastRace? { nil }
+}
+
 struct ClosedLobbyService: LobbyService {
     let closure: LobbyClosure
 

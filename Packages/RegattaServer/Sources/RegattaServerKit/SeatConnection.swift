@@ -8,12 +8,16 @@ import RegattaProtocol
 /// handshake, the join, then every frame to the race host. Fed each binary message in order.
 ///
 /// 1. `Hello`: a protocol version or simulation revision other than the server's (`canSail`) gets
-///    `UpdateRequired` and the connection closes; otherwise `HelloAck`. Dev auth (`SeatAuthPolicy.dev`) asks nothing more.
-/// 2. `JoinRace`: the race token must be signed by this server, unexpired, and name a running race's
+///    `UpdateRequired` and the connection closes; otherwise `HelloAck`, its attestation not checked: a race connection
+///    carries no App Attest proof (ADR 0014, T2). Its credential is the race token.
+/// 2. Under `SeatAuthPolicy.raceToken` (staging, production) the only way on is a race token the queue minted, which it
+///    does only for an attested, signed-in service connection: anything but a `JoinRace` with a valid token is refused.
+///    Under `.dev` the instant race's tokens join too.
+/// 3. `JoinRace`: the race token must be signed by this server, unexpired, and name a running race's
 ///    human seat that no connection holds. Then the race's host takes over: `RaceStart`, and the race.
 ///    A good token for a race that isn't running gets `RaceCancelled` (#30, #148: one a restart lost, or cancelled),
 ///    or `RaceClosed` if the lifecycle closed it, and the connection closes normally.
-/// 3. Everything after goes to `RaceHost.receive(_:from:)`, but `LeaveRace` (#149): the seat's player leaves for good
+/// 4. Everything after goes to `RaceHost.receive(_:from:)`, but `LeaveRace` (#149): the seat's player leaves for good
 ///    (`RaceSession.quit`), and the host closes the connection. From a connection that isn't seated it is out of turn.
 ///
 /// Anything out of turn, or a bad token, closes the connection with a policy-violation close: the
@@ -77,9 +81,10 @@ struct SeatConnection {
             return refuse("undecodable Hello")
         }
         guard Self.canSail(clientSimulationVersion: hello.simulationVersion) else { return updateRequired(.simulationVersion) }
-        // Dev auth (`config.auth`, the only policy): no attestation (#158), no account; the data files a race
-        // names resolve on the server (`RaceFiles`), but Hello's are not checked against them yet.
-        send(.helloAck(HelloAck(serverBuild: config.serverBuild)))
+        // No App Attest on a race connection (ADR 0014, T2) and no account: the race token is the credential, and under
+        // `.raceToken` only the queue mints one, for an attested connection. The data files a race names resolve on the
+        // server (`RaceFiles`), but Hello's are not checked against them yet.
+        send(.helloAck(HelloAck(serverBuild: config.serverBuild, attestation: .notChecked)))
         phase = .awaitingJoin
     }
 

@@ -1,20 +1,28 @@
+import AppAttest
 import Crypto
 import Foundation
 import Persistence
 import RaceHost
 import RegattaCore
 import RegattaProtocol
+import X509
 
-/// The deployment the server runs in: the `ENV` variable. Only `dev` exists for now (#67): the server has
-/// dev auth and nothing else, so it refuses to start anywhere else, and the dev endpoints (the instant
-/// race) exist only here. One pure check for both, so tests can assert each refusal.
+/// The deployment the server runs in: the `ENV` variable, exactly `dev`, `staging` or `production` (#158). Any other
+/// value (`prod`, `DEV`, `dev `, unset) refuses to start. The dev endpoints (the instant race) exist only in dev.
 public enum ServerEnvironment: Hashable, Sendable {
     case dev
-    /// Any other value of `ENV`, or nil if it's unset.
+    case staging
+    case production
+    /// Any other value of `ENV`, or nil if it's unset: the server refuses to start.
     case other(String?)
 
     public init(env value: String?) {
-        self = value == "dev" ? .dev : .other(value)
+        switch value {
+        case "dev": self = .dev
+        case "staging": self = .staging
+        case "production": self = .production
+        default: self = .other(value)
+        }
     }
 
     public var isDev: Bool { self == .dev }
@@ -25,35 +33,85 @@ public enum ServerEnvironment: Hashable, Sendable {
     public var name: String {
         switch self {
         case .dev: "dev"
+        case .staging: "staging"
+        case .production: "production"
         case .other(let value): value ?? "(unset)"
         }
     }
 }
 
-/// How the server decides a connection may sail. Only dev auth exists (#67): any client that passes the
-/// handshake's version checks may join the seat its race token names, with no account and no App Attest
-/// (#158). It is allowed only in `ENV=dev`: that is the startup refusal.
+/// How the server decides a race connection may take a seat.
 public enum SeatAuthPolicy: Hashable, Sendable {
+    /// Dev (#67): any client that passes the handshake's version checks may join the seat a race token names,
+    /// including the instant race's (`POST /dev/instant-race`).
     case dev
+    /// Staging and production (#158): a seat is joined only with a race token the queue minted, and the queue serves
+    /// only an attested, signed-in service connection. A race connection without a valid token is refused.
+    case raceToken
 
     /// The policy for `environment`, or the refusal to start.
     public static func `for`(_ environment: ServerEnvironment) throws(ServerConfigError) -> SeatAuthPolicy {
-        guard environment.isDev else { throw .devAuthOutsideDev(environment.name) }
-        return .dev
+        switch environment {
+        case .dev: .dev
+        case .staging, .production: .raceToken
+        case .other: throw .unknownEnvironment(environment.name)
+        }
     }
 }
 
 public enum ServerConfigError: Error, Equatable, Sendable, CustomStringConvertible {
-    /// Dev auth is all there is, and `ENV` isn't `dev`.
-    case devAuthOutsideDev(String)
+    /// `ENV` isn't `dev`, `staging` or `production`.
+    case unknownEnvironment(String)
     case invalid(variable: String, value: String, expected: String)
 
     public var description: String {
         switch self {
-        case .devAuthOutsideDev(let env):
-            "RegattaServer has dev auth only and refuses to start unless ENV=dev (ENV is \(env))."
+        case .unknownEnvironment(let env):
+            "RegattaServer refuses to start unless ENV is dev, staging or production (ENV is \(env))."
         case .invalid(let variable, let value, let expected):
             "\(variable)=\(value) is invalid: expected \(expected)."
+        }
+    }
+}
+
+/// App Attest on service connections (#158, ADR 0014).
+public struct AppAttestSettings: Sendable {
+    /// `APP_ATTEST_BYPASS`: a connection with no proof (or `unsupported`, the simulator) counts as attested. A real
+    /// proof is still verified. Dev only: on by default there; outside dev the server refuses to start with it on.
+    public var bypass = true
+    /// `APP_ATTEST_ENVIRONMENT`: the environments whose keys are accepted (the AAGUID follows the app's entitlement).
+    public var environments: Set<AppAttestEnvironment> = [.development, .production]
+    /// The anchors: Apple's App Attestation root (embedded); tests pass their own.
+    public var trustedRoots: [Certificate] = [AppleAppAttestRoot.certificate]
+
+    public init() {}
+
+    /// The variables for `environment`: the bypass defaults on in dev and off elsewhere, where only `off` is
+    /// accepted; the environment defaults to both in dev, development in staging and production in production, where
+    /// nothing else is accepted.
+    init(env: [String: String], environment: ServerEnvironment) throws(ServerConfigError) {
+        switch env["APP_ATTEST_BYPASS"] {
+        case nil: bypass = environment.isDev
+        case "off": bypass = false
+        case "on" where environment.isDev: bypass = true
+        case "on": throw .invalid(variable: "APP_ATTEST_BYPASS", value: "on", expected: "off or unset outside ENV=dev")
+        case let value?: throw .invalid(variable: "APP_ATTEST_BYPASS", value: value, expected: environment.isDev ? "on or off" : "off or unset")
+        }
+        switch env["APP_ATTEST_ENVIRONMENT"] {
+        case nil:
+            environments = switch environment {
+            case .staging: [.development]
+            case .production: [.production]
+            default: [.development, .production]
+            }
+        case "production": environments = [.production]
+        case "development": environments = [.development]
+        case "both": environments = [.development, .production]
+        case let value?:
+            throw .invalid(variable: "APP_ATTEST_ENVIRONMENT", value: value, expected: "production, development or both")
+        }
+        if environment == .production, environments != [.production] {
+            throw .invalid(variable: "APP_ATTEST_ENVIRONMENT", value: env["APP_ATTEST_ENVIRONMENT"] ?? "(unset)", expected: "production in ENV=production")
         }
     }
 }
@@ -62,7 +120,7 @@ public enum ServerConfigError: Error, Equatable, Sendable, CustomStringConvertib
 ///
 /// | variable | default | |
 /// |---|---|---|
-/// | `ENV` | none | must be `dev` |
+/// | `ENV` | none | `dev`, `staging` or `production` (#158); anything else refuses to start |
 /// | `HOST` | `127.0.0.1` | address to bind; the container sets `0.0.0.0` |
 /// | `PORT` | `8080` | 0 picks a free port |
 /// | `RACE_TOKEN_SECRET` | random per process | HMAC key for race tokens |
@@ -73,7 +131,9 @@ public enum ServerConfigError: Error, Equatable, Sendable, CustomStringConvertib
 /// | `REGATTA_BUNDLE_ID` | `com.phillreeder.regatta` | the bundle id Game Center signs (README; final in #49) |
 /// | `REGATTA_TEAM_ID` | `8S5TQ65X3B` | the Apple Developer team (README; final in #49) |
 /// | `REGATTA_APPLE_ROOT_PEM` | none | a PEM file of the certificates Game Center's key must chain to; unset in dev = dev verifier |
-/// | `REGATTA_DATABASE_URL` | none | Postgres (ADR 0009); unset in dev = accounts in memory |
+/// | `REGATTA_DATABASE_URL` | none | Postgres (ADR 0009); unset in dev = accounts in memory; required outside dev |
+/// | `APP_ATTEST_BYPASS` | `on` in dev | dev only: `on` lets a connection with no App Attest proof (or the simulator's `unsupported`) through; a real proof is still verified; `off` verifies every connection. Outside dev only `off` or unset: `on` refuses to start (#158) |
+/// | `APP_ATTEST_ENVIRONMENT` | `both` in dev, `development` in staging, `production` in production | the App Attest environments accepted: `production`, `development` or `both`; production refuses anything but `production` (#158) |
 /// | `QUEUE_LOCK_SECONDS` | `60` | seconds from the oldest queued player's join to fleet lock (#146); short for the contract runner |
 /// | `QUEUE_RACE_SECONDS` | none | dev only: a queue race is closed this many seconds after the gun (5…3600) with results as it stands (the rest placed by distance), for a local demo or an e2e run (#162); refused outside `ENV=dev` |
 /// | `ALL_GONE_GRACE_SECONDS` | `30` | dev only: how long a race every human has left waits for one to come back before it closes (G3; 1…3600), so one e2e player can drop and rejoin (#162); refused outside `ENV=dev` |
@@ -123,6 +183,8 @@ public struct ServerConfig: Sendable {
     public var analytics = AnalyticsSettings()
     /// The admin tool (#154): who may use it.
     public var admin = AdminSettings()
+    /// App Attest on service connections (#158).
+    public var appAttest = AppAttestSettings()
 
     /// A dev config: dev auth, the given port (0 for a free one), a random token key.
     public static func dev(host: String = "127.0.0.1", port: Int = 0) -> ServerConfig {
@@ -235,10 +297,15 @@ public struct ServerConfig: Sendable {
             }
             config.admin.tokens = tokens
         }
+        config.appAttest = try AppAttestSettings(env: env, environment: environment)
         do {
             config.identity.database = try DatabaseConfiguration.fromEnvironment(env)
         } catch {
             throw .invalid(variable: "REGATTA_DATABASE_URL", value: "(hidden)", expected: "a postgres:// URL")
+        }
+        // Outside dev the App Attest keys and the accounts must outlive a restart.
+        if !environment.isDev, config.identity.database == nil {
+            throw .invalid(variable: "REGATTA_DATABASE_URL", value: "(unset)", expected: "Postgres outside ENV=dev")
         }
         return config
     }
