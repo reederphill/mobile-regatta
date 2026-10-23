@@ -58,23 +58,25 @@ import Testing
         }
     }
 
-    /// #584: the loss table's columns sum to the gap: each sailor's metres behind the oracle at T+60 are her timing,
-    /// speed and bias at the gun less the oracle's, and the oracle's first minute less hers (air and forced moves zero with
-    /// nobody else on the water); on every seed and in the mean over them.
+    /// #584: the loss table's columns sum to the gap: each sailor's worth at T+60 is her metres below the line at the gun
+    /// and her first minute by the ledger (the polar's best progress in her wind, less what she lost of it by cause, less
+    /// her speed's shortfall at T+60), so her metres behind the oracle are those columns less the oracle's (air and forced
+    /// moves zero with nobody else on the water); on every seed and in the mean over them.
     @Test func lossTableSumsToTheGap() {
         for trial in Self.report.seeds {
             let oracle = trial.oracle
-            #expect(abs(oracle.firstMinute - oracle.bias - oracle.timing - oracle.speed - oracle.worth) < 1e-9,
-                    "the oracle's own columns make its worth")
+            #expect(abs(oracle.sum - oracle.worth) < 1e-6, "the oracle's own columns make its worth: \(oracle)")
+            #expect(oracle.late >= -1e-6, "nothing is late of a start on time")
             for (entry, loss) in zip(trial.sailors, trial.losses) {
+                #expect(abs(entry.sum - entry.worth) < 1e-6, "\(trial.seed.name) \(entry.sailor)'s own columns")
                 #expect(abs(loss.gap - (oracle.worth - entry.worth)) < 1e-9)
-                #expect(abs(loss.sum - loss.gap) < 1e-9, "\(trial.seed.name) \(loss.sailor): \(loss.values)")
+                #expect(abs(loss.sum - loss.gap) < 1e-6, "\(trial.seed.name) \(loss.sailor): \(loss.values)")
                 #expect(loss.air == 0 && loss.forced == 0, "no fleet, no air or forced moves")
             }
         }
         let means = Self.report.means
         #expect(means.map(\.sailor) == ["executor", "national"])
-        for loss in means { #expect(abs(loss.sum - loss.gap) < 1e-9, "the mean \(loss.sailor)") }
+        for loss in means { #expect(abs(loss.sum - loss.gap) < 1e-6, "the mean \(loss.sailor)") }
         #expect(Self.report.lines.contains { $0.hasPrefix("national") })
     }
 

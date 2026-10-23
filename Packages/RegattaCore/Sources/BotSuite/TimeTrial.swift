@@ -440,10 +440,17 @@ public struct LapLedger {
         var ideal: Double
         /// Heading change this tick, radians a second.
         var turnRate: Double
+        /// With `measuresMetres`: metres up the course axis the polar's best progress in her wind made this tick, and
+        /// what she fell short of it (negative where she made more); their difference is her progress.
+        var idealMetres = 0.0
+        var lostMetres = 0.0
     }
 
     private let course: TimeTrialCourse
     private var ticks: [Tick] = []
+    /// Whether it also measures each tick in metres up the course axis (#584, the start trial's first minute): the
+    /// first beat's ladder, what `StartGeometry.made` counts.
+    private let measuresMetres: Bool
     /// The leg whose rounding window she is in.
     private var roundingLeg: Int?
     /// After a boom crossing, the manoeuvre lasts until she is back to speed or this tick.
@@ -458,8 +465,24 @@ public struct LapLedger {
     /// Back to speed: this share of her target at the angle she sails, turning slower than `turningRate`.
     static let recoveredShare = 0.95
 
-    init(course: TimeTrialCourse) {
+    init(course: TimeTrialCourse, measuresMetres: Bool = false) {
         self.course = course
+        self.measuresMetres = measuresMetres
+    }
+
+    /// `tick` with its metres (`measuresMetres`): the polar's best progress up the axis in her wind and current this
+    /// tick, and her own.
+    private func metred(_ tick: Tick, race: Race, before: Boat) -> Tick {
+        guard measuresMetres else { return tick }
+        let boat = race.boats[0]
+        let dt = 1 / Double(Race.tickRate)
+        let upwind = course.course.upwind
+        let rate = course.bestProgressRate(along: upwind, windDirection: boat.sailingWind.direction,
+                                           windSpeed: boat.polarWindSpeed(in: course.boatClass), current: boat.current)
+        var tick = tick
+        tick.idealMetres = max(0, rate) * dt
+        tick.lostMetres = tick.idealMetres - (boat.position - before.position).dot(upwind)
+        return tick
     }
 
     /// Records the tick the race just stepped: `before` is her boat before it.
@@ -469,7 +492,8 @@ public struct LapLedger {
         guard before.status != .finished else { return }
         let turnRate = wrapAngle(boat.heading - before.heading) / dt
         if before.status == .prestart || before.status == .ocs {
-            ticks.append(Tick(segment: .start, cause: .start, lost: dt, ideal: 0, turnRate: turnRate))
+            ticks.append(metred(Tick(segment: .start, cause: .start, lost: dt, ideal: 0, turnRate: turnRate), race: race,
+                                before: before))
             return
         }
         let leg = boat.status == .finished ? before.legIndex : boat.legIndex
@@ -481,7 +505,8 @@ public struct LapLedger {
             roundingLeg = leg
         }
         if let rounding = roundingLeg {
-            ticks.append(Tick(segment: .rounding(rounding), cause: .rounding, lost: dt, ideal: 0, turnRate: turnRate))
+            ticks.append(metred(Tick(segment: .rounding(rounding), cause: .rounding, lost: dt, ideal: 0, turnRate: turnRate),
+                                race: race, before: before))
             return
         }
         let progress = race.ladderDistanceToFinish(of: before) - race.ladderDistanceToFinish(of: boat)
@@ -520,7 +545,8 @@ public struct LapLedger {
                               windDirection: wind.direction, windSpeed: boat.polarWindSpeed(in: course.boatClass)) {
             cause = .overstood
         }
-        ticks.append(Tick(segment: .leg(leg), cause: cause, lost: dt - ideal, ideal: ideal, turnRate: turnRate))
+        ticks.append(metred(Tick(segment: .leg(leg), cause: cause, lost: dt - ideal, ideal: ideal, turnRate: turnRate),
+                            race: race, before: before))
     }
 
     /// Seconds recorded: to her finish, or to the close.
@@ -532,6 +558,17 @@ public struct LapLedger {
         for tick in ticks {
             sums[tick.cause, default: 0] += tick.lost
             sums[.wind, default: 0] += tick.ideal
+        }
+        return sums
+    }
+
+    /// With `measuresMetres`: metres short of the polar's best progress up the axis by cause, `.wind` the best progress
+    /// itself. The best less the rest is her progress up the axis, to rounding.
+    public var metresByCause: [Cause: Double] {
+        var sums = Dictionary(uniqueKeysWithValues: Cause.allCases.map { ($0, 0.0) })
+        for tick in ticks {
+            sums[tick.cause, default: 0] += tick.lostMetres
+            sums[.wind, default: 0] += tick.idealMetres
         }
         return sums
     }

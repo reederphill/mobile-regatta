@@ -140,7 +140,9 @@ public struct StartFix: Codable, Hashable, Sendable {
     public var speed: Double
 }
 
-/// One sailor's start on one seed (#584), as she sailed it.
+/// One sailor's start on one seed (#584), as she sailed it. Her worth is the line's metres she was short of at the gun
+/// and her first minute by the ledger (`LapLedger`, in metres up the axis): `worth = −timing + wind − late − manoeuvre −
+/// overstood − offPolar − speed`, to rounding.
 public struct StartEntry: Codable, Hashable, Sendable {
     public var sailor: String
     /// What it was worth at T+60, metres (`StartGeometry.worth`).
@@ -153,56 +155,78 @@ public struct StartEntry: Codable, Hashable, Sendable {
     public var atT30: StartFix
     public var atT10: StartFix
     public var atGun: StartFix
-    /// Metres her end gave up to the favoured end at the gun, up the wind at the line's centre then: by her spot at it,
-    /// kept to the line.
-    public var bias: Double
-    /// Metres below the line at her spot at the gun (`atGun.depth`).
+    /// Metres below the line's centre up the course axis at the gun (negative over it): "metres from the line at the gun".
     public var timing: Double
-    /// Metres her speed at the gun below the polar's at her angle costs (`StartGeometry.deficitMetres`).
+    /// From the gun to T+60, metres up the axis: the polar's best progress in the wind and current she had (`.wind`) ...
+    public var wind: Double
+    /// ... and what she fell short of it by cause: before she started (and, unstarted at T+60, what she made that the score
+    /// doesn't count), ...
+    public var late: Double
+    /// ... in tacks and gybes, past the layline, and anything else off the polar's best (a rounding's too, none in a
+    /// minute) ...
+    public var manoeuvre: Double
+    public var overstood: Double
+    public var offPolar: Double
+    /// ... and her speed at T+60 below the polar's at her angle, as the score counts it (`StartGeometry.deficitMetres`).
     public var speed: Double
-    /// Metres she made from the gun to T+60, as the score counts them: the worth less what she had at the gun, her
-    /// end's bias given back (so a start's worth is `firstMinute − bias − timing − speed`, from the line's centre).
-    public var firstMinute: Double
+    /// Not in the sum, for reading it: metres her end gave up to the favoured end at the gun, up the wind at the line's
+    /// centre then (by her spot at it, kept to the line), and her speed's shortfall at the gun in the score's metres. The
+    /// score is metres up the axis, so a favoured end or a slow gun counts through the first minute's columns.
+    public var bias: Double
+    public var gunSpeed: Double
+
+    /// The columns, summed: her worth, to rounding.
+    public var sum: Double { -timing + wind - late - manoeuvre - overstood - offPolar - speed }
 }
 
 /// A sailor's start against the oracle's on one seed (#584): metres behind it at T+60, and why. Every column is hers
-/// less the oracle's but the first minute's, which is the oracle's less hers: so they sum to the gap.
+/// less the oracle's but the wind's, which is the oracle's less hers: so they sum to the gap.
 public struct StartLoss: Codable, Hashable, Sendable {
     public var sailor: String
     public var gap: Double
     public var timing: Double
+    /// The first minute: less of the polar's best progress than the oracle had (the wind she sailed into), and more of it
+    /// lost, by cause.
+    public var wind: Double
+    public var late: Double
+    public var manoeuvre: Double
+    public var overstood: Double
+    public var offPolar: Double
     public var speed: Double
-    public var bias: Double
     /// Seconds in another boat's air, and forced moves, in the first minute: zero with nobody else on the water, by
     /// construction (stage 2's columns).
     public var air: Double
     public var forced: Double
-    public var firstMinute: Double
 
-    public static let columns = ["gap", "timing", "speed", "bias", "air", "forced", "first minute"]
+    public static let columns = ["gap", "timing", "wind", "late", "manoeuvre", "overstood", "off polar", "speed", "air",
+                                 "forced"]
 
-    public var values: [Double] { [gap, timing, speed, bias, air, forced, firstMinute] }
+    public var values: [Double] { [gap, timing, wind, late, manoeuvre, overstood, offPolar, speed, air, forced] }
 
-    init(sailor: String, gap: Double, timing: Double, speed: Double, bias: Double, air: Double, forced: Double,
-         firstMinute: Double) {
+    init(sailor: String, values: [Double]) {
+        precondition(values.count == Self.columns.count, "a value a column")
         self.sailor = sailor
-        self.gap = gap
-        self.timing = timing
-        self.speed = speed
-        self.bias = bias
-        self.air = air
-        self.forced = forced
-        self.firstMinute = firstMinute
+        gap = values[0]
+        timing = values[1]
+        wind = values[2]
+        late = values[3]
+        manoeuvre = values[4]
+        overstood = values[5]
+        offPolar = values[6]
+        speed = values[7]
+        air = values[8]
+        forced = values[9]
     }
 
     init(_ entry: StartEntry, oracle: StartEntry) {
-        self.init(sailor: entry.sailor, gap: oracle.worth - entry.worth, timing: entry.timing - oracle.timing,
-                  speed: entry.speed - oracle.speed, bias: entry.bias - oracle.bias, air: 0, forced: 0,
-                  firstMinute: oracle.firstMinute - entry.firstMinute)
+        self.init(sailor: entry.sailor,
+                  values: [oracle.worth - entry.worth, entry.timing - oracle.timing, oracle.wind - entry.wind,
+                           entry.late - oracle.late, entry.manoeuvre - oracle.manoeuvre, entry.overstood - oracle.overstood,
+                           entry.offPolar - oracle.offPolar, entry.speed - oracle.speed, 0, 0])
     }
 
     /// The columns but the gap, summed: the gap, to rounding.
-    public var sum: Double { timing + speed + bias + air + forced + firstMinute }
+    public var sum: Double { values.dropFirst().reduce(0, +) }
 }
 
 /// One seed of the start trial's report.
@@ -238,9 +262,9 @@ public struct StartTrialReport: Codable, Hashable, Sendable {
         let count = Double(seeds.count)
         return first.sailors.indices.map { k in
             let losses = seeds.map { $0.losses[k] }
-            func mean(_ value: (StartLoss) -> Double) -> Double { losses.reduce(0) { $0 + value($1) } / count }
-            return StartLoss(sailor: losses[0].sailor, gap: mean(\.gap), timing: mean(\.timing), speed: mean(\.speed),
-                             bias: mean(\.bias), air: mean(\.air), forced: mean(\.forced), firstMinute: mean(\.firstMinute))
+            return StartLoss(sailor: losses[0].sailor, values: StartLoss.columns.indices.map { i in
+                losses.reduce(0) { $0 + $1.values[i] } / count
+            })
         }
     }
 
@@ -270,8 +294,10 @@ public struct StartTrialReport: Codable, Hashable, Sendable {
         for loss in means { rows.append([loss.sailor] + loss.values.map(format)) }
         lines += table(rows)
         lines.append("")
-        lines.append("starts: mean worth m, mean start s (60 for none by T+60), OCS, mean spot and depth m at T-30, T-10 and the gun:")
-        var starts = [["sailor", "worth", "start s", "OCS", "spot -30", "depth -30", "spot -10", "depth -10", "spot gun", "depth gun"]]
+        lines.append("starts: mean worth m, mean start s (60 for none by T+60), OCS, mean spot and depth m at T-30, T-10 and the gun,")
+        lines.append("and outside the sum, metres her end gave up to the favoured end and her speed's shortfall at the gun:")
+        var starts = [["sailor", "worth", "start s", "OCS", "spot -30", "depth -30", "spot -10", "depth -10", "spot gun", "depth gun",
+                       "bias", "gun speed"]]
         let columns: [(String, [StartEntry])] = [("oracle", oracles)]
             + (seeds[0].sailors.indices.map { k in (seeds[0].sailors[k].sailor, seeds.map { $0.sailors[k] }) })
         for (name, entries) in columns {
@@ -279,7 +305,8 @@ public struct StartTrialReport: Codable, Hashable, Sendable {
                            "\(entries.filter(\.ocs).count)",
                            fixed(mean(entries, \.atT30.spot), 2), format(mean(entries, \.atT30.depth)),
                            fixed(mean(entries, \.atT10.spot), 2), format(mean(entries, \.atT10.depth)),
-                           fixed(mean(entries, \.atGun.spot), 2), format(mean(entries, \.atGun.depth))])
+                           fixed(mean(entries, \.atGun.spot), 2), format(mean(entries, \.atGun.depth)),
+                           format(mean(entries, \.bias)), format(mean(entries, \.gunSpeed))])
         }
         lines += table(starts)
         lines.append("")
@@ -342,12 +369,15 @@ struct StartWatch {
     private(set) var gunWindward: Vec2?
     private(set) var startTick: Int?
     private(set) var ocs = false
+    /// The first minute, tick by tick, in metres up the axis.
+    private var ledger: LapLedger
 
     static let t30Tick = -30 * Race.tickRate
     static let t10Tick = -10 * Race.tickRate
 
     init(_ geometry: StartGeometry) {
         self.geometry = geometry
+        ledger = LapLedger(course: geometry.course, measuresMetres: true)
     }
 
     func fix(_ boat: Boat) -> StartFix {
@@ -356,9 +386,10 @@ struct StartWatch {
                         speed: boat.speed)
     }
 
-    /// Records the tick the race just stepped to.
-    mutating func record(_ race: Race) {
+    /// Records the tick the race just stepped to: `before` is her boat before it.
+    mutating func record(_ race: Race, before: Boat) {
         let boat = race.boats[0]
+        if race.tick > 0 { ledger.record(race, before: before) }
         switch race.tick {
         case Self.t30Tick: atT30 = fix(boat)
         case Self.t10Tick: atT10 = fix(boat)
@@ -383,12 +414,19 @@ struct StartWatch {
         guard let atT30, let atT10, let atGun, let gunBoat, let gunWindward else {
             preconditionFailure("a start trial sails to T+60")
         }
-        let worth = geometry.worth(race.boats[0])
-        let bias = geometry.biasLoss(spot: atGun.spot, into: gunWindward)
-        let speed = geometry.deficitMetres(gunBoat)
+        let boat = race.boats[0]
+        let worth = geometry.worth(boat)
+        let speed = geometry.deficitMetres(boat)
+        // What she made that the score doesn't count: a boat unstarted at T+60 has at best the line.
+        let uncounted = geometry.made(boat.position) - speed - worth
+        let metres = ledger.metresByCause
         return StartEntry(sailor: sailor, worth: worth, startSeconds: startTick.map { Double($0) / Double(Race.tickRate) },
-                          ocs: ocs, atT30: atT30, atT10: atT10, atGun: atGun, bias: bias, timing: atGun.depth, speed: speed,
-                          firstMinute: worth + bias + atGun.depth + speed)
+                          ocs: ocs, atT30: atT30, atT10: atT10, atGun: atGun, timing: -geometry.made(gunBoat.position),
+                          wind: metres[.wind] ?? 0, late: (metres[.start] ?? 0) + uncounted,
+                          manoeuvre: metres[.manoeuvre] ?? 0, overstood: metres[.overstood] ?? 0,
+                          offPolar: (metres[.offPolar] ?? 0) + (metres[.rounding] ?? 0), speed: speed,
+                          bias: geometry.biasLoss(spot: atGun.spot, into: gunWindward),
+                          gunSpeed: geometry.deficitMetres(gunBoat))
     }
 }
 
@@ -407,9 +445,10 @@ public enum StartTrial {
         var watch = StartWatch(StartGeometry(course))
         while race.tick < StartGeometry.horizonTick && !race.isOver {
             driver.drive(race)
+            let before = race.boats[0]
             race.step()
             _ = race.drainEvents()
-            watch.record(race)
+            watch.record(race, before: before)
         }
         return watch.entry(sailor.description, race: race)
     }
@@ -426,9 +465,10 @@ public enum StartTrial {
                 if let tap = inputs[next].tap { race.tap(tap, seat: 0, atTick: inputs[next].tick) }
                 next += 1
             }
+            let before = race.boats[0]
             race.step()
             _ = race.drainEvents()
-            watch.record(race)
+            watch.record(race, before: before)
         }
         return (watch.entry(TimeTrialSailor.oracle.description, race: race), watch.lineBias, race.digest())
     }
