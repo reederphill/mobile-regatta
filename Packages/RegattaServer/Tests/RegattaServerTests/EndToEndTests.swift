@@ -189,7 +189,11 @@ struct EndToEndTests {
         config.environment = .staging
         config.auth = try SeatAuthPolicy.for(.staging)
         #expect(config.auth == .raceToken)
-        let server = try await RegattaHTTPServer.start(config: config, services: try ServiceEndpoint.make(config: .dev(), store: InMemoryAccountStore()))
+        // Outside dev the bypass must be off, in the config and in the endpoint (the review's finding 3).
+        config.appAttest.bypass = false
+        var serviceConfig = ServerConfig.dev()
+        serviceConfig.appAttest.bypass = false
+        let server = try await RegattaHTTPServer.start(config: config, services: try ServiceEndpoint.make(config: serviceConfig, store: InMemoryAccountStore()))
         let options = LoadClientOptions(host: "127.0.0.1", port: server.port, timeout: .seconds(60))
         defer { Task { await server.shutdown() } }
         func greeted() async throws -> WebSocketRaceTransport {
