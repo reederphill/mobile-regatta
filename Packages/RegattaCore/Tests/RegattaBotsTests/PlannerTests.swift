@@ -81,8 +81,9 @@ import Testing
     static let worstTickMillisecondsPerPlanningBot = 0.66
     static let meanMillisecondsPerBotPerTick = 0.05
 
-    /// #583 ("CPU budget first"): the planner's own benchmark. Every reference race (`ReferenceRegatta`: ten National
-    /// bots, two laps, the bundled set) sailed in full; on each tick, each plan a bot made is timed again from its inputs
+    /// #583 ("CPU budget first"): the planner's own benchmark. The first reference race of each conditions file
+    /// (`ReferenceRegatta`: ten National bots, two laps, the bundled set; all sixteen cost the package's tests their CI
+    /// time limit) sailed in full; on each tick, each plan a bot made is timed again from its inputs
     /// (`BotPlanner.Request`: the bot reads no clock), and the fleet's planning summed for the tick. The mean, over every
     /// bot and tick, is under `meanMillisecondsPerBotPerTick`. The worst ticks so timed (the `kept` slowest) are timed
     /// again at the end, each plan the fastest of `retimes` runs, so a tick the scheduler took the core from (the
@@ -105,7 +106,9 @@ import Testing
         var botTicks = 0
         var plans = 0
         var slowest: [(ms: Double, requests: [BotPlanner.Request])] = []
-        for n in 1...ReferenceRegatta.count {
+        var seen = Set<String>()
+        let races = (1...ReferenceRegatta.count).filter { seen.insert(ReferenceRegatta.race($0).entry.conditions).inserted }
+        for n in races {
             let reference = ReferenceRegatta.race(n)
             let race = try reference.race()
             var drivers = reference.setup.seats.indices.map { reference.driver(seat: $0) }
@@ -138,7 +141,7 @@ import Testing
             if tick / Double(costs.count) > worstTick.ms / Double(worstTick.planners) { worstTick = (tick, costs.count) }
         }
         let mean = total / Double(botTicks)
-        print("PlannerTests: \(plans) plans over \(ReferenceRegatta.count) reference races; worst tick \(worstTick.ms) ms for "
+        print("PlannerTests: \(plans) plans over reference races \(races); worst tick \(worstTick.ms) ms for "
               + "\(worstTick.planners) planning bots, worst plan \(worstPlan) ms (first timed \(slowest.first?.ms ?? 0) ms); "
               + "mean \(mean) ms a bot a tick")
         #expect(plans > 0)

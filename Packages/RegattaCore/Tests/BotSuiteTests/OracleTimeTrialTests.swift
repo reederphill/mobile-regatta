@@ -9,9 +9,9 @@ import Testing
 /// with a narrower, shorter search than the tool's (`options`) so the suite stays quick; the tool's own settings only
 /// search harder.
 @Suite struct OracleTimeTrialTests {
-    /// The search the tests run: a beam of 4 (two places of it the bots' own laps), children sailed on 10 s before they
-    /// are scored.
-    static let options = Oracle.Options(checkpointSeconds: 2, horizonSeconds: 10, beamWidth: 4)
+    /// The search the tests run: a beam of 3 (two places of it the bots' own laps), children sailed on 6 s before they
+    /// are scored; any wider costs the package's tests their CI time limit.
+    static let options = Oracle.Options(checkpointSeconds: 2, horizonSeconds: 6, beamWidth: 3)
 
     /// The first reference race of each conditions file, one lap.
     static let seeds: [TimeTrialSeed] = {
