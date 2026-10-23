@@ -187,6 +187,35 @@ extension RaceSims {
             #expect(try await rig.lifecycle.lastRace(of: "T:1")?.rating?.outcome == .rated(before: rating(1500), after: rating(1338)))
         }
 
+        /// #163 (T2): she is the only human at the gun, so the race is unrated. She leaves for good after the gun and is
+        /// released, so the close's seated pass misses her; the race is still her last race, and its close tells her
+        /// `.unrated`, once, by its race id. One who gave her seat away before the gun hears nothing of it.
+        @Test func anUnratedCloseTellsAPostGunLeaver() async throws {
+            let rig = Self.rig()
+            let race = try await rig.race(["T:0", "T:1"], seats: 4)
+            let transports = [KeptTransport(), KeptTransport()]
+            for seat in 0..<2 { try await race.join(seat: seat, transport: transports[seat]) }
+            var seq: UInt32 = 0
+            await rig.sail(race, [0, 1], to: -30, seq: &seq)
+            #expect(await race.quit(seat: 1, transport: transports[1]))
+            await rig.lifecycle.seatReleased("T:1", race: race.id)
+            await rig.sail(race, [0], to: 30, seq: &seq)
+            #expect(await race.quit(seat: 0, transport: transports[0]))
+            await rig.lifecycle.seatReleased("T:0", race: race.id)
+            #expect(await rig.lifecycle.seat(of: "T:0") == nil)
+            await rig.runUntilEnded(race, limit: 1_200)
+            let outcome = try #require(await race.host.outcome)
+            #expect(outcome.log.humanSeatsAtGun == [0])
+            #expect(try #require(outcome.results).rated == false)
+            await rig.end(race)
+
+            let id = RaceResultsFeed.raceID(race.id)
+            #expect(await pushed(rig.lifecycle, "T:0", expecting: 2) == [RatingChange(raceID: id, outcome: .unrated)], "once, for this race")
+            #expect(try await rig.lifecycle.lastRace(of: "T:0")?.report.raceID == id)
+            #expect(await pushed(rig.lifecycle, "T:1", expecting: 0).isEmpty)
+            #expect(try await rig.lifecycle.lastRace(of: "T:1") == nil)
+        }
+
         /// One definition of "at the gun" (review of #151): the race's own (`SeatPresence`), by which a leave stamped
         /// tick 0, the tick the gun fires in, is a leave before the gun. So a leaver at −1 or 0 is taken over by a fleet
         /// bot and has nothing of the race: no rating, no counts, not her last race. At 1 she was at the gun: her boat is
