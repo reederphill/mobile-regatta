@@ -287,7 +287,9 @@ final class LobbyModel {
         generation += 1
         let generation = generation
         task?.cancel()
-        phase = .loading
+        // A reopen after a dropped feed keeps the open lobby on screen while it reads: a spinner would take the
+        // composer down with her text's focus, every time the feed flaps.
+        if phase != .open || replacing { phase = .loading }
         task = Task { [weak self] in await self?.run(generation, replacing: replacing) }
         if tick == nil {
             tick = Task { [weak self, sleep] in

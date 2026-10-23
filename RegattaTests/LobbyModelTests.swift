@@ -14,16 +14,25 @@ final class CountingLobby: LobbyService {
     }
 
     let base: any LobbyService
+    /// Holds every history read after the first until it allows one (a reopen caught mid-read).
+    let reopenGate: LobbySleeps?
     private let counted = Mutex(Counts())
 
-    init(_ base: any LobbyService) { self.base = base }
+    init(_ base: any LobbyService, reopenGate: LobbySleeps? = nil) {
+        self.base = base
+        self.reopenGate = reopenGate
+    }
 
     var counts: Counts { counted.withLock { $0 } }
     private func count(_ change: (inout Counts) -> Void) { counted.withLock { change(&$0) } }
 
     func state() async throws -> LobbyState { try await base.state() }
     func history() async throws -> [LobbyMessage] {
-        count { $0.history += 1 }
+        let reads = counted.withLock { counts in
+            counts.history += 1
+            return counts.history
+        }
+        if reads > 1, let reopenGate { await reopenGate.sleep(.seconds(1)) }
         return try await base.history()
     }
     func feed() -> AsyncStream<LobbyEvent> {
@@ -103,9 +112,9 @@ final class LobbySleeps: Sendable {
     }
 
     static func rig(_ scenario: FakeServiceScenario, hidesChat: Bool = false, lobby: (any LobbyService)? = nil,
-                    sleeps: LobbySleeps = LobbySleeps()) async -> Rig {
+                    sleeps: LobbySleeps = LobbySleeps(), reopenGate: LobbySleeps? = nil) async -> Rig {
         var services = ServiceSet.fake(scenario)
-        let counting = CountingLobby(lobby ?? services.lobby)
+        let counting = CountingLobby(lobby ?? services.lobby, reopenGate: reopenGate)
         services.lobby = counting
         let status = OnlineStatus(services: services, isInitiallyOnline: scenario != .offline,
                                   lobbySleep: { await sleeps.sleep($0) })
@@ -155,6 +164,27 @@ final class LobbySleeps: Sendable {
         await Self.settle()
         #expect(rig.lobby.counts.history == 3 && rig.lobby.counts.feed == 3, "one read each reopen")
         #expect(sleeps.asked == [.seconds(1), .seconds(2), .seconds(4)], "the waits grow")
+        #expect(rig.model.feed.lines.count == 7, "the same lines, once each")
+    }
+
+    /// A reopen after a dropped feed keeps the open lobby on screen while it reads: no spinner, so the composer
+    /// stays up with her text and its focus (the design gate's dropped typing).
+    @Test func aReopenKeepsTheOpenLobbyAndHerText() async {
+        let sleeps = LobbySleeps()
+        let gate = LobbySleeps()
+        let rig = await Self.rig(.lobbyFreeText, sleeps: sleeps, reopenGate: gate)
+        #expect(rig.model.phase == .open)
+        rig.model.text = "The wind went right"
+        rig.model.isFieldFocused = true
+        sleeps.allow(1)
+        await Self.settle()
+        #expect(rig.lobby.counts.history == 2, "the reopen is reading")
+        #expect(rig.model.phase == .open, "no spinner while it reads")
+        gate.allow(1)
+        await Self.settle()
+        #expect(rig.model.phase == .open)
+        #expect(rig.model.text == "The wind went right")
+        #expect(rig.model.isFieldFocused)
         #expect(rig.model.feed.lines.count == 7, "the same lines, once each")
     }
 
