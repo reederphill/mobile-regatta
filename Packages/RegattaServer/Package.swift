@@ -227,6 +227,10 @@ let package = Package(
                 "RegattaServer",
                 // The service endpoint (#145): its clients, the contract runner, and Postgres for its persistence tests.
                 "GameCenterIdentity",
+                // App Attest on the service endpoint (#158).
+                "AppAttest",
+                .product(name: "X509", package: "swift-certificates"),
+                .product(name: "SwiftASN1", package: "swift-asn1"),
                 "Persistence",
                 "Ratings",
                 "ChatFilter",

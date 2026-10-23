@@ -465,21 +465,27 @@ public struct RetentionRun: Sendable, Equatable {
     public var reports = 0
     public var inactivePlayers = 0
     public var scoreBlocks = 0
+    /// App Attest keys unused for `inactiveAfterDays` (#158).
+    public var appAttestKeys = 0
 }
 
 /// The retention job (#160, #28): the lobby at 30 days, reports and penalties at a year (or the penalty's length), the
-/// inactivity deletion (G8) and the leaderboard blocks still owed, every `interval` while the server listens.
+/// inactivity deletion (G8), the leaderboard blocks still owed and App Attest keys unused as long as an inactive player
+/// (#158), every `interval` while the server listens.
 public final class RetentionJobs: Sendable {
     let deletion: OnlineDataDeletion
     let moderation: any ModerationStore
     let lobby: LobbyHub?
+    let appAttestKeys: (any AppAttestKeyStore)?
     let now: @Sendable () -> Date
     private let loop = Mutex<Task<Void, Never>?>(nil)
 
-    public init(deletion: OnlineDataDeletion, moderation: any ModerationStore, lobby: LobbyHub?, now: @escaping @Sendable () -> Date = { Date() }) {
+    public init(deletion: OnlineDataDeletion, moderation: any ModerationStore, lobby: LobbyHub?, appAttestKeys: (any AppAttestKeyStore)? = nil,
+                now: @escaping @Sendable () -> Date = { Date() }) {
         self.deletion = deletion
         self.moderation = moderation
         self.lobby = lobby
+        self.appAttestKeys = appAttestKeys
         self.now = now
     }
 
@@ -501,6 +507,13 @@ public final class RetentionJobs: Sendable {
         }
         run.inactivePlayers = await deletion.eraseInactive()
         run.scoreBlocks = await deletion.blockPendingScores()
+        if let appAttestKeys {
+            do {
+                run.appAttestKeys = try await appAttestKeys.purge(unusedSince: time - TimeInterval(settings.inactiveAfterDays) * 86_400)
+            } catch {
+                OnlineDataDeletion.log("the App Attest key purge failed: \(error)")
+            }
+        }
         return run
     }
 
