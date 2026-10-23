@@ -164,6 +164,12 @@ final class LobbyUITests: XCTestCase {
         app.buttons["toolbar-settings"].tap()
         let toggle = app.switches["settings-hidesLobbyChat"].firstMatch
         XCTAssertTrue(toggle.waitForExistence(timeout: 20), "no Hide lobby chat")
+        // The Lobby section is below the fold (CI's iPhone 17: the switch at y 1034 in an 874 pt window), and a
+        // coordinate tap doesn't scroll to its element: scrolled into view first, or the tap lands on nothing.
+        for _ in 0..<6 where !toggle.isHittable {
+            app.swipeUp(velocity: .slow)
+        }
+        XCTAssertTrue(toggle.isHittable, "Hide lobby chat didn't scroll into view")
         let before = toggle.value as? String
         for _ in 1...2 where toggle.value as? String == before {
             toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
