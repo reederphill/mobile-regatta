@@ -248,10 +248,11 @@ final class GameScene: SKScene {
             float centre = 1.0 - 0.3;
             float d = (uv.y - centre) / 0.15;
             float band = exp(-d * d * 1.6);
-            float s1 = sin(uv.x * 95.0 + u_time * 1.9 + sin(uv.y * 40.0 + u_time * 0.7) * 2.0);
-            float s2 = sin(uv.x * 41.0 - u_time * 2.6 + uv.y * 70.0);
-            float sparkle = max(s1 * s2, 0.0);
-            float a = band * (0.035 + 0.16 * sparkle * sparkle);
+            vec2 cell = floor(uv * vec2(260.0, 560.0));
+            float r = fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5453);
+            float twinkle = 0.5 + 0.5 * sin(u_time * (1.5 + 3.0 * r) + r * 40.0);
+            float sparkle = step(0.965, r) * pow(twinkle, 6.0);
+            float a = band * (0.025 + 0.2 * sparkle);
             gl_FragColor = vec4(a, a, a, a);
         }
         """)

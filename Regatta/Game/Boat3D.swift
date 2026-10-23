@@ -72,9 +72,16 @@ final class Fleet3D {
 
         let style = ChartStyle.standard
         let hull = style.committeeHull
-        let box = SCNBox(width: hull.width * ppm, height: 1.5 * ppm, length: hull.height * ppm, chamferRadius: 0.4 * ppm)
-        box.materials = [Fleet3D.lambert(UIColor(white: 0.96, alpha: 1))]
+        // A low hull and a small cabin on it, so she reads as a boat, not a block.
+        let box = SCNBox(width: hull.width * ppm * 0.8, height: 0.9 * ppm, length: hull.height * ppm, chamferRadius: 0.35 * ppm)
+        box.materials = [Fleet3D.lambert(UIColor(white: 0.82, alpha: 1))]
         committee = SCNNode(geometry: box)
+        let cabinBox = SCNBox(width: hull.width * ppm * 0.5, height: 0.9 * ppm, length: hull.height * ppm * 0.4,
+                              chamferRadius: 0.2 * ppm)
+        cabinBox.materials = [Fleet3D.lambert(UIColor(white: 0.97, alpha: 1))]
+        let cabin = SCNNode(geometry: cabinBox)
+        cabin.position = SCNVector3(0, Float(0.9 * ppm), -Float(hull.height * ppm * 0.1))
+        committee.addChildNode(cabin)
         let position = course.startLine.committee.position
         committeePosition = CGPoint(x: position.x * ppm, y: position.y * ppm)
         scene.rootNode.addChildNode(committee)
@@ -129,7 +136,7 @@ final class Fleet3D {
             buoy.material.diffuse.contents = tone
         }
         let at = ground(committeePosition)
-        committee.position = SCNVector3(at.x, Float(0.75 * ppm), at.z)
+        committee.position = SCNVector3(at.x, Float(0.45 * ppm), at.z)
         committee.eulerAngles = SCNVector3(0, Float(rho), 0)
     }
 }
