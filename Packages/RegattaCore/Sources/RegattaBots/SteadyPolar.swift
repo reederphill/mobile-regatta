@@ -6,15 +6,20 @@ import RegattaCore
 /// can't sail at its speed. The oracle's grooves and estimate, the ledger's ideal (`BotSuite`) and the planner's estimate
 /// (`BotPlanner`) read this.
 public struct SteadyPolar: Sendable {
-    /// Metres a second by whole degree of true wind angle, 0…180.
+    /// Metres a second by true wind angle, 0…180, every `step` degrees.
     public let speeds: [Double]
+    /// Degrees between entries of `speeds`: 1, or coarser where a table is built often and read roughly (the planner's).
+    public let step: Int
     /// The best VMG upwind and downwind: the angle and the speed there.
     public let up: (twa: Double, speed: Double)
     public let down: (twa: Double, speed: Double)
 
-    public init(boatClass: BoatClass, tws: Double) {
+    /// The table at `tws`, every `step` degrees (a divisor of 180).
+    public init(boatClass: BoatClass, tws: Double, step: Int = 1) {
+        precondition(step >= 1 && 180 % step == 0, "a steady polar's step divides 180")
         let polar = boatClass.polar
-        speeds = (0...180).map { degree in
+        self.step = step
+        speeds = stride(from: 0, through: 180, by: step).map { degree in
             let twa = deg2rad(Double(degree))
             guard twa >= BoatDynamics.noGoAngle(polar) else { return 0 }
             let kite: Spinnaker = boatClass.spinnaker.map { twa >= $0.hoistAboveTWA ? .up : .down } ?? .down
@@ -29,8 +34,8 @@ public struct SteadyPolar: Sendable {
         }
         var up = (twa: Double.pi / 4, speed: 0.0, vmg: 0.0)
         var down = (twa: Double.pi * 3 / 4, speed: 0.0, vmg: 0.0)
-        for (degree, speed) in speeds.enumerated() {
-            let twa = deg2rad(Double(degree))
+        for (index, speed) in speeds.enumerated() {
+            let twa = deg2rad(Double(index * step))
             let vmg = speed * Vec2.heading(twa).y
             if vmg > up.vmg { up = (twa, speed, vmg) }
             if -vmg > down.vmg { down = (twa, speed, -vmg) }
@@ -39,20 +44,24 @@ public struct SteadyPolar: Sendable {
         self.down = (down.twa, down.speed)
     }
 
-    /// The speed at `twa`, radians, between whole degrees.
+    /// The speed at `twa`, radians, between entries.
     public func speed(twa: Double) -> Double {
-        let degrees = min(max(rad2deg(abs(twa)), 0), 180)
-        let low = Int(degrees.rounded(.down))
-        guard low < 180 else { return speeds[180] }
-        let share = degrees - Double(low)
+        let at = min(max(rad2deg(abs(twa)), 0), 180) / Double(step)
+        let low = Int(at.rounded(.down))
+        guard low < speeds.count - 1 else { return speeds[speeds.count - 1] }
+        let share = at - Double(low)
         return speeds[low] * (1 - share) + speeds[low + 1] * share
     }
 }
 
-/// Steady polars by wind speed (#583 stage 3): each worked out once a tenth of a metre a second of wind and kept, for a
-/// bot's planner, whose every plan would otherwise work out two. Read by key only, never iterated.
+/// Steady polars by wind speed (#583 stage 3): each worked out once a tenth of a metre a second of wind, every
+/// `SteadyPolars.step` degrees, and kept, for a bot's planner, whose every plan would otherwise work out two. Read by key
+/// only, never iterated.
 public struct SteadyPolars: Sendable {
     private var byTenth: [Int: SteadyPolar] = [:]
+    /// Degrees between a planner's table's entries: half the work of a whole-degree table, inside the budget's worst
+    /// tick (`PlannerTests.plannerStaysWithinTheTickBudget`).
+    public static let step = 2
 
     public init() {}
 
@@ -60,7 +69,7 @@ public struct SteadyPolars: Sendable {
     public mutating func polar(tws: Double, boatClass: BoatClass) -> SteadyPolar {
         let key = Int((tws * 10).rounded())
         if let known = byTenth[key] { return known }
-        let polar = SteadyPolar(boatClass: boatClass, tws: Double(key) / 10)
+        let polar = SteadyPolar(boatClass: boatClass, tws: Double(key) / 10, step: Self.step)
         byTenth[key] = polar
         return polar
     }

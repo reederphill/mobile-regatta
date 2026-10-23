@@ -83,55 +83,64 @@ import Testing
 
     /// #583 ("CPU budget first"): the planner's own benchmark. Every reference race (`ReferenceRegatta`: ten National
     /// bots, two laps, the bundled set) sailed in full; on each tick, each plan a bot made is timed again from its inputs
-    /// (`BotPlanner.Request`: the bot reads no clock), the fastest of three runs, and the fleet's planning summed for the
-    /// tick. Its worst tick is
-    /// under `worstTickMillisecondsPerPlanningBot` a planning bot, and its mean under `meanMillisecondsPerBotPerTick`.
-    /// Release only: debug timings prove nothing.
+    /// (`BotPlanner.Request`: the bot reads no clock), and the fleet's planning summed for the tick. The mean, over every
+    /// bot and tick, is under `meanMillisecondsPerBotPerTick`. The worst ticks so timed (the `kept` slowest) are timed
+    /// again at the end, each plan the fastest of `retimes` runs, so a tick the scheduler took the core from (the
+    /// suite's other tests share it) doesn't stand for the planner's cost: the worst of them is under
+    /// `worstTickMillisecondsPerPlanningBot` a planning bot. Release only: debug timings prove nothing.
     @Test(.enabled(if: !_isDebugAssertConfiguration(), "debug timings prove nothing"))
     func plannerStaysWithinTheTickBudget() throws {
+        let kept = 200
+        let retimes = 10
         let clock = ContinuousClock()
         let ms = { (d: Duration) in Double(d.components.seconds) * 1_000 + Double(d.components.attoseconds) / 1e15 }
+        func time(_ request: BotPlanner.Request) -> Double {
+            let start = clock.now
+            let gain = request.gain()
+            let spent = ms(start.duration(to: clock.now))
+            #expect(gain.isFinite)
+            return spent
+        }
         var total = 0.0
         var botTicks = 0
-        var worstTick = (ms: 0.0, planners: 1)
-        var worstPlan = 0.0
         var plans = 0
+        var slowest: [(ms: Double, requests: [BotPlanner.Request])] = []
         for n in 1...ReferenceRegatta.count {
             let reference = ReferenceRegatta.race(n)
             let race = try reference.race()
             var drivers = reference.setup.seats.indices.map { reference.driver(seat: $0) }
             #expect(drivers.allSatisfy { $0.planningHorizon != nil }, "race \(n): every National bot plans")
             while !race.isOver && race.tick < 1_500 * Race.tickRate {
-                var tick = 0.0
-                var planners = 0
+                var requests: [BotPlanner.Request] = []
                 for k in drivers.indices {
                     let before = drivers[k].plans
                     drivers[k].drive(race)
-                    guard drivers[k].plans > before, let request = drivers[k].lastPlanRequest else { continue }
-                    // The fastest of three runs: the plan's own cost, not the scheduler's (other tests share the cores).
-                    var spent = Double.infinity
-                    for _ in 0..<3 {
-                        let start = clock.now
-                        let gain = request.gain()
-                        spent = min(spent, ms(start.duration(to: clock.now)))
-                        #expect(gain.isFinite)
-                    }
-                    tick += spent
-                    planners += 1
-                    worstPlan = max(worstPlan, spent)
+                    if drivers[k].plans > before, let request = drivers[k].lastPlanRequest { requests.append(request) }
                 }
-                if planners > 0, tick / Double(planners) > worstTick.ms / Double(worstTick.planners) {
-                    worstTick = (tick, planners)
-                }
+                let tick = requests.reduce(0) { $0 + time($1) }
                 total += tick
-                plans += planners
+                plans += requests.count
                 botTicks += drivers.count
+                if !requests.isEmpty, slowest.count < kept || tick > slowest[slowest.count - 1].ms {
+                    slowest.append((tick, requests))
+                    slowest.sort { $0.ms > $1.ms }
+                    if slowest.count > kept { slowest.removeLast() }
+                }
                 race.step()
             }
         }
+        var worstTick = (ms: 0.0, planners: 1)
+        var worstPlan = 0.0
+        for candidate in slowest {
+            let costs = candidate.requests.map { request in (0..<retimes).map { _ in time(request) }.min() ?? 0 }
+            let tick = costs.reduce(0, +)
+            worstPlan = max(worstPlan, costs.max() ?? 0)
+            if tick / Double(costs.count) > worstTick.ms / Double(worstTick.planners) { worstTick = (tick, costs.count) }
+        }
         let mean = total / Double(botTicks)
         print("PlannerTests: \(plans) plans over \(ReferenceRegatta.count) reference races; worst tick \(worstTick.ms) ms for "
-              + "\(worstTick.planners) planning bots, worst plan \(worstPlan) ms; mean \(mean) ms a bot a tick")
+              + "\(worstTick.planners) planning bots, worst plan \(worstPlan) ms (first timed \(slowest.first?.ms ?? 0) ms); "
+              + "mean \(mean) ms a bot a tick")
         #expect(plans > 0)
         #expect(worstTick.ms <= Self.worstTickMillisecondsPerPlanningBot * Double(worstTick.planners))
         #expect(worstPlan <= Self.worstTickMillisecondsPerPlanningBot)

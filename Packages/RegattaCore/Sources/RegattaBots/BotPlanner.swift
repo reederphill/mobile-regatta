@@ -27,8 +27,12 @@ struct BotPlanner: Sendable, Equatable {
         var horizon: Double
     }
 
-    /// The forward sail's step, seconds: coarser than the race's tick, as cheap as it can be and still turn her.
+    /// The forward sail's step, seconds: coarser than the race's tick, as cheap as it can be and still turn her; and the
+    /// longer step once she has settled on her course (`settledStep`, within `settled` of it, the rudder all but
+    /// centred), where the dynamics change slowly: the plan's cost is mostly the straight sailing after the turn.
     static let step = 0.1
+    static let settledStep = 0.3
+    static let settled = deg2rad(3)
     /// Planning is costly: she plans again only this often, seconds, and holds the answer between.
     static let replanSeconds = 1.0
 
@@ -46,7 +50,7 @@ struct BotPlanner: Sendable, Equatable {
         return horizon >= step ? Depth(horizon: horizon) : nil
     }
 
-    /// Advance calls one plan sails: two options, each `horizon / step` steps. What the budget test holds (#583).
+    /// Advance calls one plan sails at most: two options, each `horizon / step` steps. What the budget test holds (#583).
     static func steps(_ depth: Depth) -> Int { 2 * Int((depth.horizon / step).rounded(.up)) }
 
     /// The wind she can see (#583: information, not foresight), built from her seat's view alone.
@@ -129,16 +133,19 @@ struct BotPlanner: Sendable, Equatable {
             let relative = wrapAngle(w.direction - state.heading)
             let desired = side == .port ? wrapAngle(w.direction - twa) : wrapAngle(w.direction + twa)
             var rudder = 0.0
+            let error = wrapAngle(desired - state.heading)
             if !(state.speed < 0.5 && abs(relative) < noGo) {
                 let tacking = BoomSide.leeward(ofRelativeWind: wrapAngle(w.direction - desired)) != state.boomSide
                     && abs(relative) < .pi / 2
                 let cap = tacking ? 0.7 : 0.35
-                rudder = (wrapAngle(desired - state.heading) * gain).clamped(to: -cap...cap)
+                rudder = (error * gain).clamped(to: -cap...cap)
             }
+            let settled = abs(error) < Self.settled && abs(state.rudder) < 0.05 && abs(rudder) < 0.05
+            let dt = min(settled ? Self.settledStep : Self.step, seconds - t)
             state = BoatDynamics.advance(state, control: BoatDynamics.Control(rudder: rudder),
                                          env: BoatDynamics.Environment(windDirection: w.direction, windSpeed: w.speed),
-                                         boatClass: boatClass, dt: step)
-            t += step
+                                         boatClass: boatClass, dt: dt)
+            t += dt
         }
         return Sailed(state: state, seconds: t)
     }
