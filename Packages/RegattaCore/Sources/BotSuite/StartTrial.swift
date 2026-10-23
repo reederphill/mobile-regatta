@@ -118,6 +118,34 @@ struct StartGeometry {
         return max(0, target - boat.speed) / target * course.boatClass.momentum.speedingUp
     }
 
+    /// The spots a start is aimed at: the line's ends are a mark and the committee boat, so in from them by the start
+    /// oracle's outermost spots (`StartOracle.lineSpots`).
+    static let startableSpots = 0.05...0.95
+
+    /// The estimate's worth at T+60 of a boat not yet started (`StartOracle.estimate`): the line's metres at her spot
+    /// (kept to `startableSpots`), and the polar's best up the axis from the time she can be there, no earlier than the gun. She
+    /// sails there at the polar's best in `windDirection` and `tws` (`Oracle.legSeconds`: straight where she can, two
+    /// legs where she can't, so a boat out beyond an end pays her way back to it), on the course side of the line or its
+    /// extensions by way of a hull length below it first, with a turn's worth of the class's speeding up if she is
+    /// sailing away from where she goes next, and her deficit made up on the way.
+    func unstartedWorth(at position: Vec2, heading: Double, time: Double, deficitSeconds: Double, windDirection: Double,
+                        tws: Double) -> Double {
+        let point = linePoint(spot(position).clamped(to: Self.startableSpots))
+        let polar = course.steady(tws: tws)
+        let vmg = max(polar.up.speed * cos(polar.up.twa), Oracle.slowest)
+        var stops = [point]
+        if line.side(position) > 0 { stops.insert(point - upwind * course.boatClass.hull.length, at: 0) }
+        var seconds = deficitSeconds
+        var from = position
+        for stop in stops {
+            seconds += Oracle.legSeconds(polar: polar, from: from, to: stop, windDirection: windDirection)
+            from = stop
+        }
+        let away = stops[0] - position
+        if away.lengthSquared > 1e-6, Vec2.heading(heading).dot(away) < 0 { seconds += course.boatClass.momentum.speedingUp }
+        return made(point) + vmg * max(0, Self.horizonSeconds - max(time + seconds, 0))
+    }
+
     /// Her speed's shortfall in metres: the deficit's seconds at the polar's best upwind.
     func deficitMetres(_ boat: Boat) -> Double { deficitSeconds(boat) * upwindVMG(boat) }
 
@@ -243,7 +271,10 @@ public struct StartTrialSeedResult: Codable, Hashable, Sendable {
     public var oracleDigest: UInt64
     public var sailors: [StartEntry]
 
-    public var losses: [StartLoss] { sailors.map { StartLoss($0, oracle: oracle) } }
+    /// The loss table's rows, in order: each sailor's.
+    public var rows: [StartEntry] { sailors }
+
+    public var losses: [StartLoss] { rows.map { StartLoss($0, oracle: oracle) } }
 }
 
 /// The start trial's report (#584): per seed, then the mean over the pool for each sailor.
@@ -260,7 +291,7 @@ public struct StartTrialReport: Codable, Hashable, Sendable {
     public var means: [StartLoss] {
         guard let first = seeds.first else { return [] }
         let count = Double(seeds.count)
-        return first.sailors.indices.map { k in
+        return first.rows.indices.map { k in
             let losses = seeds.map { $0.losses[k] }
             return StartLoss(sailor: losses[0].sailor, values: StartLoss.columns.indices.map { i in
                 losses.reduce(0) { $0 + $1.values[i] } / count
@@ -299,7 +330,7 @@ public struct StartTrialReport: Codable, Hashable, Sendable {
         var starts = [["sailor", "worth", "start s", "OCS", "spot -30", "depth -30", "spot -10", "depth -10", "spot gun", "depth gun",
                        "bias", "gun speed"]]
         let columns: [(String, [StartEntry])] = [("oracle", oracles)]
-            + (seeds[0].sailors.indices.map { k in (seeds[0].sailors[k].sailor, seeds.map { $0.sailors[k] }) })
+            + (seeds[0].rows.indices.map { k in (seeds[0].rows[k].sailor, seeds.map { $0.rows[k] }) })
         for (name, entries) in columns {
             starts.append([name, format(mean(entries, \.worth)), format(mean(entries) { $0.startSeconds ?? 60 }),
                            "\(entries.filter(\.ocs).count)",
@@ -312,12 +343,12 @@ public struct StartTrialReport: Codable, Hashable, Sendable {
         lines.append("")
         lines.append("waiting, mean |spot - oracle's| and depth - oracle's m at T-30 and T-10:")
         var waits = [["sailor", "|spot| -30", "depth -30", "|spot| -10", "depth -10"]]
-        for k in seeds[0].sailors.indices {
-            let pairs = seeds.map { ($0.sailors[k], $0.oracle) }
+        for k in seeds[0].rows.indices {
+            let pairs = seeds.map { ($0.rows[k], $0.oracle) }
             func pairMean(_ value: (StartEntry, StartEntry) -> Double) -> Double {
                 pairs.reduce(0) { $0 + value($1.0, $1.1) } / count
             }
-            waits.append([seeds[0].sailors[k].sailor,
+            waits.append([seeds[0].rows[k].sailor,
                           fixed(pairMean { abs($0.atT30.spot - $1.atT30.spot) }, 2), format(pairMean { $0.atT30.depth - $1.atT30.depth }),
                           fixed(pairMean { abs($0.atT10.spot - $1.atT10.spot) }, 2), format(pairMean { $0.atT10.depth - $1.atT10.depth })])
         }
@@ -326,13 +357,13 @@ public struct StartTrialReport: Codable, Hashable, Sendable {
         lines.append("per seed, metres behind the oracle at T+60 (start s); the line's bias at the gun (+ the committee end "
             + "favoured); the oracle's spot and depth m at T-30, T-10:")
         var seedRows = [["seed", "conditions", "seat", "bias m", "oracle m", "start s", "-30", "-10"]
-                        + seeds[0].sailors.map(\.sailor)]
+                        + seeds[0].rows.map(\.sailor)]
         for seed in seeds {
             let o = seed.oracle
             seedRows.append([seed.seed.name, seed.seed.trial.conditions, "\(seed.seed.seat)", format(seed.lineBias),
                              format(o.worth), o.startSeconds.map(format) ?? "-",
                              "\(fixed(o.atT30.spot, 2))/\(format(o.atT30.depth))", "\(fixed(o.atT10.spot, 2))/\(format(o.atT10.depth))"]
-                            + zip(seed.sailors, seed.losses).map { entry, loss in
+                            + zip(seed.rows, seed.losses).map { entry, loss in
                                 (entry.ocs ? "OCS " : "") + format(loss.gap) + " (\(entry.startSeconds.map(format) ?? "-"))"
                             })
         }
@@ -780,18 +811,12 @@ public struct StartOracle {
         case .racing:
             return geometry.made(boat.position) + vmg * max(0, horizon - race.time - geometry.deficitSeconds(boat))
         case .prestart:
-            let point = geometry.linePoint(geometry.spot(boat.position))
-            let below = geometry.made(point) - geometry.made(boat.position)
-            var seconds = abs(below) / vmg + geometry.deficitSeconds(boat)
-            let towards = Vec2.heading(boat.heading).dot(upwindSign(below) * geometry.upwind)
-            if towards < 0 { seconds += course.boatClass.momentum.speedingUp }
-            let start = max(race.time + seconds, 0)
-            return geometry.made(point) + vmg * max(0, horizon - start)
+            let wind = boat.sailingWind
+            return geometry.unstartedWorth(at: boat.position, heading: boat.heading, time: race.time,
+                                           deficitSeconds: geometry.deficitSeconds(boat), windDirection: wind.direction,
+                                           tws: boat.polarWindSpeed(in: course.boatClass))
         default:
             return -.infinity
         }
     }
-
-    /// Up the axis for a boat below the line, down it for one above.
-    private func upwindSign(_ below: Double) -> Double { below >= 0 ? 1 : -1 }
 }

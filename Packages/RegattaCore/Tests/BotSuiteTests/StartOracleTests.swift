@@ -67,7 +67,7 @@ import Testing
             let oracle = trial.oracle
             #expect(abs(oracle.sum - oracle.worth) < 1e-6, "the oracle's own columns make its worth: \(oracle)")
             #expect(oracle.late >= -1e-6, "nothing is late of a start on time")
-            for (entry, loss) in zip(trial.sailors, trial.losses) {
+            for (entry, loss) in zip(trial.rows, trial.losses) {
                 #expect(abs(entry.sum - entry.worth) < 1e-6, "\(trial.seed.name) \(entry.sailor)'s own columns")
                 #expect(abs(loss.gap - (oracle.worth - entry.worth)) < 1e-9)
                 #expect(abs(loss.sum - loss.gap) < 1e-6, "\(trial.seed.name) \(loss.sailor): \(loss.values)")
