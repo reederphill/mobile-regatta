@@ -17,7 +17,8 @@ final class OnlineResults {
     /// Online races you had completed before this one: what its earned line counts from.
     let completedBefore: Int
     /// Told once when the race closes with a result of yours that counts as completed (G6): the device's count goes up
-    /// by one (`CompletedRacesStore`), so Try it lands on an unlocked design. #163 later sets the server's count.
+    /// by one (`CompletedRacesStore`), so Try it lands on an unlocked design, until the server's count replaces it
+    /// (`AppModel.adoptServerCount`, #139).
     @ObservationIgnored var onCompleted: ((RaceID) -> Void)?
     /// Told on every change, so a session rebuilds its sheet even when the race clock has stopped.
     @ObservationIgnored var onChange: (() -> Void)?

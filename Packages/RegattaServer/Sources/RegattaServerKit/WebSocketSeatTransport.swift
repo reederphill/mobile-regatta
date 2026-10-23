@@ -64,7 +64,16 @@ public final class WebSocketSeatTransport: SeatTransport {
     /// The host disconnected the seat.
     public func close() { close(code: .normalClosure, reason: nil) }
 
-    /// Sends a WebSocket close after whatever is queued, then closes the connection. Once only.
+    /// How long a connection the server has closed waits for the peer's own close before it is dropped.
+    public static let closeGrace = TimeAmount.seconds(2)
+
+    /// Sends a WebSocket close after whatever is queued, then shuts the sending side (a FIN after the last frame) and
+    /// drops the connection once the peer has closed too, or after `closeGrace`. Once only.
+    ///
+    /// Not a full close at once: a socket closed with the peer's frames still unread sends a reset, and the reset can
+    /// throw away what the peer hadn't read yet. A race's close was lost that way (CI run 39870999248): the app's
+    /// inputs were in flight as the race closed, its `RaceClosed` never arrived, and it went Home with no results. The
+    /// connection's reader (`serveRace`, `serveService`) drains what still comes in until the peer's close.
     public func close(code: WebSocketErrorCode, reason: String?) {
         let first = state.withLock { state in
             defer { state.closed = true }
@@ -76,7 +85,11 @@ public final class WebSocketSeatTransport: SeatTransport {
         if let reason { data.writeString(reason) }
         let channel = channel
         channel.writeAndFlush(WebSocketFrame(fin: true, opcode: .connectionClose, data: data)).whenComplete { _ in
-            channel.close(promise: nil)
+            let shutDown = channel.eventLoop.makePromise(of: Void.self)
+            // A channel that can't half-close (or is already closed) closes in full, as before.
+            shutDown.futureResult.whenFailure { _ in channel.close(promise: nil) }
+            channel.close(mode: .output, promise: shutDown)
+            channel.eventLoop.scheduleTask(in: Self.closeGrace) { channel.close(promise: nil) }
         }
     }
 }

@@ -5,6 +5,9 @@ import SwiftUI
 struct MenuPageView: View {
     let page: AppModel.Page
     @Bindable var model: AppModel
+    /// Home's online actions: the profile's Sign in and Try again are the lobby area's (#139).
+    var online = HomeOnlineActions()
+    @Environment(\.onlineStatus) private var onlineStatus
 
     var body: some View {
         switch page {
@@ -13,8 +16,7 @@ struct MenuPageView: View {
         case .myBoat:
             MyBoatView(model: model.myBoat)
         case .profile:
-            PlaceholderPage(title: "Profile", systemImage: "person.crop.circle", id: "page-profile",
-                            message: "Your rating, races and badges arrive here.")
+            ProfileView(model: model, status: onlineStatus, online: online)
         case .help:
             HelpPage()
         case .settings:
@@ -122,45 +124,6 @@ struct PracticeSetupView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-    }
-}
-
-/// A page whose content a later ticket builds.
-private struct PlaceholderPage<Extra: View>: View {
-    let title: String
-    let systemImage: String
-    let id: String
-    let message: String
-    let extra: Extra
-
-    init(title: String, systemImage: String, id: String, message: String, @ViewBuilder extra: () -> Extra = { EmptyView() }) {
-        self.title = title
-        self.systemImage = systemImage
-        self.id = id
-        self.message = message
-        self.extra = extra()
-    }
-
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 12) {
-                Image(systemName: systemImage)
-                    .font(.largeTitle)
-                    .foregroundStyle(ChromePalette.tint)
-                    .accessibilityHidden(true)
-                Text(message)
-                    .font(MenuFont.body())
-                    .multilineTextAlignment(.center)
-                extra
-            }
-            .padding(.vertical, 40)
-            .readableColumn()
-            // UI tests check the page was pushed.
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier(id)
-        }
-        .menuBackground()
-        .navigationTitle(title)
     }
 }
 

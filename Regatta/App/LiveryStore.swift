@@ -26,8 +26,8 @@ struct LiveryStore {
 }
 
 /// Online races you've completed (#21, G6: any result but RET; never practice, never a cancelled race): what earned
-/// designs count. Nothing counts them on the device yet: #162/#163 set it from the server's profile, and
-/// `-completedRaces` for UI tests (in their own suite only).
+/// designs count. The server's profile sets it (`AppModel.adoptServerCount`, #139); an online race's close adds one
+/// meanwhile (#133), and `-completedRaces` sets it for UI tests (in their own suite only).
 struct CompletedRacesStore {
     let defaults: UserDefaults
     static let key = "completedOnlineRaces"

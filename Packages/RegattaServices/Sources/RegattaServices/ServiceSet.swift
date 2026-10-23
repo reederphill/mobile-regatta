@@ -103,6 +103,9 @@ public enum FakeServiceScenario: String, CaseIterable, Sendable {
     case rejoinable
     /// As `joinable`, but the race server never answers after fleet lock (#141).
     case raceGone = "race-gone"
+    /// As `joinable`, with an established player's profile (#139): 32 completed races, 4 wins, 1586 with no badge,
+    /// the first earned design earned and the next at 50 ("32 / 50 races").
+    case profileEstablished = "profile-established"
 
     /// When the `suspended` scenario's suspension ends, in seconds since the epoch: noon UTC on 14 October 2037.
     public static let suspendedUntil: Int64 = 2_139_134_400
@@ -128,7 +131,7 @@ public enum FakeServiceScenario: String, CaseIterable, Sendable {
         case .queued, .suspended, .suspendedPermanent, .cooldown, .cannotRace, .updateRequired, .multiplayerRestricted,
              .termsSaveFailed, .sessionFailed, .unreachable, .connecting:
             return []
-        case .joinable, .rejoinable, .raceGone, .signedOut, .underage, .communicationRestricted, .offline, .cancelledRace, .onlineResults,
+        case .joinable, .rejoinable, .raceGone, .profileEstablished, .signedOut, .underage, .communicationRestricted, .offline, .cancelledRace, .onlineResults,
              .onlineResultsUnrated, .termsBump:
             return [queued(1, 40), queued(3, 25), queued(4, 8), queued(4, 0), .fleetLocked, .idle]
         }
@@ -218,6 +221,31 @@ public enum FakeServiceScenario: String, CaseIterable, Sendable {
 
         let services: ServiceSet
 
+        /// The scenario's rating: an established 1586 for `profile-established`, else a new player's 1500, provisional.
+        static func rating(_ scenario: FakeServiceScenario) -> Rating {
+            scenario == .profileEstablished ? Rating(value: 1586, isProvisional: false) : Rating(value: 1500, isProvisional: true)
+        }
+
+        /// The profile the server keeps for the scenario's player (#139), built for every scenario: the profile
+        /// service gives it only while Game Center has her (`ScriptedProfileService`'s identity), so a signed-out
+        /// scenario's sign-in brings it in. A new player's (0 races, 0 wins, "0 / 10 races") but for
+        /// `profile-established`'s, and the suspended ones carry the queue's suspension.
+        static func profile(_ scenario: FakeServiceScenario, player: GameCenterPlayer) -> Profile {
+            let earned10 = EarnedMilestone(design: DesignID("skiff-earned-10"), completedRaces: 10)
+            let earned50 = EarnedMilestone(design: DesignID("skiff-earned-50"), completedRaces: 50)
+            let established = scenario == .profileEstablished
+            let suspension: RacingSuspension? = switch scenario {
+            case .suspended: RacingSuspension(until: FakeServiceScenario.suspendedUntil)
+            case .suspendedPermanent: RacingSuspension(until: nil)
+            default: nil
+            }
+            return Profile(
+                gamePlayerID: player.gamePlayerID, nickname: player.alias, rating: rating(scenario),
+                completedRaces: established ? 32 : 0, wins: established ? 4 : 0, suspension: suspension,
+                progress: established ? EarnedProgress(earned: [earned10.design], next: earned50) : EarnedProgress(earned: [], next: earned10),
+                livery: livery)
+        }
+
         static let player = GameCenterPlayer(gamePlayerID: GamePlayerID("G:fake-1"), alias: "Sailor")
         static let other = GamePlayerID("G:fake-2")
         static let terms = TermsVersion(1)
@@ -285,8 +313,9 @@ public enum FakeServiceScenario: String, CaseIterable, Sendable {
             default: raceSession = ScriptedRaceSessionService(RaceSessionScenario(handOff: handOff))
             }
 
-            let me = LobbyAuthor(gamePlayerID: player.gamePlayerID, nickname: player.alias,
-                                 rating: Rating(value: 1500, isProvisional: true), chip: Self.chip)
+            let profile = ScriptedProfileService(
+                ProfileScenario(profile: Self.profile(scenario, player: player), catalogue: Self.catalogue), signedInWith: identity)
+            let me = LobbyAuthor(gamePlayerID: player.gamePlayerID, nickname: player.alias, rating: Self.rating(scenario), chip: Self.chip)
             let access: LobbyAccess = !signedIn ? .closed(.notSignedIn) : !player.canChat ? .closed(.communicationRestricted)
                 : scenario == .termsBump ? .closed(.termsNotAccepted) : .open
             let lobby = ScriptedLobbyService(LobbyScenario(
@@ -301,12 +330,6 @@ public enum FakeServiceScenario: String, CaseIterable, Sendable {
                     seat == 0 ? .player : scenario.raceBotSeats.contains(seat) ? .bot : .human(GamePlayerID("G:fake-\(seat + 1)"))
                 }]))
 
-            let profile = ScriptedProfileService(ProfileScenario(
-                profile: signedIn ? Profile(
-                    gamePlayerID: player.gamePlayerID, nickname: player.alias, rating: me.rating, completedRaces: 0, wins: 0, suspension: nil,
-                    progress: EarnedProgress(earned: [], next: EarnedMilestone(design: DesignID("skiff-earned-10"), completedRaces: 10)),
-                    livery: Self.livery) : nil,
-                catalogue: Self.catalogue))
             let isOnline = scenario != .offline
             let store = ScriptedStoreService(StoreScenario(
                 products: [StoreProduct(id: ProductID("com.phillreeder.regatta.skiff.chevron-sail"), design: DesignID("skiff-chevron-sail"),

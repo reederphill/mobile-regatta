@@ -41,7 +41,7 @@ struct RootView: View {
             case .livery: LiveryGalleryView()
             case .briefing(let fixture): BriefingGalleryView(fixture: fixture)
             case .briefingLocked: BriefingGalleryView(fixture: nil)
-            case .practiceSetup, .pauseMenu, .myBoat, .help, .queueBar, .rejoin, .lastRaceRating:
+            case .practiceSetup, .pauseMenu, .myBoat, .help, .queueBar, .rejoin, .lastRaceRating, .profile:
                 MenuGalleryView(gallery: fixtureGallery, model: model)
             case .results(let stage, let rivalSkill): ResultsGalleryView(stage: stage, rivalSkill: rivalSkill)
             }
@@ -218,6 +218,7 @@ struct RootView: View {
                 if model.sheet == .terms { agreeToTerms() }
             case .settings: model.path = [.settings]
             case .practiceSetup: model.path = [.practiceSetup]
+            case .profile: model.path = [.profile]
             case .startPractice: model.beginPractice()
             case .ready: model.finishBriefing()
             case .takeover:

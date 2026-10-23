@@ -123,7 +123,7 @@ import RegattaServices
             + "signed-out, underage, communication-restricted, multiplayer-restricted, offline, queued, cancelled-race, "
             + "online-results, online-results-unrated, terms-bump, suspended, suspended-permanent, cooldown, cannot-race, "
             + "update-required, terms-save-failed, session-failed, unreachable, connecting, joinable, joinable-alone, joinable-hold, "
-            + "rejoinable, race-gone"])
+            + "rejoinable, race-gone, profile-established"])
         let missing = parse("-fakeServices", "-autostart")
         #expect(missing.fakeServices == nil && missing.autostart)
         #expect(missing.problems == ["-fakeServices needs a value"])
@@ -218,11 +218,13 @@ import RegattaServices
             == [.raceOnline, .gun, .raceMenu, .raceLeave, .confirmLeave])
         #expect(parse("-tap", "race-online,race,done,race-home,race-again,rejoin,leaderboard,last-race,race-ended").taps
             == [.raceOnline, .race, .done, .raceHome, .raceAgain, .rejoin, .leaderboard, .lastRace, .raceEnded])
+        // The profile page (#139), for the design gate's screenshots.
+        #expect(parse("-fakeServices", "profile-established", "-tap", "profile").taps == [.profile])
         #expect(parse("-fakeServices", "rejoinable", "-raceSeconds", "90").raceSeconds == 90)
         let bad = parse("-tap", "race-online,practice")
         #expect(bad.taps.isEmpty)
         #expect(bad.problems == ["-tap race-online,practice: expected race-online, terms-agree, settings, practice-setup, "
-            + "start-practice, ready, takeover, briefing-leave, home, connection-lost, connection-regained, race, gun, done, "
+            + "profile, start-practice, ready, takeover, briefing-leave, home, connection-lost, connection-regained, race, gun, done, "
             + "race-menu, race-leave, confirm-leave, race-home, race-again, rejoin, leaderboard, last-race, race-ended, "
             + "separated by commas"])
     }
