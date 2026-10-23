@@ -514,9 +514,9 @@ struct BoatCardSheet: View {
             ScrollView {
                 VStack(spacing: 8) {
                     boat
-                    if let card {
+                    if let sailNumber = BoatCardBoat(card: card, isLoading: isLoading, chip: author.chip).sailNumber {
                         // TODO-COPY (#171)
-                        Text(verbatim: "Sail \(card.livery.sailNumber)")
+                        Text(verbatim: "Sail \(sailNumber)")
                             .font(MenuFont.number(.subheadline))
                             .foregroundStyle(.secondary)
                             .accessibilityIdentifier("boatCard-sail")
@@ -598,19 +598,45 @@ struct BoatCardSheet: View {
         }
     }
 
-    /// Her boat: the render once the card answers, a spinner until then, her chip if it gives none.
+    /// Her boat: a spinner until the card answers, then its render; the plain stand-in if it gives none.
     @ViewBuilder private var boat: some View {
         Group {
-            if let card {
-                LiveryRenderView(livery: card.livery)
-            } else if isLoading {
-                ProgressView()
-            } else {
-                LiveryChipView(chip: author.chip, diameter: 72)
+            switch BoatCardBoat(card: card, isLoading: isLoading, chip: author.chip) {
+            case .loading: ProgressView().accessibilityIdentifier("boatCard-loading")
+            case .render(let livery), .standIn(let livery): LiveryRenderView(livery: livery)
             }
         }
         .frame(height: LiveryRenderView.defaultSize.height)
         .accessibilityIdentifier("boatCard-render")
+    }
+}
+
+/// What the boat card draws for her boat (#142, T9): a spinner while the card is read, her current livery with its
+/// sail number from the card, or, when the lobby gives no card, a plain boat in her chip's colours with no number.
+enum BoatCardBoat: Equatable {
+    case loading
+    case render(Livery)
+    case standIn(Livery)
+
+    init(card: BoatCard?, isLoading: Bool, chip: LiveryChip) {
+        if let card {
+            self = .render(card.livery)
+        } else if isLoading {
+            self = .loading
+        } else {
+            self = .standIn(Self.plain(chip))
+        }
+    }
+
+    /// The plain design (an id the catalogue doesn't have draws plain, deck and sail from the first two colours) and
+    /// no sail number.
+    static func plain(_ chip: LiveryChip) -> Livery {
+        Livery(design: DesignID("lobby-stand-in"), colours: [chip.deck, chip.sail], sailNumber: 0)
+    }
+
+    /// The sail number line: only from the card.
+    var sailNumber: Int? {
+        if case .render(let livery) = self { livery.sailNumber } else { nil }
     }
 }
 

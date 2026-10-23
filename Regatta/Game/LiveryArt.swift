@@ -225,7 +225,8 @@ enum LiveryArt {
             cg.addPath(panel)
             cg.fillPath()
         }
-        drawNumber(look.sailNumber, in: numberFrame(g), ink: UIColor(rgb: look.numberInk), cg: cg)
+        // No number on a look that has none (0, never a sail number): the boat card's plain stand-in (#142).
+        if look.sailNumber > 0 { drawNumber(look.sailNumber, in: numberFrame(g), ink: UIColor(rgb: look.numberInk), cg: cg) }
         cg.restoreGState()
         // A dark hairline round the sail, so a sail in the deck's colour doesn't merge into the hull.
         let edge = ChartPalette.markEdge.uiColor.cgColor
