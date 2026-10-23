@@ -122,8 +122,8 @@ public struct PlayerStore: Sendable {
 
 // MARK: - Sessions
 
-/// What Game Center reported about the player when the session began (#34). Client-asserted until #158's App
-/// Attest assertion covers the request that carries them (TODO(#158)).
+/// What Game Center reported about the player when the session began (#34). The client sends them; the server trusts
+/// them only on a connection whose App Attest proof binds the session call that carries them (#158, ADR 0014).
 public struct SessionRestrictions: Sendable, Equatable {
     public var isUnderage: Bool
     public var isPersonalizedCommunicationRestricted: Bool

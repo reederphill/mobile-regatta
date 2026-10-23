@@ -273,6 +273,10 @@ _Avoid_: finished race (when DSQ and OCS are meant too)
 What hands a player one seat in one online race: the race, the seat and an expiry, signed by the server. The client sends it, unread, to join.
 _Avoid_: ticket, invite, session key
 
+**Attested connection**:
+A service connection whose `Hello` carried an App Attest proof the server verified, bound to the player its session call names. Only an attested connection may queue, chat or race; any other keeps its profile, terms and deletion and sees "Can't race online right now". Race connections carry no proof: their race token was minted for an attested one.
+_Avoid_: verified device, trusted client
+
 **Race registry**:
 The server's record of every online race it starts: running until it closes or is cancelled, with the data files it names at race start. A race still running when the server starts is an orphan of a crash and is cancelled.
 _Avoid_: race table, lobby
