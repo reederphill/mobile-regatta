@@ -107,10 +107,11 @@ final class RuleCueLayer: SKNode {
         CGPoint(x: CGFloat(v.x) * ppm, y: CGFloat(v.y) * ppm)
     }
 
-    /// Draws the cues over `world` for a camera at scale `px` (scene points per screen point) turned `rotation`.
+    /// Draws the cues over `world` for a camera at scale `px` (scene points per screen point) turned `rotation`, its
+    /// screen-up squashed to `squash` by the tilt (#597): the badges stand upright and unsquashed on screen.
     /// `served`: your last served turn's flash (#489), lighting a `tackAndGybe` turn's marks for a moment.
     func update(_ world: RenderWorld, calls: RuleCallLines, served: ServedTurnFlash = ServedTurnFlash(), style: BoatStyle,
-                px: CGFloat, rotation: CGFloat) {
+                px: CGFloat, rotation: CGFloat, squash: CGFloat = 1) {
         let me = world.myBoatIndex
         let ghost = world.isGhost(ofSeat: me)
         glows = GlowSelection.glows(keepClear: world.frame.keepClear, positions: world.boats.map(\.position),
@@ -118,11 +119,12 @@ final class RuleCueLayer: SKNode {
                                     fullHulls: style.glowFullHulls, hullLength: world.boatClass.hull.length)
         let active = ghost ? [] : calls.active(at: world.time, seconds: style.ruleCallLineSeconds,
                                                fadeSeconds: style.ruleCallFadeSeconds)
-        updateLines(world, active: active, px: px, rotation: rotation)
+        updateLines(world, active: active, px: px, rotation: rotation, squash: squash)
         updateArc(world, served: served, style: style, px: px, rotation: rotation, ghost: ghost)
     }
 
-    private func updateLines(_ world: RenderWorld, active: [RuleCallLines.Line], px: CGFloat, rotation: CGFloat) {
+    private func updateLines(_ world: RenderWorld, active: [RuleCallLines.Line], px: CGFloat, rotation: CGFloat,
+                             squash: CGFloat) {
         for (i, line) in lines.enumerated() {
             let badge = badges[i]
             guard i < active.count, world.boats.indices.contains(active[i].offender),
@@ -151,7 +153,9 @@ final class RuleCueLayer: SKNode {
             for node in [badge.plate, badge.label] as [SKNode] {
                 node.position = mid
                 node.zRotation = rotation
-                node.setScale(px)
+                // Turned with the camera, the squash meets the badge unturned: undone by its own height.
+                node.xScale = px
+                node.yScale = px / max(squash, 1e-3)
                 node.alpha = CGFloat(call.alpha)
                 node.isHidden = false
             }

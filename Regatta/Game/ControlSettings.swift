@@ -15,6 +15,8 @@ final class ControlSettings {
     /// The pinch multiplier on every shot's zoom (#322): the scene sets it as you pinch and `savesZoomMultiplier`
     /// keeps it.
     var zoomMultiplier: Double
+    /// The race scene's tilt, degrees off vertical (#597): the scene eases to it each frame.
+    var tilt: Double
     /// Whether the laylines are drawn (#122): on by default.
     var showsLaylines: Bool
     /// Whether the ladder lines are drawn (#122): off by default.
@@ -29,33 +31,36 @@ final class ControlSettings {
     var showsHints: Bool
 
     init(steering: DeviceSettings.Steering = .halves, camera: DeviceSettings.Camera = .courseUp, autoZoom: Bool = true,
-         zoomMultiplier: Double = 1, showsLaylines: Bool = true, showsLadderLines: Bool = false,
+         zoomMultiplier: Double = 1, tilt: Double = DeviceSettings.defaultTilt, showsLaylines: Bool = true, showsLadderLines: Bool = false,
          showsLeaderboard: Bool = true, showsHints: Bool = true) {
         self.steering = steering
         self.camera = camera
         self.autoZoom = autoZoom
         self.zoomMultiplier = zoomMultiplier
+        self.tilt = DeviceSettings.clampedTilt(tilt)
         self.showsLaylines = showsLaylines
         self.showsLadderLines = showsLadderLines
         self.showsLeaderboard = showsLeaderboard
         self.showsHints = showsHints
     }
 
-    /// The device's controls from `settings`, with a test launch's `-scheme` and `-camera` over them.
+    /// The device's controls from `settings`, with a test launch's `-scheme`, `-camera` and `-tilt` over them.
     convenience init(_ settings: DeviceSettings, launchOptions: LaunchOptions) {
         self.init(steering: Self.steering(settings.steering, override: launchOptions.steeringScheme),
                   camera: Self.camera(settings.camera, override: launchOptions.camera),
                   autoZoom: settings.autoZoom, zoomMultiplier: settings.zoomMultiplier,
+                  tilt: Self.tilt(settings.tilt, launchOptions: launchOptions),
                   showsLaylines: settings.laylines, showsLadderLines: settings.ladderLines,
                   showsLeaderboard: settings.liveLeaderboard, showsHints: settings.hints)
     }
 
-    /// Takes `settings`, with a test launch's `-scheme` and `-camera` over them: once per Settings change.
+    /// Takes `settings`, with a test launch's `-scheme`, `-camera` and `-tilt` over them: once per Settings change.
     func update(_ settings: DeviceSettings, launchOptions: LaunchOptions) {
         steering = Self.steering(settings.steering, override: launchOptions.steeringScheme)
         camera = Self.camera(settings.camera, override: launchOptions.camera)
         autoZoom = settings.autoZoom
         zoomMultiplier = settings.zoomMultiplier
+        tilt = Self.tilt(settings.tilt, launchOptions: launchOptions)
         showsLaylines = settings.laylines
         showsLadderLines = settings.ladderLines
         showsLeaderboard = settings.liveLeaderboard
@@ -76,6 +81,14 @@ final class ControlSettings {
         case .boat?: .boatUp
         case nil: stored
         }
+    }
+
+    /// The tilt a race draws at (#597): `-tilt`'s when a test launch sets one, the default for a render fixture (so
+    /// references stay put whatever the device's setting), else Settings', held in `DeviceSettings.tiltRange`.
+    static func tilt(_ stored: Double, launchOptions: LaunchOptions) -> Double {
+        if let override = launchOptions.tilt { return DeviceSettings.clampedTilt(override) }
+        if launchOptions.fixture != nil || !launchOptions.fixtureSequence.isEmpty { return DeviceSettings.defaultTilt }
+        return DeviceSettings.clampedTilt(stored)
     }
 
     /// The scheme a race steers with: `-scheme`'s when a test launch sets one, else Settings'.

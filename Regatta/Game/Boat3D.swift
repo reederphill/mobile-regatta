@@ -23,13 +23,13 @@ final class Fleet3D {
     private let committeePosition: CGPoint
     private let course: CourseLayout
     private let ppm: CGFloat
-    private let tilt: Double
+    /// The tilt the camera is pitched to, radians off vertical.
+    private var tilt: Double = .nan
 
     init(boats roster: [Boat], colors: [UIColor], boatClass: BoatClass, course: CourseLayout, pointsPerMeter ppm: CGFloat,
          tiltDegrees: Double, sceneSize: CGSize) {
         self.course = course
         self.ppm = ppm
-        tilt = tiltDegrees * .pi / 180
         node = SK3DNode(viewportSize: sceneSize)
         node.scnScene = scene
         node.autoenablesDefaultLighting = false
@@ -39,10 +39,6 @@ final class Fleet3D {
         camera.zNear = 1
         camera.zFar = 40_000
         cameraNode.camera = camera
-        // Pitched down from the horizontal by 90° − tilt: a ground point (x, 0, −y) lands on screen at (x, y·cos tilt).
-        cameraNode.eulerAngles = SCNVector3(-(Float.pi / 2 - Float(tilt)), 0, 0)
-        let back: Float = 10_000
-        cameraNode.position = SCNVector3(0, back * Float(cos(tilt)), back * Float(sin(tilt)))
         scene.rootNode.addChildNode(cameraNode)
         node.pointOfView = cameraNode
 
@@ -98,7 +94,18 @@ final class Fleet3D {
         }
         buoys = ChartMarks.buoys(of: course).map { buoy($0.mark, isPin: false) }
         buoys.append(buoy(course.startLine.pin, isPin: true))
+        pitch(toDegrees: tiltDegrees)
+    }
 
+    /// Pitches the camera down from the horizontal by 90° − tilt: a ground point (x, 0, −y) lands on screen at
+    /// (x, y·cos tilt), where the squashed flat world draws it (`ChartGeometry.obliqueSquash`).
+    private func pitch(toDegrees degrees: Double) {
+        let radians = degrees * .pi / 180
+        guard radians != tilt else { return }
+        tilt = radians
+        cameraNode.eulerAngles = SCNVector3(-(Float.pi / 2 - Float(radians)), 0, 0)
+        let back: Float = 10_000
+        cameraNode.position = SCNVector3(0, back * Float(cos(radians)), back * Float(sin(radians)))
     }
 
     static func lambert(_ color: UIColor) -> SCNMaterial {
@@ -109,9 +116,10 @@ final class Fleet3D {
     }
 
     /// Places everything for the camera of this frame: `center` (world points), `rotation` (`CameraRig.cameraRotation`)
-    /// and `cameraScale`.
+    /// `cameraScale` and `tiltDegrees`.
     func update(_ world: RenderWorld, poses: [BoatPose], style: BoatStyle, center: CGPoint, rotation: CGFloat,
-                cameraScale: CGFloat, sceneSize: CGSize, time: Double, dt: Double, settled: Bool) {
+                cameraScale: CGFloat, tiltDegrees: Double, sceneSize: CGSize, time: Double, dt: Double, settled: Bool) {
+        pitch(toDegrees: tiltDegrees)
         node.viewportSize = sceneSize
         camera.orthographicScale = Double(sceneSize.height / 2 * cameraScale)
         let rho = -rotation

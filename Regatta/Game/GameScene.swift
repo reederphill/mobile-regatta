@@ -96,14 +96,24 @@ final class GameScene: SKScene {
     private(set) var pace = PaceMeter()
 
     private let world = SKNode()
-    /// #596 prototype: the oblique projection. Scene ← `tiltNode` (y squashed by `cos(tilt)`) ← `rotor` (the camera's
-    /// turn) ← `world` (at −centre). The camera stays at the origin, unturned, carrying only the zoom.
+    /// The oblique projection (#596, #597). Scene ← `tiltNode` (y squashed by `cos(tilt)`) ← `rotor` (the camera's
+    /// turn) ← `world` (at −centre). The camera stays at the origin, unturned, carrying only the zoom, so boat-up stays
+    /// boat-up: the squash comes after the camera's turn. Whatever a camera child places against a world point takes
+    /// `screenPoint(of:)`.
     private let tiltNode = SKNode()
     private let rotor = SKNode()
-    /// Degrees off vertical (`-tilt`); 0 draws today's flat look.
-    private let tiltDegrees = LaunchOptions.current.tilt
-    private var isTilted: Bool { tiltDegrees > 0 }
-    /// The fleet, buoys and committee boat standing up (#596): nil when flat.
+    /// The tilt drawn now, degrees off vertical (#597): eased to `targetTilt` each frame, snapped in a settled one.
+    private(set) var shownTilt: Double?
+    /// How fast the shown tilt closes on the setting, per second: about 0.5 s to settle, like a camera change.
+    static let tiltEaseRate = 6.0
+    /// The device's tilt (`ControlSettings.tilt`, `-tilt` over it), read every frame.
+    private var targetTilt: Double {
+        session?.controls.tilt ?? ControlSettings.tilt(DeviceSettings.defaultTilt, launchOptions: .current)
+    }
+    private var tiltDegrees: Double { shownTilt ?? targetTilt }
+    /// Screen-up's share of its length at the tilt drawn (`ChartGeometry.obliqueSquash`).
+    var squash: CGFloat { ChartGeometry.obliqueSquash(tiltDegrees: tiltDegrees) }
+    /// The fleet, buoys and committee boat standing up (#596).
     private var fleet3D: Fleet3D?
     /// The land's extruded rim (#596), a child of `tiltNode`.
     private let landRim = SKShapeNode()
@@ -200,7 +210,7 @@ final class GameScene: SKScene {
         let layers: [(SKNode, String)] = [(water, "water"), (effectsLayer, "effects"), (courseLayer, "course"),
                                           (cueLayer, "cues"), (boatLayer, "fleet")]
         for (layer, name) in layers { layer.name = name }
-        tiltNode.yScale = ChartGeometry.obliqueSquash(tiltDegrees: tiltDegrees)
+        tiltNode.yScale = squash
         rotor.addChild(world)
         tiltNode.addChild(rotor)
         addChild(tiltNode)
@@ -216,9 +226,8 @@ final class GameScene: SKScene {
         buildTilt()
     }
 
-    /// #596 prototype: the standing fleet, the land's rim and the glint, only when tilted.
+    /// The standing fleet, the land's rim and the glint (#596).
     private func buildTilt() {
-        guard isTilted else { return }
         let frame = driver.currentFrame
         let fleet = Fleet3D(boats: frame.boats, colors: frame.boats.map { Palette.boat($0.colorIndex) },
                             boatClass: driver.boatClass, course: driver.course, pointsPerMeter: ppm,
@@ -429,6 +438,7 @@ final class GameScene: SKScene {
         cameraWorld.area = chart.framing
         rig.advance(cameraWorld, sceneSize: size, dt: dt, settled: settled)
         // #596: the camera stays at the origin, unturned; the world moves and turns under the squash instead.
+        easeTilt(dt: dt, settled: settled)
         cam.position = .zero
         cam.setScale(rig.cameraScale)
         cam.zRotation = 0
@@ -436,7 +446,6 @@ final class GameScene: SKScene {
         rotor.zRotation = -rig.cameraRotation
         pointShimmer(world)
 
-        let squash = ChartGeometry.obliqueSquash(tiltDegrees: tiltDegrees)
         let view = WaterView(center: rig.center, sceneSize: CGSize(width: size.width, height: size.height / squash),
                              scale: rig.cameraScale, rotation: rig.cameraRotation)
         water.hidesRipple = drawsCuesOnly
@@ -446,7 +455,7 @@ final class GameScene: SKScene {
         chart.update(status: world.me.status, legIndex: world.me.legIndex, cameraScale: rig.cameraScale)
         if let fleet3D {
             fleet3D.update(world, poses: poses, style: boatStyle, center: rig.center, rotation: rig.cameraRotation,
-                           cameraScale: rig.cameraScale, sceneSize: size, time: world.time, dt: dt, settled: settled)
+                           cameraScale: rig.cameraScale, tiltDegrees: tiltDegrees, sceneSize: size, time: world.time, dt: dt, settled: settled)
             updateLandRim()
             glint?.size = size
         }
@@ -457,7 +466,7 @@ final class GameScene: SKScene {
             let mine = world.myBoatIndex
             servedTurn.follow(world.frame.owed.indices.contains(mine) ? world.frame.owed[mine] : nil)
             ruleCues?.update(world, calls: ruleCalls, served: servedTurn, style: boatStyle, px: cam.xScale,
-                             rotation: rig.cameraRotation)
+                             rotation: rig.cameraRotation, squash: squash)
         } else {
             ruleCues?.reset()
         }
@@ -467,6 +476,33 @@ final class GameScene: SKScene {
             node.setRightOfWayGlow(seat < glows.count ? glows[seat] : nil, style: boatStyle)
         }
     }
+
+    /// Eases the shown tilt to the device's (#597), at `tiltEaseRate`; a settled frame snaps to it.
+    private func easeTilt(dt: Double, settled: Bool) {
+        let target = targetTilt
+        if settled || shownTilt == nil {
+            shownTilt = target
+        } else if let shown = shownTilt {
+            let next = shown + (target - shown) * min(1, dt * Self.tiltEaseRate)
+            shownTilt = abs(target - next) < 0.01 ? target : next
+        }
+        tiltNode.yScale = squash
+    }
+
+    /// Where world point `world` (metres) draws on screen this frame, in scene points from the view's bottom left:
+    /// the rig's flat projection with screen-up squashed by the tilt (`ChartGeometry.obliqueSquash`) about the view's
+    /// centre (#597). Every camera child placed against a world point reads it.
+    func screenPoint(of world: Vec2) -> CGPoint {
+        let flat = rig.project(world, sceneSize: size)
+        let centreY = size.height / 2
+        return CGPoint(x: flat.x, y: centreY + (flat.y - centreY) * squash)
+    }
+
+    /// The tilt drawn, whole degrees, for UI tests (`CueProbe`): e.g. `tilt=45`.
+    var tiltSummary: String { "tilt=\(Int(tiltDegrees.rounded()))" }
+
+    /// The edge arrow's position on the camera and whether it shows, for tests.
+    var edgeArrowPlacement: CGPoint? { edgeArrow.isHidden ? nil : edgeArrow.position }
 
     /// Points the ribbons' shimmer at the water this frame (`TurbulenceTrailLayer.setView`): a drawable pixel's world
     /// metres through the camera as just set.
@@ -541,13 +577,12 @@ final class GameScene: SKScene {
 
     /// The showing hint's leader line (#129), from under the notice pill to its target.
     private func updateHintLeader(_ world: RenderWorld) {
-        let framing = rig
         let sceneSize = size
         let top = (view?.safeAreaInsets.top ?? 0)
             + HUDView.noticeTop(showsLeaderboard: session?.controls.showsLeaderboard ?? false) + HintLeader.pillHeight
         hintLeader.update(notice: session?.notice, world: world, sceneSize: sceneSize, anchorFromTop: top,
-                          visible: framing.visibleInsets.visibleRect(sceneSize: sceneSize),
-                          project: { framing.project($0, sceneSize: sceneSize) })
+                          visible: rig.visibleInsets.visibleRect(sceneSize: sceneSize),
+                          project: { [unowned self] in screenPoint(of: $0) })
     }
 
     /// Your laylines, from the formula a bot sees them by (`Laylines`, `SeatView.laylines`): dashed.
@@ -570,7 +605,8 @@ final class GameScene: SKScene {
         let leg = course.legSailed(status: me.status, legIndex: me.legIndex)
         let centre = Vec2(Double(rig.center.x / ppm), Double(rig.center.y / ppm))
         ladderScale = cam.xScale
-        let radius = Double(hypot(size.width, size.height) * cam.xScale / ppm)
+        // The squash shows more water up the screen: the lines reach past that too.
+        let radius = Double(hypot(size.width, size.height / squash) * cam.xScale / ppm)
         let path = CGMutablePath()
         for line in LadderCue.segments(for: leg, in: course, centre: centre, radius: radius,
                                        spacing: boatStyle.ladderSpacingMetres) {
@@ -645,12 +681,11 @@ final class GameScene: SKScene {
     /// The next-mark edge arrow (`EdgeArrow`), on the camera: shown only while what you sail for is off screen.
     private func updateEdgeArrow(_ world: RenderWorld) {
         let me = world.me
-        let framing = rig
         let sceneSize = size
         let targets = EdgeArrow.targets(status: me.status, legIndex: me.legIndex, course: world.course)
         guard !world.isGhost(ofSeat: world.myBoatIndex),
-              let placed = EdgeArrow.placement(targets: targets, project: { framing.project($0, sceneSize: sceneSize) },
-                                               visible: framing.visibleInsets.visibleRect(sceneSize: sceneSize)) else {
+              let placed = EdgeArrow.placement(targets: targets, project: { [unowned self] in screenPoint(of: $0) },
+                                               visible: rig.visibleInsets.visibleRect(sceneSize: sceneSize)) else {
             edgeArrow.isHidden = true
             return
         }

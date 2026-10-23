@@ -205,7 +205,8 @@ import Testing
             let me = world.me
             let rig = scene.rig
             let targets = EdgeArrow.targets(status: me.status, legIndex: me.legIndex, course: world.course)
-            let placed = try #require(EdgeArrow.placement(targets: targets, project: { rig.project($0, sceneSize: size) },
+            // The squashed projection the scene places camera children by (#597, `screenPoint(of:)`).
+            let placed = try #require(EdgeArrow.placement(targets: targets, project: { scene.screenPoint(of: $0) },
                                                           visible: rig.visibleInsets.visibleRect(sceneSize: size)))
             #expect(rig.visibleInsets == EdgeArrow.insets(safeArea: (0, 0), showsLeaderboard: session.controls.showsLeaderboard,
                                                           style: scene.boatStyle), "\(name): the rig reads the HUD's insets")
