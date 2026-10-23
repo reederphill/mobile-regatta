@@ -41,6 +41,10 @@ struct LobbyView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: fills ? .infinity : nil, alignment: .topLeading)
         .background(ChromePalette.surface, in: .rect(cornerRadius: 16))
+        // A second child, hidden from VoiceOver: SwiftUI folds a container whose only child is a container into one
+        // element under the outer identifier, which hid the hidden panel's `lobby-hidden` and the unreachable
+        // panel's `lobby-unreachable` from UI tests (`LobbyAccessibilityTests`).
+        .background { Color.clear.accessibilityHidden(true) }
         // UI tests check it fits the window.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("lobby-panel")
@@ -528,7 +532,8 @@ struct BoatCardSheet: View {
                         Text(verbatim: "\(rating.value)")
                             .font(MenuFont.number(.title3))
                             .accessibilityLabel("Rating")
-                            .accessibilityValue("\(rating.value)")
+                            // Verbatim: a string literal here is a localized key, and its number would read "1,610".
+                            .accessibilityValue(Text(verbatim: "\(rating.value)"))
                             .accessibilityIdentifier("boatCard-rating")
                         if rating.isProvisional {
                             ProvisionalBadge().accessibilityIdentifier("boatCard-provisional")
