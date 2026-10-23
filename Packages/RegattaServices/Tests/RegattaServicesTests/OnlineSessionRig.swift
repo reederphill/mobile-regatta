@@ -162,6 +162,10 @@ final class FakeService: Sendable {
         var saveLivery: ProfileResult?
     }
 
+    /// Each `Hello`'s attestation, and each session call's player (#158).
+    let hellos = Recorder<VersionedPayload>()
+    let sessionPlayers = Recorder<WirePlayer>()
+
     private struct State {
         var script = Script()
         var links: [FakeLink] = []
@@ -228,14 +232,16 @@ final class FakeService: Sendable {
 
     fileprivate func handle(_ message: Message, from link: FakeLink) {
         switch message {
-        case .hello:
+        case .hello(let hello):
             events.add(.hello)
+            hellos.add(hello.attestation)
             if let answer = state.withLock({ $0.script.hello }) { link.deliver(answer) }
         case .sessionRequest(let request):
             let result: SessionResult
             switch request.call {
             case .signIn(let signature, let player):
                 events.add(.signIn(team: signature.teamPlayerID))
+                sessionPlayers.add(player)
                 result = state.withLock { state in
                     if let wrong = state.script.answersSessionCallsWith { return wrong }
                     if !state.script.signIn.isEmpty { return state.script.signIn.removeFirst() }
@@ -244,6 +250,7 @@ final class FakeService: Sendable {
                 }
             case .resume(let token, let player):
                 events.add(.resume(token))
+                sessionPlayers.add(player)
                 result = state.withLock { state in
                     if let wrong = state.script.answersSessionCallsWith { return wrong }
                     if !state.script.resume.isEmpty { return state.script.resume.removeFirst() }
@@ -443,7 +450,7 @@ struct SessionRig: Sendable {
     let keptAtLog = Recorder<[String: [UInt8]]>()
 
     init(player: DevicePlayer? = SessionRig.wren, afterSignIn: DevicePlayer? = nil, tokens: [String: [UInt8]] = [:],
-         isOnline: Bool = true, isActive: Bool = true, signatureNeverComes: Bool = false) {
+         isOnline: Bool = true, isActive: Bool = true, signatureNeverComes: Bool = false, attester: ConnectionAttester? = nil) {
         let (server, sleeper, logs, kept) = (server, sleeper, logs, keptAtLog)
         let store = InMemorySessionTokenStore(tokens)
         self.tokens = store
@@ -464,7 +471,7 @@ struct SessionRig: Sendable {
         session = OnlineSession(
             OnlineSession.Dependencies(
                 connect: { try server.connect() }, device: device, tokens: store, sleep: { try await sleeper.sleep($0) },
-                jitter: { 0 }, clientBuild: "test",
+                jitter: { 0 }, clientBuild: "test", attester: attester,
                 log: { event in
                     kept.add(store.all)
                     logs.add(event)

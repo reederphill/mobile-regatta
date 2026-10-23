@@ -56,7 +56,8 @@ public final class HandshakenLink: SessionLink {
 }
 
 public enum HandshakeOutcome: Sendable {
-    case accepted(HandshakenLink)
+    /// `attestation`: what the server made of `Hello.attestation` (#158).
+    case accepted(HandshakenLink, attestation: AttestationStatus)
     /// The server won't serve this build. The link is closed.
     case updateRequired(UpdateRequired.Reason)
     /// No answer, or not one a handshake allows. The link is closed.
@@ -64,10 +65,11 @@ public enum HandshakeOutcome: Sendable {
 }
 
 public enum ServiceHandshake {
-    /// Sends `Hello` on `link` and reads the server's answer.
-    public static func open(_ link: any SessionLink, clientBuild: String) async -> HandshakeOutcome {
+    /// Sends `Hello`, with the App Attest proof `attestation` (#158), on `link` and reads the server's answer.
+    public static func open(_ link: any SessionLink, clientBuild: String, attestation: VersionedPayload = .none) async -> HandshakeOutcome {
         let handshaken = HandshakenLink(link)
-        guard let hello = try? Frame(seq: 1, tick: 0, message: .hello(Hello(clientBuild: clientBuild, files: []))).encoded() else {
+        let message = Message.hello(Hello(clientBuild: clientBuild, files: [], attestation: attestation))
+        guard let hello = try? Frame(seq: 1, tick: 0, message: message).encoded() else {
             link.close()
             return .failed
         }
@@ -77,7 +79,7 @@ public enum ServiceHandshake {
             return .failed
         }
         switch answer {
-        case .helloAck: return .accepted(handshaken)
+        case .helloAck(let ack): return .accepted(handshaken, attestation: ack.attestation)
         case .updateRequired(let update):
             link.close()
             return .updateRequired(update.reason)

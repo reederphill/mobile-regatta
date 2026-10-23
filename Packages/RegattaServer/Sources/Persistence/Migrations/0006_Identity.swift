@@ -2,7 +2,7 @@ extension Migration {
     /// Game Center identity, sessions and the Terms of Use (#145). Players are keyed by the verified teamPlayerID
     /// (the signed field) and carry the gamePlayerID the authenticated client sent, bound 1:1 (unique), and the
     /// last online session time, the retention clock #160 reads (G8). Sessions keep the restrictions Game Center
-    /// reported for them (client-asserted until #158's App Attest covers the request) and slide on use. Terms
+    /// reported for them (bound by the connection's App Attest proof since #158) and slide on use. Terms
     /// acceptances record player, version and time; they go with the player (G8).
     static let identity = Migration(
         version: 6,

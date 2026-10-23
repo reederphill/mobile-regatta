@@ -39,6 +39,10 @@ extension ServiceEndpoint {
     /// default, over the in-memory stores when the accounts are in memory (none otherwise). A deleted player's
     /// leaderboard scores are blocked by `scoreBlocker`: App Store Connect's when the leaderboard's resource id is
     /// configured, unless a test passes one.
+    ///
+    /// App Attest (#158) checks each connection's `Hello` against `config.appAttest` and the App ID
+    /// (`teamID.bundleID`), keeping keys in `appAttestKeys` (memory by default: a dev server; Postgres's outside dev),
+    /// which the retention job purges.
     public static func make(config: ServerConfig, store: any AccountStore, archive: any RaceArchive = InMemoryRaceArchive(),
                             restrictions: any RestrictionStore = InMemoryRestrictionStore(), ratings: (any RatingBook)? = nil,
                             registry: RaceRegistry? = nil, fetcher: (any CertificateFetching)? = nil,
@@ -46,8 +50,13 @@ extension ServiceEndpoint {
                             wordList: ChatWordList? = nil, classifier: (any ToxicityClassifier)? = nil,
                             moderationStore: (any ModerationStore)? = nil, analyticsStore: (any AnalyticsStore)? = nil,
                             liveryStore: (any LiveryStore)? = nil, onlineData: (any OnlineDataStore)? = nil,
-                            scoreBlocker: (any ScoreBlocking)? = nil) throws -> ServiceEndpoint {
+                            scoreBlocker: (any ScoreBlocking)? = nil,
+                            appAttestKeys: (any AppAttestKeyStore)? = nil) throws -> ServiceEndpoint {
         let identity = config.identity
+        try config.appAttest.validate(for: config.environment)
+        let appAttestKeys = appAttestKeys ?? InMemoryAppAttestKeyStore()
+        let attestation = ConnectionAttestation(settings: config.appAttest, teamID: identity.teamID, bundleID: identity.bundleID,
+                                                keys: appAttestKeys)
         let verifier: any GameCenterVerifier
         if let pem = identity.appleRootsPEM {
             let pinned = try GameCenterVerifierConfig.certificates(pem: pem)
@@ -103,7 +112,7 @@ extension ServiceEndpoint {
         // The queue is made below and reads the lobby, which this tells: it reaches the queue late.
         let deletion = online.map { OnlineDataDeletion(store: $0, scores: blocker, beforeErase: { await queueBox.value?.forget($0) }) }
         deletion?.attach(hub)
-        let retention = deletion.map { RetentionJobs(deletion: $0, moderation: moderationStore, lobby: hub) }
+        let retention = deletion.map { RetentionJobs(deletion: $0, moderation: moderationStore, lobby: hub, appAttestKeys: appAttestKeys) }
         let analytics = AnalyticsIngest(settings: config.analytics, store: analyticsStore)
         let measures = ServerMeasures(analytics: analytics, archive: archive, ratings: book, pingInterval: config.roundTripPingInterval)
         let unlocks = EarnedUnlocks(ratings: book, earned: liveries.earned, analytics: analytics)
@@ -150,7 +159,7 @@ extension ServiceEndpoint {
             matchmaker: matchmaker, lifecycle: lifecycle, lobby: hub, analytics: analytics,
             analyticsRetention: AnalyticsRetention(settings: config.analytics, store: analyticsStore), ratings: book,
             moderation: moderation, deletion: deletion, retention: retention, archive: archive,
-            fairPlay: FairPlayJob(store: moderationStore, archive: archive), measures: measures)
+            fairPlay: FairPlayJob(store: moderationStore, archive: archive), measures: measures, attestation: attestation)
     }
 
     /// The lobby's word list (#152, owner 2026-10-11: the offline list always applies). Outside `ENV=dev` it is the

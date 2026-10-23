@@ -9,7 +9,8 @@ import Persistence
 import RegattaServerKit
 
 /// `RegattaServer` (#67): the race server. Configured from the environment (`ServerConfig`); refuses to
-/// start, with exit status 78 (EX_CONFIG) and the reason on stderr, unless `ENV=dev`.
+/// start, with exit status 78 (EX_CONFIG) and the reason on stderr, unless `ENV` is dev, staging or production and the
+/// variables that environment needs are set.
 @main
 enum RegattaServerMain {
     /// Synchronous on purpose. RegattaServerTests links this module (to start the real executable), and at
@@ -31,7 +32,7 @@ enum RegattaServerMain {
         }
         let server: RegattaHTTPServer
         do {
-            let (store, archive, restrictions, ratings, lobby, analytics, liveries, moderation, online) = try await stores(config)
+            let (store, archive, restrictions, ratings, lobby, analytics, liveries, moderation, online, appAttestKeys) = try await stores(config)
             if config.chat.moderationKey == nil {
                 FileHandle.standardOutput.write(Data("RegattaServer: no OPENAI_MODERATION_API_KEY: free text is filtered by the word list alone\n".utf8))
             }
@@ -45,7 +46,8 @@ enum RegattaServerMain {
                                                                                                          moderationStore: moderation,
                                                                                                          analyticsStore: analytics,
                                                                                                          liveryStore: liveries,
-                                                                                                         onlineData: online))
+                                                                                                         onlineData: online,
+                                                                                                         appAttestKeys: appAttestKeys))
         } catch {
             FileHandle.standardError.write(Data("RegattaServer: can't start: \(error)\n".utf8))
             exit(1)
@@ -70,10 +72,11 @@ enum RegattaServerMain {
     private static func stores(_ config: ServerConfig) async throws -> (any AccountStore, any RaceArchive, any RestrictionStore,
                                                                          (any RatingBook)?, (any LobbyStore)?, (any AnalyticsStore)?,
                                                                          (any LiveryStore)?, (any ModerationStore)?,
-                                                                         (any OnlineDataStore)?) {
+                                                                         (any OnlineDataStore)?, any AppAttestKeyStore) {
         guard let configuration = config.identity.database else {
             FileHandle.standardOutput.write(Data("RegattaServer: no REGATTA_DATABASE_URL: accounts and races in memory\n".utf8))
-            return (InMemoryAccountStore(), InMemoryRaceArchive(), InMemoryRestrictionStore(), nil, nil, nil, nil, nil, nil)
+            return (InMemoryAccountStore(), InMemoryRaceArchive(), InMemoryRestrictionStore(), nil, nil, nil, nil, nil, nil,
+                    InMemoryAppAttestKeyStore())
         }
         let database = Database(configuration)
         Task.detached { await database.run() }
@@ -84,6 +87,6 @@ enum RegattaServerMain {
             "RegattaServer: Postgres: migrations applied \(applied), orphaned races cancelled \(orphans.count)\n".utf8))
         return (PostgresAccountStore(database), archive, PlayerRestrictionStore(database), RatingStore(database), LobbyMessageStore(database),
                 AnalyticsEventStore(database), PlayerLiveryStore(database), ModerationRecordStore(database),
-                PlayerDataStore(database))
+                PlayerDataStore(database), PostgresAppAttestKeyStore(database))
     }
 }

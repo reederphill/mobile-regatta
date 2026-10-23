@@ -93,7 +93,7 @@ import Testing
         let endpoint = ServiceEndpoint(
             config: ServiceEndpointConfig(sessionTouchInterval: 3_600),
             sessions: SessionAuthority(store: store, verifier: StubVerifier(), now: { clock.withLock { $0 } }),
-            backends: ServiceBackends(queue: { _ in queue }))
+            backends: ServiceBackends(queue: { _ in queue }), attestation: .devDefault())
         let (_, connection, _) = try await ServiceFixtures.signedIn(endpoint, "gale")
         #expect(await store.lastSession["T:gale"] == start)
         _ = try await RemoteTermsService(connection).accept(TermsVersion(1))
@@ -118,7 +118,7 @@ import Testing
     @Test func openStreamsAreCappedPerConnection() async throws {
         let endpoint = ServiceEndpoint(
             config: ServiceEndpointConfig(maxOpenStreams: 16, maxOpenStreamsBeforeSignIn: 4),
-            sessions: SessionAuthority(store: InMemoryAccountStore(), verifier: StubVerifier()))
+            sessions: SessionAuthority(store: InMemoryAccountStore(), verifier: StubVerifier()), attestation: .devDefault())
         let open = { (id: UInt32) in Message.identityRequest(ServiceRequest(id: id, call: .openStateUpdates)) }
 
         let signedOut = try await InProcessServiceLink.open(endpoint)

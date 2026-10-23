@@ -86,8 +86,8 @@ Packages/RegattaServer/   The race server (#65, #67) and the load client; SwiftN
   RaceHost/RaceHost.swift  actor owning one Race: 30 Hz catch-up scheduler, input buffer, snapshots, events, close
   RaceHost/InputGate.swift the #26 caps over a sliding window, strikes to disconnect; the 1 s stamp limit
   RaceHost/HostIO.swift    the clock and seat transport protocols the host is driven through
-  RegattaServerKit/        the server as a library: config and the ENV=dev gate, race tokens, races, the endpoint
-    ServerConfig.swift       environment variables; dev auth; refuses to start unless ENV=dev
+  RegattaServerKit/        the server as a library: config and the ENV gate, race tokens, races, the endpoint
+    ServerConfig.swift       environment variables; ENV dev, staging or production and what each requires; the App Attest bypass
     RaceToken.swift          the signed race token (race, seat, expiry; HMAC-SHA256) a client joins with
     RaceSession.swift        one race: its RaceHost, wall-clock driver, seats, close; the instant-race fleet
     RaceRegistry.swift       running races by id, and nothing else
@@ -97,6 +97,8 @@ Packages/RegattaServer/   The race server (#65, #67) and the load client; SwiftN
     RegattaHTTPServer.swift  the port: HTTP/1.1, upgraded to a WebSocket at /race or /service
     ServiceEndpoint.swift    one /service connection (#145): handshake, session calls, the Terms gate, pulled streams
     ServiceSessions.swift    sign-in by Game Center signature, session tokens (SHA-256 stored), identity and terms
+    ConnectionAttestation.swift  App Attest per service connection (#158): verify, register or advance, the bypass
+    AppAttestKeys.swift      the App Attest key store: in memory, or Postgres (migration 0018); no player link
     AccountStore.swift       players, sessions and terms acceptances: Postgres, or in memory for dev and tests
     ServiceSetup.swift       the endpoint from the config (Apple or dev verifier), the dev situations, the HTTPS fetch
     AnalyticsIngest.swift    usage analytics (#156): devices' batches by install id, the server's own events, the roll-up and purge
@@ -107,6 +109,7 @@ Packages/RegattaServer/   The race server (#65, #67) and the load client; SwiftN
     FairPlay.swift           fair-play flags (#155): the nightly scan of the window's race logs, flags to the admin queue
     Measures.swift           measures and balance queries (#157): queue, fleet, briefing, round-trip and Race again events; queries over logs
   GameCenterIdentity/      Game Center identity verification: Apple's chain, RSA PKCS#1 v1.5 over the signed payload
+  AppAttest/               App Attest verification (#158): own CBOR decoder, Apple's embedded root, attestations, assertions
   RegattaServer/           the `RegattaServer` executable
   RegattaDevAPI/           the dev endpoints' JSON, shared by the server and the load client
   Persistence/             the server's Postgres (#144, ADR 0009), used by the server when REGATTA_DATABASE_URL is set
@@ -260,14 +263,16 @@ resources ("encountered an I/O error (code: 4)", an interrupted read); the scrip
 with a race token, then the race; #18), the service WebSocket at `/service` (#145: `Hello`, then a session call
 that signs in with a Game Center identity signature or resumes a session token, then the service messages of
 #143, the lobby and the queue gated on the current Terms of Use), and in dev `POST /dev/instant-race` and
-`POST /dev/situation` (puts a contract-runner test account in a suite's situation). Race seats still have dev auth
-only (no App Attest yet), so it refuses to start (exit status 78) unless `ENV=dev`, and the dev routes exist only
-there (404 otherwise). In dev, without `REGATTA_APPLE_ROOT_PEM`, any well-formed fresh identity signature passes;
-with it, the signature is checked against Apple's chain. It reads:
+`POST /dev/situation` (puts a contract-runner test account in a suite's situation). Each service connection's
+`Hello` carries an App Attest proof (#158, ADR 0014); the queue, the lobby and races serve only an attested one, and
+a race seat is joined only with a race token the queue minted. It refuses to start (exit status 78) unless `ENV` is
+`dev`, `staging` or `production`, and outside dev without Apple's root, the moderation key and Postgres, or with the
+App Attest bypass on. The dev routes exist only in dev (404 otherwise). In dev, without `REGATTA_APPLE_ROOT_PEM`, any
+well-formed fresh identity signature passes; with it, the signature is checked against Apple's chain. It reads:
 
 | variable | default | |
 |---|---|---|
-| `ENV` | none | must be `dev` |
+| `ENV` | none | `dev`, `staging` or `production`; anything else refuses to start |
 | `HOST`, `PORT` | `127.0.0.1`, `8080` | where it listens (the container sets `HOST=0.0.0.0`); `PORT=0` picks a free port |
 | `RACE_TOKEN_SECRET` | random per process | HMAC key for race tokens, at least 16 bytes |
 | `RACE_TOKEN_TTL` | `600` | seconds a race token joins for |
@@ -276,7 +281,9 @@ with it, the signature is checked against Apple's chain. It reads:
 | `TERMS_VERSION` | `1` | the Terms of Use version players must accept; a bump re-asks everyone |
 | `REGATTA_BUNDLE_ID`, `REGATTA_TEAM_ID` | `com.phillreeder.regatta`, `8S5TQ65X3B` | what Game Center signs, and the team (final values: #49) |
 | `REGATTA_APPLE_ROOT_PEM` | none | PEM file with Apple's root and the intermediate that issues Game Center's key (Game Center serves the leaf only); self-signed certificates are the anchors, the rest chain links; required outside dev (ADR 0010) |
-| `REGATTA_DATABASE_URL` | none | Postgres (migrations run at start, orphaned races cancelled); unset in dev keeps accounts in memory |
+| `REGATTA_DATABASE_URL` | none | Postgres (migrations run at start, orphaned races cancelled); unset in dev keeps accounts in memory; required outside dev |
+| `APP_ATTEST_BYPASS` | `on` in dev | dev only (#158): `on` lets a connection with no App Attest proof, or the simulator's `unsupported`, through (the load client, the contract runner, e2e); a real proof is still verified; `off` verifies every connection. Outside dev only `off` or unset: `on` refuses to start |
+| `APP_ATTEST_ENVIRONMENT` | `both` in dev and staging (TestFlight builds attest as production), `production` in production | the App Attest environments whose keys are accepted (the AAGUID follows the app's entitlement): `production`, `development` or `both`; production takes `production` only |
 | `QUEUE_LOCK_SECONDS` | `60` | seconds from the oldest queued player's join to fleet lock (#146); the contract runner's server uses a few |
 | `QUEUE_RACE_SECONDS` | none | `ENV=dev` only: a queue race is closed this many seconds after its gun (5 to 3600) with results as it stands, boats still racing placed by distance; for the local demo and the e2e run (#162). Unset, a race sails to its end |
 | `ALL_GONE_GRACE_SECONDS` | `30` | `ENV=dev` only: how long a race every person has left waits for one to come back before it closes (G3), so the e2e run's one player can drop and rejoin (#162) |

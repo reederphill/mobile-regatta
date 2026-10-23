@@ -124,8 +124,9 @@ public enum IdentityResult: Equatable, Sendable {
 /// Opening the connection's signed-in session (#145). A connection starts signed out; until a session is open the
 /// server answers identity as signed out and refuses every other service.
 public enum SessionCall: Equatable, Sendable {
-    /// Signs in with what Game Center signed, and the alias and restrictions Game Center reports now (taken from the
-    /// client until #158's App Attest assertion covers the request). The player's `gamePlayerID` is the signature's.
+    /// Signs in with what Game Center signed, and the alias and restrictions Game Center reports now. The server trusts
+    /// the restrictions only when the connection's App Attest proof binds this player (#158,
+    /// `WirePlayer.attestationBinding`). The player's `gamePlayerID` is the signature's.
     case signIn(signature: WireIdentitySignature, player: WirePlayer)
     /// Resumes the session `token` names, with the alias and restrictions Game Center reports now.
     case resume(token: [UInt8], player: WirePlayer)

@@ -19,7 +19,8 @@ public struct PlayerRestrictions: Sendable, Equatable {
     /// The briefing-leave cooldown's end, if one was set (it may have passed).
     public var cooldownUntil: Date?
     public var suspension: StoredSuspension?
-    /// App Attest failed (#158; the client's word until then, ADR 0010).
+    /// A stored lever for a person's decision (#26): nothing writes it automatically; a failed App Attest proof closes
+    /// only its own connection (#158, ADR 0014).
     public var attestationFailed: Bool
 
     public init(cooldownUntil: Date? = nil, suspension: StoredSuspension? = nil, attestationFailed: Bool = false) {
@@ -105,7 +106,7 @@ public struct PlayerRestrictionStore: Sendable {
             """, logger: database.logger)
     }
 
-    /// Sets or clears her failed-attestation flag (#158).
+    /// Sets or clears her failed-attestation flag: an admin's lever, never set by a failed proof (ADR 0014).
     public func setAttestationFailed(_ playerID: String, _ failed: Bool) async throws {
         try await database.client.query("UPDATE players SET attestation_failed = \(failed) WHERE team_player_id = \(playerID)",
                                         logger: database.logger)
