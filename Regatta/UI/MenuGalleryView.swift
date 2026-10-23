@@ -7,7 +7,8 @@ import SwiftUI
 /// topics (#135); `{ "gallery": "queueBar", … }` the queue bar above the practice setup page, as above any pushed page
 /// (#140); `{ "gallery": "rejoin" }` Home with Rejoin race and its race clock, and `{ "gallery": "lastRaceRating" }`
 /// Home with a Last race row whose rating is in (#141), both online and signed in, whatever the device is; and
-/// `{ "gallery": "profile" }` the profile of an established player (#139), pushed as from home.
+/// `{ "gallery": "profile" }` the profile of an established player (#139), pushed as from home; and `{ "gallery": "lobby" }`
+/// Home with the lobby open on every kind of line (#142).
 ///
 /// Like the race fixture (`RaceView`), it's one `render-fixture` element whose value is the bottom safe-area inset in
 /// points: the home-indicator band the diffs leave out.
@@ -49,6 +50,8 @@ struct MenuGalleryView: View {
             home(.rejoin)
         case .lastRaceRating:
             home(.lastRaceRating)
+        case .lobby:
+            home(.lobby)
         case .profile:
             NavigationStack {
                 ProfileView(model: model, status: nil, online: HomeOnlineActions(), fixture: ProfileFixture.established)

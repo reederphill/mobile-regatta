@@ -37,7 +37,7 @@ struct HomeView: View {
 
     private var lastRace: RaceResultViewModel? { fixture?.lastRace ?? model.lastRace }
     /// The lobby (#142): the feed and composer, held by the online status.
-    private var lobby: LobbyModel? { onlineStatus?.lobby }
+    private var lobby: LobbyModel? { fixture?.lobby ?? onlineStatus?.lobby }
     @Environment(\.screenSize) private var screenSize
 
     /// What the lobby area shows (the brief's visibility matrix).
@@ -308,6 +308,9 @@ struct HomeView: View {
 struct HomeFixture {
     var rejoin: OnlineRaceController.RejoinEntry?
     var lastRace: RaceResultViewModel?
+    /// The lobby's lines, as read, in place of the online status's (#142). Few enough to fit an iPhone's feed unscrolled,
+    /// so the render never catches a scroll.
+    var lobby: LobbyModel?
 
     /// 12 minutes 41 seconds into a race.
     static let rejoin = HomeFixture(rejoin: OnlineRaceController.RejoinEntry(tick: 761 * Race.tickRate,
@@ -318,6 +321,36 @@ struct HomeFixture {
         let last = FakeServiceScenario.onlineRace(rated: true).lastRace
         return HomeFixture(lastRace: last.map { RaceResultViewModel(lastRace: $0, livery: FleetLiveries.yours) })
     }
+
+    /// The lobby open (#142, G15): a gun, an established and a provisional sailor, the winner, her own line and her
+    /// post the filter blocked, free text open.
+    @MainActor static var lobby: HomeFixture {
+        HomeFixture(lobby: LobbyModel(fixture: LobbyFixture.lines, me: LobbyFixture.me))
+    }
+}
+
+/// The lobby gallery's lines (#142, G15): every kind a feed shows.
+enum LobbyFixture {
+    static let me = GamePlayerID("G:fake-1")
+
+    static let lines: [LobbyMessage] = {
+        func author(_ id: String, _ nickname: String, _ rating: Int, provisional: Bool, _ deck: String, _ sail: String) -> LobbyAuthor {
+            LobbyAuthor(gamePlayerID: GamePlayerID(id), nickname: nickname, rating: Rating(value: rating, isProvisional: provisional),
+                        chip: LiveryChip(deck: SwatchID(deck), sail: SwatchID(sail)))
+        }
+        let wren = author("G:fake-2", "Wren", 1610, provisional: false, "charcoal", "white")
+        let kestrel = author("G:fake-3", "Kestrel", 1500, provisional: true, "pale-bluish-green", "white")
+        let sailor = author(me.rawValue, "Sailor", 1500, provisional: true, "sky-blue", "white")
+        let kinds: [LobbyMessage.Kind] = [
+            .system(.gun(venue: "Fellmere", boats: 10, humans: 2)),
+            .post(LobbyPost(author: wren, body: .quickChat(.oneMore))),
+            .post(LobbyPost(author: kestrel, body: .text("That last beat was close"))),
+            .system(.winner(venue: "Fellmere", nickname: "Wren")),
+            .post(LobbyPost(author: sailor, body: .quickChat(.gg))),
+            .post(LobbyPost(author: sailor, body: .text("see you on the next start"), delivery: .notSent)),
+        ]
+        return kinds.enumerated().map { LobbyMessage(id: MessageID("fixture-\($0.offset + 1)"), kind: $0.element) }
+    }()
 }
 
 struct HomeOnlineActions {

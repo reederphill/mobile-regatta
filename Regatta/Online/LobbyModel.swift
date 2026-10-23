@@ -290,6 +290,16 @@ final class LobbyModel {
         self.sleep = sleep
     }
 
+    /// A render fixture's open lobby (#142, G15): `lines` as read, her own among them, free text open. It never asks
+    /// the lobby: nothing allows it to.
+    convenience init(fixture lines: [LobbyMessage], me: GamePlayerID, at time: Date = Date()) {
+        self.init(lobby: ServiceSet.fake(.signedOut).lobby, now: { time })
+        self.me = me
+        phase = .open
+        feed.replace(with: lines, at: time)
+        composer.canPostFreeText = true
+    }
+
     /// Whether the lobby may be read now, from `OnlineStatus`.
     func setAllowed(_ allowed: Bool) {
         guard allowed != isAllowed else { return }

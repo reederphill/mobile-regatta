@@ -41,7 +41,7 @@ struct RootView: View {
             case .livery: LiveryGalleryView()
             case .briefing(let fixture): BriefingGalleryView(fixture: fixture)
             case .briefingLocked: BriefingGalleryView(fixture: nil)
-            case .practiceSetup, .pauseMenu, .myBoat, .help, .queueBar, .rejoin, .lastRaceRating, .profile:
+            case .practiceSetup, .pauseMenu, .myBoat, .help, .queueBar, .rejoin, .lastRaceRating, .profile, .lobby:
                 MenuGalleryView(gallery: fixtureGallery, model: model)
             case .results(let stage, let rivalSkill): ResultsGalleryView(stage: stage, rivalSkill: rivalSkill)
             }

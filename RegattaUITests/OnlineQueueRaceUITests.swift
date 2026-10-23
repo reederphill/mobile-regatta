@@ -65,7 +65,10 @@ final class OnlineQueueRaceUITests: XCTestCase {
     /// Home with the session open and the terms accepted: the lobby area asks for nothing.
     @MainActor private func waitForTheSession(_ app: XCUIApplication) {
         XCTAssertTrue(app.buttons["race-online"].waitForExistence(timeout: 30), "no Race online")
-        XCTAssertTrue(app.staticTexts["Lobby"].waitForExistence(timeout: 30), "no session for a player with the terms accepted")
+        // Past the gates: the lobby's own panels (before #164 a session's lobby can't be reached, so "Can't reach the
+        // lobby"), never Sign in or the terms.
+        let pastTheGates = app.descendants(matching: .any).matching(NSPredicate(format: "identifier IN %@", ["lobby-feed", "lobby-unreachable"]))
+        XCTAssertTrue(pastTheGates.firstMatch.waitForExistence(timeout: 30), "no session for a player with the terms accepted")
     }
 
     /// Race online, into the queue: the bar, not the stand-in alert.
