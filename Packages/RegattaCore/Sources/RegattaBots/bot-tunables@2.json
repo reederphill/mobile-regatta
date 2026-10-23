@@ -1,0 +1,32 @@
+{
+  "id": "bot-tunables",
+  "notes": "Version 2 (#583 stage 2): tuned by regatta-timetrial --tune (coordinate descent, --tune-skip planner) from version 1 on the reference regatta's 16 races, 2 laps, for National, Regional and the tactician against the oracle's laps: a first pass for National and the tactician (28.89 -> 25.62 s behind the oracle), then with Regional (38.47 -> 35.43 s). Mean seconds behind the oracle, reference / hold-out: National 35.1 -> 30.0 / 44.9 -> 36.6, Regional 57.7 -> 54.6 / 58.9 -> 61.8, Club 104.6 -> 99.3 / 96.7 -> 93.7, tactician 22.7 -> 21.7 / 28.9 -> 28.7. No bot plans (plannerHorizonSeconds 0).",
+  "values": {
+    "dirtyAirWeightDegrees": 2,
+    "downwindShadowWeightDegrees": 4,
+    "laneEdgePressure": 0.1,
+    "laylineLeadMetres": 2.5,
+    "liveHeaderThresholdDegrees": 4.7188,
+    "liveTackIntervalSeconds": 26.25,
+    "luffStepDegrees": 3.1563,
+    "lullHeatUpDegrees": 12,
+    "pinchAngleDegrees": 38.4062,
+    "pinchRangeMetres": 60,
+    "plannerHorizonSeconds": 0,
+    "plannerMarginSeconds": 1,
+    "plannerSecondsPerDegree": 1,
+    "plannerStart": 0.5,
+    "plannerStartHorizonSeconds": 8,
+    "pressureWeightDegrees": 19,
+    "puffWeightDegrees": 14,
+    "replaneStepDegrees": 6.75,
+    "spotPressureWeightDegrees": 33.75,
+    "tackingSpeed": 0.6125,
+    "tacticianAnticipationSeconds": 8.5,
+    "tacticianCorridor": 0.3625,
+    "tacticianDownwindShiftDegrees": 5.5938,
+    "tacticianHeaderThresholdDegrees": 4.6875,
+    "tacticianTackIntervalSeconds": 17.25
+  },
+  "version": 2
+}

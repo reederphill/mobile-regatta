@@ -146,8 +146,8 @@ public struct BotTunables: Codable, Hashable, Sendable {
 
     // MARK: - The file
 
-    /// The file bots sail by.
-    public static let currentVersion = 1
+    /// The file bots sail by: version 2, #583 stage 2's tuned set (no planning); version 1, the constants as they were.
+    public static let currentVersion = 2
 
     /// The bundled `bot-tunables@<currentVersion>.json`.
     public static let bundled: BotTunables = {
