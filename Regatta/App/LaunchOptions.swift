@@ -201,6 +201,8 @@ struct LaunchOptions: Equatable {
     #if DEBUG
     var tuning = false
     var fps120 = false
+    /// `-captureAppAttestFixture`: writes #175's App Attest fixture on a device (`AppAttestFixtureCapture`, #158).
+    var captureAppAttestFixture = false
     /// `-beatMetres`: honoured only with `-uitesting` (`AppModel`).
     var beatMetres: Double?
     /// `-devIdentity <n>`: signed in as the dev player `n` against a dev server, in place of Game Center (#161).
@@ -239,6 +241,7 @@ struct LaunchOptions: Equatable {
             #if DEBUG
             case "-tuning": tuning = true
             case "-fps120": fps120 = true
+            case "-captureAppAttestFixture": captureAppAttestFixture = true
             case "-fakeServices", "-referenceRace", "-beatMetres", "-devIdentity", "-devRestrictions", "-termsVersion", "-tap":
                 guard let value = takeValue(of: argument, from: &rest) else { continue }
                 apply(argument, value)
@@ -270,7 +273,7 @@ struct LaunchOptions: Equatable {
                           "-thermal", "-cuesOnly",
                           "-onlineResults"]
         #if DEBUG
-        flags.formUnion(["-tuning", "-fps120", "-fakeServices", "-referenceRace", "-beatMetres", "-devIdentity", "-devRestrictions",
+        flags.formUnion(["-tuning", "-fps120", "-captureAppAttestFixture", "-fakeServices", "-referenceRace", "-beatMetres", "-devIdentity", "-devRestrictions",
                          "-termsVersion", "-tap"])
         #endif
         return flags
