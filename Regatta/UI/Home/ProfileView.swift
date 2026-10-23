@@ -185,13 +185,7 @@ struct ProfileView: View {
                     .accessibilityValue(Text(verbatim: "\(loaded.rating.value)"))
                     .accessibilityIdentifier("profile-rating")
                 if loaded.rating.isProvisional {
-                    // TODO-COPY (#171)
-                    Text("Provisional")
-                        .font(MenuFont.body(.subheadline))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(ChromePalette.tint.opacity(0.18), in: .capsule)
-                        .accessibilityIdentifier("profile-provisional")
+                    ProvisionalBadge().accessibilityIdentifier("profile-provisional")
                 }
             }
             .padding(16)

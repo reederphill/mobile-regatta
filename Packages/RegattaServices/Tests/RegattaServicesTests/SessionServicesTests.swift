@@ -52,7 +52,9 @@ import Testing
 
     @Test func aCallWaitsForTheSessionToOpenThenSaysNotConnected() async throws {
         let rig = SessionRig(isOnline: false)
-        await rig.session.start()
+        // The device's player given at once, not through `start()`'s task: a join before that task has run finds
+        // nobody signed in and is refused, and the wait below would never see its sleep.
+        await rig.session.deviceChanged(SessionRig.wren)
         let queue = rig.session.queue
         // The session opens while the call waits: it goes through.
         async let joined: Void = queue.join()

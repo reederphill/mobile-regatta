@@ -128,7 +128,7 @@ extension Gen {
     }
 
     mutating func lobbyError() -> WireLobbyError {
-        switch int(0...9) {
+        switch int(0...10) {
         case 0: .closed(pick(WireLobbyClosure.allCases))
         case 1: .freeTextLocked
         case 2: .empty
@@ -138,7 +138,8 @@ extension Gen {
         case 6: .banned
         case 7: .unknownMessage
         case 8: .notReportable
-        default: .cannotBlockSelf
+        case 9: .cannotBlockSelf
+        default: .unknownPlayer
         }
     }
 
@@ -186,7 +187,7 @@ extension Gen {
         case .queueRequest: return .queueRequest(ServiceRequest(id: id, call: pick(QueueCall.allCases)))
         case .raceSessionRequest: return .raceSessionRequest(ServiceRequest(id: id, call: pick(RaceSessionCall.allCases)))
         case .lobbyRequest:
-            let call: LobbyCall = switch int(0...10) {
+            let call: LobbyCall = switch int(0...11) {
             case 0: .state
             case 1: .history
             case 2: .openFeed
@@ -197,7 +198,8 @@ extension Gen {
             case 7: .blockedPlayers
             case 8: .reportMessage(messageID: string())
             case 9: .reportPlayer(gamePlayerID: string())
-            default: .reportRace(raceID: string(), seat: seat(), reason: pick(WireRaceReportReason.allCases))
+            case 10: .reportRace(raceID: string(), seat: seat(), reason: pick(WireRaceReportReason.allCases))
+            default: .boatCard(gamePlayerID: string())
             }
             return .lobbyRequest(ServiceRequest(id: id, call: call))
         case .profileRequest: return .profileRequest(ServiceRequest(id: id, call: bool() ? .profile : .saveLivery(livery())))
@@ -240,7 +242,7 @@ extension Gen {
             }
             return .raceSessionReply(ServiceReply(id: id, result: result))
         case .lobbyReply:
-            let result: LobbyResult = switch int(0...8) {
+            let result: LobbyResult = switch int(0...9) {
             case 0: .state(lobbyState())
             case 1: .history(list(0...6) { $0.lobbyMessage() })
             case 2: .event(.state(lobbyState()))
@@ -249,7 +251,8 @@ extension Gen {
             case 5: .posted(lobbyMessage())
             case 6: .done
             case 7: .blockedPlayers(list(0...4) { WireBlockedPlayer(gamePlayerID: $0.string(), nickname: $0.string()) })
-            default: .failure(lobbyError())
+            case 8: .failure(lobbyError())
+            default: .boatCard(WireBoatCard(gamePlayerID: string(), nickname: string(), rating: rating(), livery: livery()))
             }
             return .lobbyReply(ServiceReply(id: id, result: result))
         case .profileReply:

@@ -33,7 +33,8 @@ final class OnlineRestrictionUITests: XCTestCase {
     @MainActor func testASuspensionClosesRaceOnlineAndPracticeStillOpens() {
         var app = launch("suspended")
         _ = closedRaceOnline(app, line: "Racing paused until ")
-        XCTAssertTrue(app.staticTexts["Lobby"].exists, "a suspension from racing closed the lobby area")
+        XCTAssertTrue(app.descendants(matching: .any)["lobby-feed"].firstMatch.waitForExistence(timeout: 20),
+                      "a suspension from racing closed the lobby")
         app.buttons["practice"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["page-practiceSetup"].firstMatch.waitForExistence(timeout: 20),
                       "Practice didn't open for a suspended player")

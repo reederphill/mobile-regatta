@@ -57,7 +57,8 @@ import RegattaServices
 ///   `cancelled-race`, `online-results`, `online-results-unrated`, `terms-bump`, and #161's `suspended`,
 ///   `suspended-permanent`, `cooldown`, `cannot-race`, `update-required`, `terms-save-failed`, `session-failed`,
 ///   `unreachable` or `connecting`, #140's `joinable`, `joinable-alone` or `joinable-hold`, #141's `rejoinable` or
-///   `race-gone`, and #139's `profile-established` (`FakeServiceScenario`).
+///   `race-gone`, #139's `profile-established`, and #142's `lobby-free-text`, `lobby-muted` or `lobby-banned`
+///   (`FakeServiceScenario`).
 ///   Every scenario whose player gets past Race online's gate has a queue to join, to fleet lock and its briefing
 ///   (#140). The `joinable` ones, `signed-out`, `cancelled-race`, `race-gone` and `rejoinable` go on into a fake race
 ///   (#141, `FakeRaceDirector`): the gun 75 s after fleet lock, at `-timescale`. Debug builds only (#314): other builds don't know it, so a
@@ -72,7 +73,8 @@ import RegattaServices
 ///   water, the gun and your results; `race-menu`, `race-leave` and `confirm-leave` open the race menu, ask to leave
 ///   and leave; `race-home` and `race-again` are the results' buttons; `rejoin` taps Home's Rejoin race;
 ///   `leaderboard` opens the live leaderboard, `last-race` the Last race sheet; `race-ended` closes the fake race
-///   with the queue's stream lagging, so Rejoin race finds none.
+///   with the queue's stream lagging, so Rejoin race finds none. The lobby's (#142): `boat-card` opens the first other
+///   sailor's boat card once the lobby has lines, `blocked-players` pushes Settings → Blocked players.
 /// - `-myBoat <design-id>` opens My boat with that design tried on (#136): the stand-in for results' Try it deep link.
 /// - `-keepMyBoat` (with `-uitesting`) keeps My boat's livery, owned designs and races from the last launch, which UI
 ///   tests otherwise empty at launch: a relaunch that checks what was saved.
@@ -141,6 +143,10 @@ struct LaunchOptions: Equatable {
         case lastRace = "last-race"
         /// The fake race closes with the queue's stream lagging: Rejoin race is still up, and finds no race.
         case raceEnded = "race-ended"
+        /// The lobby (#142): the first other sailor's boat card, once the lobby has lines, and Settings → Blocked
+        /// players.
+        case boatCard = "boat-card"
+        case blockedPlayers = "blocked-players"
     }
     #endif
 

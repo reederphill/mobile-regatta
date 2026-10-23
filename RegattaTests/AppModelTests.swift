@@ -4,6 +4,7 @@ import Testing
 import UIKit
 import RegattaBots
 import RegattaCore
+import RegattaServices
 @testable import Regatta
 
 @MainActor @Suite struct AppModelTests {
@@ -52,7 +53,8 @@ import RegattaCore
     @Test func aRaceKeepsThePathUnderTheCover() {
         let model = AppModel()
         model.path = [.practiceSetup]
-        model.sheet = .boatCard
+        model.sheet = .boatCard(LobbyAuthor(gamePlayerID: GamePlayerID("G:fake-2"), nickname: "Wren", rating: Rating(value: 1610, isProvisional: false),
+                                                chip: LiveryChip(deck: SwatchID("charcoal"), sail: SwatchID("white"))))
 
         model.startRaceSequence(GameSession(config: Self.config))
         #expect(model.sheet == nil)

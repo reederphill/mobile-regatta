@@ -62,9 +62,7 @@ struct SettingsView: View {
                 section("Lobby") {
                     toggleRow("Hide lobby chat", isOn: $model.deviceSettings.hidesLobbyChat, id: "settings-hidesLobbyChat")
                     Divider()
-                    NavigationLink {
-                        BlockedPlayersPage()
-                    } label: {
+                    NavigationLink(value: AppModel.Page.blockedPlayers) {
                         rowLabel("Blocked players")
                     }
                     .accessibilityIdentifier("settings-blockedPlayers")
