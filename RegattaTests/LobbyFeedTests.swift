@@ -246,6 +246,21 @@ import Testing
         #expect(composer.text == "fair winds", "once she has typed, the same words are hers again")
     }
 
+    /// Keys she typed while the clear was on its way come back after the sent text: only they are kept.
+    @Test func keysTypedBeforeTheClearLandedAreKeptAlone() {
+        var composer = Self.open()
+        composer.type("BADWORDBA")
+        #expect(composer.takeForSend() == "BADWORDBA")
+        composer.type("BADWORDBAD")
+        #expect(composer.text == "D")
+        composer.type("BADWORDBADW")
+        #expect(composer.text == "DW", "the field still held the sent text")
+        composer.type("DWO")
+        #expect(composer.text == "DWO", "her own typing from here")
+        composer.type("BADWORDBADWOX")
+        #expect(composer.text == "BADWORDBADWOX", "the guard is gone once she has typed")
+    }
+
     /// A refused Send gives her text back, unless she has typed something since.
     @Test func aRefusedSendGivesTheTextBack() {
         var composer = Self.open()

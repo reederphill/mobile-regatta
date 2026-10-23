@@ -177,18 +177,25 @@ struct LobbyComposer: Equatable {
         return trimmed.count <= maxCharacters && trimmed.utf8.count <= maxBytes
     }
 
-    /// The text Send took, until she types something else: the field's late write-back of it is not new typing.
+    /// The text Send took, as the field read it, until she types something that doesn't start with it: the field's
+    /// late write-back of it is not new typing.
     private(set) var sending: String?
 
     /// What she typed: typing stops at the limits (G6), so a paste is cut to fit. Right after Send emptied the
-    /// field, the keyboard can hand the sent text back (an autocorrection it commits late): that is dropped, so the
-    /// field stays empty and her next typing starts afresh.
+    /// field, the keyboard can still hold the sent text (an autocorrection it commits late, or keys typed before the
+    /// clear reached it) and hand it back, alone or with her next keys after it: the sent text is dropped, so the
+    /// field keeps only what she typed since.
     mutating func type(_ new: String) {
-        if let sending {
-            if text.isEmpty, new.trimmingCharacters(in: .whitespacesAndNewlines) == sending { return }
-            self.sending = nil
-        }
         var new = new
+        if let sending, !new.isEmpty {
+            if new.hasPrefix(sending) {
+                new = String(new.dropFirst(sending.count).drop(while: \.isWhitespace))
+            } else if new.trimmingCharacters(in: .whitespacesAndNewlines) == sending.trimmingCharacters(in: .whitespacesAndNewlines) {
+                new = ""
+            } else {
+                self.sending = nil
+            }
+        }
         while !Self.fits(new), !new.isEmpty { new.removeLast() }
         if new != text { isTooLong = false }
         text = new
@@ -198,8 +205,8 @@ struct LobbyComposer: Equatable {
     /// types next is never lost to a late clear; a refusal gives the text back.
     mutating func takeForSend() -> String {
         let taken = trimmed
+        sending = text
         text = ""
-        sending = taken
         return taken
     }
 

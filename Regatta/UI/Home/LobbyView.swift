@@ -17,6 +17,10 @@ struct LobbyView: View {
     var onOpenCard: (LobbyAuthor) -> Void = { _ in }
     /// Block on a long-press, waiting for its confirm.
     @State private var blocking: LobbyAuthor?
+    /// The feed's scroll: it opens on the newest line and follows new ones while she is at the bottom.
+    @State private var feedPosition = ScrollPosition(edge: .bottom)
+    /// The feed's visible height: lines that don't fill it start at its top.
+    @State private var feedHeight: CGFloat = 0
 
     /// The open lobby fills the rest of Home (G1); the other panels are as tall as they need.
     var fills: Bool { state == .lobby }
@@ -119,7 +123,9 @@ struct LobbyView: View {
     private func open(_ model: LobbyModel) -> some View {
         VStack(spacing: 0) {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
+                // A plain stack: the feed holds 50 lines at most, and a lazy one's estimated height left an empty band under
+                // the newest line when it opened at the bottom (iPhone 17e).
+                VStack(alignment: .leading, spacing: 14) {
                     if model.feed.lines.isEmpty {
                         // TODO-COPY (#171)
                         Text("No messages yet")
@@ -135,12 +141,23 @@ struct LobbyView: View {
                     }
                 }
                 .padding(16)
+                // Lines that don't fill the feed start at its top, under the panel's edge, never below an empty band.
+                .frame(minHeight: feedHeight, alignment: .top)
             }
-            // Opens on the newest, and follows new lines while she is at the bottom (G1). Lines that don't fill the
-            // feed start at its top, under the panel's edge, never below an empty band.
-            .defaultScrollAnchor(.top, for: .alignment)
+            // Opens on the newest, and follows new lines, and a feed resized by the keyboard or the field, while she
+            // is at the bottom (G1); scrolled up to read, she stays where she is.
+            .scrollPosition($feedPosition)
             .defaultScrollAnchor(.bottom, for: .initialOffset)
-            .defaultScrollAnchor(.bottom, for: .sizeChanges)
+            // After layout: a feed that was at the bottom before its lines or its height changed goes back there.
+            .onScrollGeometryChange(for: FeedGeometry.self) { geometry in
+                FeedGeometry(content: geometry.contentSize.height, container: geometry.containerSize.height,
+                             isAtBottom: geometry.visibleRect.maxY >= geometry.contentSize.height - 24)
+            } action: { old, new in
+                feedHeight = new.container
+                if old.isAtBottom, !new.isAtBottom, old.content != new.content || old.container != new.container {
+                    withAnimation { feedPosition.scrollTo(edge: .bottom) }
+                }
+            }
             .scrollDismissesKeyboard(.interactively)
             .accessibilityIdentifier("lobby-feed")
             Divider()
@@ -302,9 +319,22 @@ struct LobbyComposerView: View {
         // A rebuilt composer starts unfocused, and a gone one has no field: the model follows, or Home would keep the
         // window for a keyboard that isn't there.
         .onAppear { if model.isFieldFocused != isFocused { model.isFieldFocused = isFocused } }
+        // Send's clear, and a write-back the composer cut, reach the field's text view at once (bug 2).
+        .onChange(of: model.text) { _, _ in if isFocused { FieldText.show(model) } }
         .onDisappear { model.isFieldFocused = false }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("lobby-composer")
+    }
+
+    /// The field's text: when the composer keeps something else than the field handed it (the sent text dropped
+    /// from keys typed before Send's clear reached the field, a paste cut to the limits), the text view shows it at
+    /// once. SwiftUI doesn't push a value changed in the binding's own setter back to a text view being edited.
+    private var fieldText: Binding<String> {
+        Binding(get: { model.text }, set: { typed in
+            FieldText.handed = typed
+            model.text = typed
+            if model.text != typed { FieldText.show(model) }
+        })
     }
 
     private func content(now: Date) -> some View {
@@ -347,7 +377,7 @@ struct LobbyComposerView: View {
                             .allowsHitTesting(false)
                             .accessibilityHidden(true)
                     }
-                    TextField(Self.placeholder(canPostFreeText: composer.canPostFreeText), text: $model.text,
+                    TextField(Self.placeholder(canPostFreeText: composer.canPostFreeText), text: fieldText,
                               prompt: Text(""), axis: .vertical)
                         .font(MenuFont.body())
                         .lineLimit(1...4)
@@ -584,6 +614,13 @@ struct BoatCardSheet: View {
     }
 }
 
+/// What the feed's scroll follows: its content and visible heights, and whether she is at the bottom.
+private struct FeedGeometry: Equatable {
+    var content: CGFloat
+    var container: CGFloat
+    var isAtBottom: Bool
+}
+
 /// The keyboard's pending autocorrection, put into the text before Send reads it (#142). Until the keyboard commits a
 /// correction it isn't in the field's text, and a clear made meanwhile is undone when it lands. A text view commits
 /// it on resigning: the field resigns and takes the keyboard back in the same turn, so the keyboard doesn't move and
@@ -593,6 +630,26 @@ struct BoatCardSheet: View {
         guard let responder = FirstResponder.find() else { return }
         responder.resignFirstResponder()
         responder.becomeFirstResponder()
+    }
+}
+
+/// The lobby field's text view, given the composer's text directly (#142, bug 2): while she types, a text set
+/// through the binding can stay behind the keys the keyboard has already put in its document.
+/// It waits a turn, so it never edits the text view inside its own change, and leaves the caret at the end. A text
+/// view holding keys it hasn't handed to the binding yet is left alone: its change comes next, and is cut then.
+@MainActor enum FieldText {
+    /// The text the field last handed to the binding.
+    static var handed: String?
+
+    static func show(_ model: LobbyModel) {
+        DispatchQueue.main.async {
+            let text = model.text
+            guard let view = FirstResponder.find() as? UITextView, view.text != text,
+                  handed == nil || view.text == handed else { return }
+            view.text = text
+            let end = view.endOfDocument
+            view.selectedTextRange = view.textRange(from: end, to: end)
+        }
     }
 }
 

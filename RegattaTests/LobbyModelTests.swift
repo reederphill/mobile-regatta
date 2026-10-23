@@ -3,6 +3,7 @@ import RegattaCore
 import RegattaServices
 import Synchronization
 import Testing
+import UIKit
 @testable import Regatta
 
 /// A lobby that counts the calls Home makes on it (#142): no read or post may reach a lobby she can't see.
@@ -271,6 +272,42 @@ final class LobbySleeps: Sendable {
         #expect(last?.message.post?.body == .text("what a badword"))
         #expect(rig.model.text.isEmpty)
         #expect(try await rig.scripted.history().contains { $0.id == last?.id } == false)
+    }
+
+    /// Keys typed before Send's clear reached the field come back after the sent text: the text view is given what
+    /// the composer kept, caret at the end (bug 2: the binding alone left "BADWORD oneBADWORD two" on screen). Keys
+    /// the text view hasn't handed to the binding yet are left alone.
+    @Test func theFieldShowsWhatTheComposerKeptAfterSend() async throws {
+        let rig = await Self.rig(.lobbyFreeText)
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        let field = UITextView(frame: CGRect(x: 0, y: 0, width: 300, height: 40))
+        window.addSubview(field)
+        window.makeKeyAndVisible()
+        defer {
+            field.resignFirstResponder()
+            window.isHidden = true
+            FieldText.handed = nil
+        }
+        #expect(field.becomeFirstResponder())
+        func typed(_ text: String) {
+            field.text = text
+            FieldText.handed = text
+            rig.model.text = text
+        }
+        typed("BADWORD one")
+        await rig.model.send()
+        typed("BADWORD oneBA")
+        #expect(rig.model.text == "BA")
+        FieldText.show(rig.model)
+        await Self.settle()
+        #expect(field.text == "BA")
+        let caret = try #require(field.selectedTextRange)
+        #expect(field.offset(from: field.beginningOfDocument, to: caret.start) == 2, "the caret at the end")
+        field.text = "BAD"
+        FieldText.show(rig.model)
+        await Self.settle()
+        #expect(field.text == "BAD", "a key not yet handed to the binding stays")
     }
 
     /// Block: Wren's lines go, and she's on the blocked list. Report: the line goes at once, and is filed.
