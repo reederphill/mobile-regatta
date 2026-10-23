@@ -227,6 +227,38 @@ import Testing
         #expect(LobbyComposerView.placeholder(canPostFreeText: false) == "Free chat opens after your first online race")
     }
 
+    /// Send takes the text as it reads and empties the field at once; the keyboard handing the sent text back late (an
+    /// autocorrection it commits after the clear) leaves the field empty, and her next typing starts afresh.
+    @Test func sendTakesTheTextAndALateWriteBackStaysCleared() {
+        var composer = Self.open()
+        composer.type("fair winds ")
+        #expect(composer.takeForSend() == "fair winds")
+        #expect(composer.text.isEmpty)
+        composer.type("fair winds ")
+        #expect(composer.text.isEmpty, "the keyboard's late write-back of the sent text")
+        composer.type("fair winds")
+        #expect(composer.text.isEmpty)
+        composer.posted(at: Self.start, clearingText: false)
+        composer.type("n")
+        #expect(composer.text == "n", "new typing starts afresh, not after the sent text")
+        composer.type("")
+        composer.type("fair winds")
+        #expect(composer.text == "fair winds", "once she has typed, the same words are hers again")
+    }
+
+    /// A refused Send gives her text back, unless she has typed something since.
+    @Test func aRefusedSendGivesTheTextBack() {
+        var composer = Self.open()
+        composer.type("hello")
+        let taken = composer.takeForSend()
+        composer.giveBack(taken)
+        #expect(composer.text == "hello")
+        _ = composer.takeForSend()
+        composer.type("x")
+        composer.giveBack(taken)
+        #expect(composer.text == "x", "what she typed since is kept")
+    }
+
     @Test func theServersTooLongReadsZero() {
         var composer = Self.open()
         composer.type("hello")

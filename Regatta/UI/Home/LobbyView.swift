@@ -1,6 +1,7 @@
 import RegattaCore
 import RegattaServices
 import SwiftUI
+import UIKit
 
 /// Home's lobby area (#25, #142): the gate panels before any lobby call, the hidden panel (the queue and the
 /// leaderboard's top) for a player who doesn't see chat, the loading, unreachable and silent panels, and the open
@@ -362,6 +363,8 @@ struct LobbyComposerView: View {
                         .accessibilityIdentifier("lobby-counter")
                 }
                 Button {
+                    // What the field reads now, a correction the keyboard still holds included.
+                    PendingText.commit()
                     Task { await model.send() }
                 } label: {
                     Image(systemName: "paperplane.fill")
@@ -573,4 +576,33 @@ struct BoatCardSheet: View {
         .frame(height: LiveryRenderView.defaultSize.height)
         .accessibilityIdentifier("boatCard-render")
     }
+}
+
+/// The keyboard's pending autocorrection, put into the text before Send reads it (#142). Until the keyboard commits a
+/// correction it isn't in the field's text, and a clear made meanwhile is undone when it lands. A text view commits
+/// it on resigning: the field resigns and takes the keyboard back in the same turn, so the keyboard doesn't move and
+/// the focus stays.
+@MainActor enum PendingText {
+    static func commit() {
+        guard let responder = FirstResponder.find() else { return }
+        responder.resignFirstResponder()
+        responder.becomeFirstResponder()
+    }
+}
+
+/// The current first responder, found by an action sent to nil (the first responder takes it).
+@MainActor private enum FirstResponder {
+    private static weak var found: UIResponder?
+
+    static func find() -> UIResponder? {
+        found = nil
+        UIApplication.shared.sendAction(#selector(UIResponder.lobbyCaptureFirstResponder), to: nil, from: nil, for: nil)
+        return found
+    }
+
+    fileprivate static func capture(_ responder: UIResponder) { found = responder }
+}
+
+extension UIResponder {
+    @objc fileprivate func lobbyCaptureFirstResponder() { FirstResponder.capture(self) }
 }

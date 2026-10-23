@@ -177,12 +177,36 @@ struct LobbyComposer: Equatable {
         return trimmed.count <= maxCharacters && trimmed.utf8.count <= maxBytes
     }
 
-    /// What she typed: typing stops at the limits (G6), so a paste is cut to fit.
+    /// The text Send took, until she types something else: the field's late write-back of it is not new typing.
+    private(set) var sending: String?
+
+    /// What she typed: typing stops at the limits (G6), so a paste is cut to fit. Right after Send emptied the
+    /// field, the keyboard can hand the sent text back (an autocorrection it commits late): that is dropped, so the
+    /// field stays empty and her next typing starts afresh.
     mutating func type(_ new: String) {
+        if let sending {
+            if text.isEmpty, new.trimmingCharacters(in: .whitespacesAndNewlines) == sending { return }
+            self.sending = nil
+        }
         var new = new
         while !Self.fits(new), !new.isEmpty { new.removeLast() }
         if new != text { isTooLong = false }
         text = new
+    }
+
+    /// Send: the text as it reads now, trimmed. The field empties at once, before the server answers, so what she
+    /// types next is never lost to a late clear; a refusal gives the text back.
+    mutating func takeForSend() -> String {
+        let taken = trimmed
+        text = ""
+        sending = taken
+        return taken
+    }
+
+    /// A refused Send: her text comes back to the field, unless she has typed something since.
+    mutating func giveBack(_ taken: String) {
+        if text.isEmpty { text = taken }
+        sending = nil
     }
 
     /// A post went through: the text goes, and the composer rests for the seconds between posts.
@@ -416,14 +440,16 @@ final class LobbyModel {
         await post(clearingText: false) { try await $0.post(quickChat) }
     }
 
-    /// Send: the field's text.
+    /// Send: the field's text as it reads now (the view commits a pending autocorrection first). The field empties
+    /// before the call, and gets the text back if the post is refused.
     func send() async {
         guard phase == .open, composer.canSend(now: now()) else { return }
-        let text = composer.trimmed
-        await post(clearingText: true) { try await $0.post(text) }
+        let text = composer.takeForSend()
+        await post(clearingText: false, givingBack: text) { try await $0.post(text) }
     }
 
-    private func post(clearingText: Bool, _ call: (any LobbyService) async throws -> LobbyMessage) async {
+    private func post(clearingText: Bool, givingBack taken: String? = nil,
+                      _ call: (any LobbyService) async throws -> LobbyMessage) async {
         do {
             let message = try await call(lobby)
             // Hers, sent or not: the feed's echo of a sent one is the same id (T4).
@@ -431,9 +457,12 @@ final class LobbyModel {
             composer.posted(at: now(), clearingText: clearingText)
             scheduleRefresh()
         } catch let error as LobbyError {
+            if let taken { composer.giveBack(taken) }
             composer.refused(error, at: now())
             scheduleRefresh()
-        } catch {}
+        } catch {
+            if let taken { composer.giveBack(taken) }
+        }
     }
 
     // MARK: Block, report, card
