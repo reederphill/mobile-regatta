@@ -182,7 +182,7 @@ struct ProfileView: View {
                 Text(verbatim: "\(loaded.rating.value)")
                     .font(MenuFont.number(.title3))
                     .accessibilityLabel("Rating")
-                    .accessibilityValue("\(loaded.rating.value)")
+                    .accessibilityValue(Text(verbatim: "\(loaded.rating.value)"))
                     .accessibilityIdentifier("profile-rating")
                 if loaded.rating.isProvisional {
                     // TODO-COPY (#171)
@@ -215,7 +215,7 @@ struct ProfileView: View {
         // UI tests read the number off the row itself, as `practice-fleet`'s.
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(title)
-        .accessibilityValue("\(value)")
+        .accessibilityValue(Text(verbatim: "\(value)"))
         .accessibilityIdentifier(id)
     }
 
