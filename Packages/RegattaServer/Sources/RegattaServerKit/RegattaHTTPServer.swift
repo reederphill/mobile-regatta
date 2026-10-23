@@ -239,6 +239,9 @@ public final class RegattaHTTPServer: Sendable {
         do {
             try await channel.executeThenClose { inbound, outbound in
                 for try await frame in inbound {
+                    // Closed by the server (`WebSocketSeatTransport.close`): what still comes in is only read, until
+                    // the client's close, so the socket shuts without a reset that could lose the last frames sent.
+                    if transport.isClosed, frame.opcode != .connectionClose { continue }
                     switch frame.opcode {
                     case .binary:
                         await connection.receive(Array(buffer: frame.unmaskedData))
@@ -247,7 +250,6 @@ public final class RegattaHTTPServer: Sendable {
                             seated = (session.id, seat)
                             pinger = Self.pinging(transport, every: handler.config.roundTripPingInterval)
                         }
-                        if connection.isClosed { return }
                     case .ping:
                         try await outbound.write(WebSocketFrame(fin: true, opcode: .pong, data: frame.unmaskedData))
                     case .pong:
@@ -303,6 +305,8 @@ public final class RegattaHTTPServer: Sendable {
         do {
             try await channel.executeThenClose { inbound, outbound in
                 for try await frame in inbound {
+                    // Closed by the server: drained until the client's close, as a race connection is.
+                    if transport.isClosed, frame.opcode != .connectionClose { continue }
                     switch frame.opcode {
                     case .binary:
                         await connection.receive(Array(buffer: frame.unmaskedData))
