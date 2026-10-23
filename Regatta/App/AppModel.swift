@@ -19,6 +19,8 @@ final class AppModel {
     /// Pages pushed on the home screen.
     enum Page: Hashable {
         case practiceSetup, myBoat, profile, help, settings
+        /// Settings → Blocked players (#110, #142).
+        case blockedPlayers
         #if DEBUG
         /// The debug tuning panel (#232): Debug builds only.
         case tuning
@@ -26,15 +28,27 @@ final class AppModel {
     }
 
     /// Sheets are only for small, brief things (#25).
-    enum Sheet: String, Identifiable {
+    enum Sheet: Identifiable, Equatable {
         /// The Terms of Use (#34, #138): after Game Center sign-in, and reopened from the lobby area.
         case terms
-        /// A lobby player's boat card.
-        case boatCard
+        /// A lobby player's boat card (#142), from her chip or name on a line: the line's author.
+        case boatCard(LobbyAuthor)
         /// Your last race's results, reopened from home's Last race (#24, #132): large, with Close only.
         case lastRace
 
-        var id: Self { self }
+        /// One per sheet, and one per sailor's card (T8).
+        var id: String {
+            if case .boatCard(let author) = self { "boatCard-\(author.gamePlayerID.rawValue)" } else { name }
+        }
+
+        /// The sheet's kind: `sheet-<name>` is its accessibility id.
+        var name: String {
+            switch self {
+            case .terms: "terms"
+            case .boatCard: "boatCard"
+            case .lastRace: "lastRace"
+            }
+        }
     }
 
     /// What the race sequence shows.
@@ -209,8 +223,18 @@ final class AppModel {
         path = [.myBoat]
     }
 
+    /// The server's count of the online races you've completed (#139, T3): what Profile shows, so My boat's
+    /// "n / N races" reads the same. Taken at each session's open (`LiverySync`) and at each profile read; it replaces
+    /// the device's own count, the results' +1 included.
+    func adoptServerCount(_ count: Int) {
+        let completed = CompletedRacesStore(defaults: myBoatDefaults)
+        completed.count = count
+        myBoat.completedRaces = completed.count
+    }
+
     /// An online race's results stream (#133), counting from the online races completed so far: its close, when it
-    /// counts (G6), adds one, so the earned line's Try it lands on an unlocked design. #163 later sets the server's count.
+    /// counts (G6), adds one on the device at once, so the earned line's Try it lands on an unlocked design. That +1
+    /// is a stopgap: the server's count replaces it at the next profile read (`adoptServerCount`).
     func onlineResults(service: any RaceSessionService, raceID: RaceID?) -> OnlineResults {
         let completed = CompletedRacesStore(defaults: myBoatDefaults)
         let results = OnlineResults(service: service, raceID: raceID, completedBefore: completed.count)

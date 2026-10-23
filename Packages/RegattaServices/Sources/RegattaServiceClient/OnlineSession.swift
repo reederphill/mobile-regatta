@@ -76,6 +76,9 @@ public actor OnlineSession {
         public var callTimeout = Duration.seconds(10)
         /// The queue's leave is best effort: the server drops her place with the connection anyway.
         public var leaveTimeout = Duration.seconds(3)
+        /// The queue refused for attestation while Apple was unavailable to the device: one reconnect after this long,
+        /// in the foreground, to try `attestKey` again (#158, ADR 0014).
+        public var attestationRetryInterval = Duration.seconds(300)
 
         public init() {}
     }
@@ -91,12 +94,15 @@ public actor OnlineSession {
         public var jitter: @Sendable () -> Double
         /// The app's build, for `Hello`.
         public var clientBuild: String
+        /// App Attest (#158): the proof each connection's `Hello` carries. Nil: none (`.none`), for the fakes.
+        public var attester: ConnectionAttester?
         public var log: @Sendable (SessionLogEvent) -> Void
 
         public init(connect: @escaping @Sendable () async throws -> any SessionLink, device: any DeviceIdentitySource,
                     tokens: any SessionTokenStore, sleep: @escaping @Sendable (Duration) async throws -> Void,
-                    jitter: @escaping @Sendable () -> Double, clientBuild: String,
+                    jitter: @escaping @Sendable () -> Double, clientBuild: String, attester: ConnectionAttester? = nil,
                     log: @escaping @Sendable (SessionLogEvent) -> Void = { _ in }) {
+            self.attester = attester
             self.connect = connect
             self.device = device
             self.tokens = tokens
@@ -120,6 +126,8 @@ public actor OnlineSession {
         case again(SessionRefusal)
         case ended(SessionPhase)
         case failed(SessionFailure)
+        /// The server failed the connection's assertion: once more at once, with a fresh one (#158).
+        case retryAttestation
     }
 
     private let dependencies: Dependencies
@@ -146,6 +154,8 @@ public actor OnlineSession {
     private var live: Live?
     /// Reads the open connection's queue stream into `queueStates`.
     private var queueReader: Task<Void, Never>?
+    /// The reconnect `readQueue` schedules while Apple's attestation service is down; ends with the reader.
+    private var attestationRetry: Task<Void, Never>?
     private var updateRequired = false
     /// Players the server refused for good (ADR 0010's first claimant keeps the `gamePlayerID`).
     private var conflicted: Set<String> = []
@@ -323,20 +333,47 @@ public actor OnlineSession {
     fileprivate func acceptTerms(_ version: TermsVersion) async throws -> TermsStatus {
         let connection = try remoteTerms().connection
         let status = try await RemoteTermsService(connection).accept(version)
-        if status.isAccepted, live?.connection === connection { readQueue(on: connection) }
+        if status.isAccepted, let live, live.connection === connection { readQueue(on: connection, link: live.link) }
         return status
     }
 
     /// Feeds the queue's state on `connection` to `queueStates`, in place of whichever stream was read before.
-    private func readQueue(on connection: ServiceConnection) {
-        queueReader?.cancel()
+    private func readQueue(on connection: ServiceConnection, link: HandshakenLink) {
+        stopReadingQueue()
         let states = queueStates
+        let attester = dependencies.attester
         queueReader = Task {
+            var retryScheduled = false
             for await state in RemoteQueueService(connection).stateUpdates() {
                 guard !Task.isCancelled else { return }
                 states.send(state)
+                // Apple's attestation service was down for the device (ADR 0014): the connection stays unattested, so
+                // one reconnect later tries `attestKey` again. It is cancelled with the reader, so never in the background.
+                if state == .unavailable(.attestationFailed), !retryScheduled, let attester, await attester.lastProofWasUnavailable {
+                    retryScheduled = true
+                    await self.scheduleAttestationRetry(closing: link)
+                }
             }
         }
+    }
+
+    /// The reconnect after `attestationRetryInterval`, unless the reader that asked for it has been stopped since.
+    private func scheduleAttestationRetry(closing link: HandshakenLink) {
+        guard queueReader?.isCancelled == false else { return }
+        let (pause, interval) = (dependencies.sleep, settings.attestationRetryInterval)
+        attestationRetry?.cancel()
+        attestationRetry = Task {
+            do { try await pause(interval) } catch { return }
+            guard !Task.isCancelled else { return }
+            link.close()
+        }
+    }
+
+    /// Ends the queue reader and the reconnect it may have scheduled.
+    private func stopReadingQueue() {
+        queueReader?.cancel()
+        attestationRetry?.cancel()
+        attestationRetry = nil
     }
 
     // MARK: - Running
@@ -447,9 +484,9 @@ public actor OnlineSession {
                 settle()
                 opened += 1
                 opens.send(opened)
-                readQueue(on: live.connection)
+                readQueue(on: live.connection, link: live.link)
                 await untilDead(live.link)
-                queueReader?.cancel()
+                stopReadingQueue()
                 guard epoch == self.epoch, !Task.isCancelled else { return }
                 self.live = nil
                 live.link.close()
@@ -477,7 +514,7 @@ public actor OnlineSession {
                 do { try await dependencies.sleep(delay) } catch { return }
                 guard epoch == self.epoch else { return }
                 waitingToRetry = false
-            case .again:
+            case .again, .retryAttestation:
                 break
             }
         }
@@ -494,6 +531,8 @@ public actor OnlineSession {
             guard let fetched = await fetchSignature() else { return .failed(.noSignature) }
             signature = fetched
         }
+        // Before the socket opens too: a first attestation talks to Apple.
+        await dependencies.attester?.prepare(for: player.player)
         guard epoch == self.epoch else { return .failed(.connect) }
         dependencies.log(.connecting(resuming: token != nil))
         guard let link = try? await dependencies.connect() else { return .failed(.connect) }
@@ -510,9 +549,16 @@ public actor OnlineSession {
         }
         defer { deadline.cancel() }
 
+        // After the socket opens, so a connection's assertions reach the server in the order they were made.
+        let attestation = await dependencies.attester?.proof(for: player.player) ?? .none
         let handshaken: HandshakenLink
-        switch await ServiceHandshake.open(link, clientBuild: dependencies.clientBuild) {
-        case .accepted(let link): handshaken = link
+        switch await ServiceHandshake.open(link, clientBuild: dependencies.clientBuild, attestation: attestation) {
+        case .accepted(let link, let status):
+            handshaken = link
+            if await dependencies.attester?.noteAck(status) == .retry {
+                link.close()
+                return .retryAttestation
+            }
         case .failed: return .failed(.handshake)
         case .updateRequired:
             updateRequired = true

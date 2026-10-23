@@ -56,8 +56,9 @@ import RegattaServices
 ///   `signed-out`, `underage`, `communication-restricted`, `multiplayer-restricted`, `offline`, `queued`,
 ///   `cancelled-race`, `online-results`, `online-results-unrated`, `terms-bump`, and #161's `suspended`,
 ///   `suspended-permanent`, `cooldown`, `cannot-race`, `update-required`, `terms-save-failed`, `session-failed`,
-///   `unreachable` or `connecting`, #140's `joinable`, `joinable-alone` or `joinable-hold`, and #141's `rejoinable` or
-///   `race-gone` (`FakeServiceScenario`).
+///   `unreachable` or `connecting`, #140's `joinable`, `joinable-alone` or `joinable-hold`, #141's `rejoinable` or
+///   `race-gone`, #139's `profile-established`, and #142's `lobby-free-text`, `lobby-muted` or `lobby-banned`
+///   (`FakeServiceScenario`).
 ///   Every scenario whose player gets past Race online's gate has a queue to join, to fleet lock and its briefing
 ///   (#140). The `joinable` ones, `signed-out`, `cancelled-race`, `race-gone` and `rejoinable` go on into a fake race
 ///   (#141, `FakeRaceDirector`): the gun 75 s after fleet lock, at `-timescale`. Debug builds only (#314): other builds don't know it, so a
@@ -65,14 +66,15 @@ import RegattaServices
 /// - `-tap race-online[,terms-agree]` (Debug builds) taps Home's Race online at launch, then the Terms of Use sheet's
 ///   I agree once it is up: for a local screenshot of a state only a tap reaches (#161: the spinner, an unreachable
 ///   server, a save that failed), where `simctl` can't tap. The queue's (#140): `settings` and `practice-setup` push
-///   a page, `start-practice` and `ready` start a practice race, `takeover` waits for fleet lock, then
+///   a page (and #139's `profile`), `start-practice` and `ready` start a practice race, `takeover` waits for fleet lock, then
 ///   `briefing-leave` taps the briefing's Leave or `home` waits for the race sequence to end, and `connection-lost`
 ///   and `connection-regained` drop the connection and bring it back. The scripted queue plays a state a second at
 ///   `-timescale` (a join answered within 2 s). The race sequence's (#141): `race`, `gun` and `done` wait for the
 ///   water, the gun and your results; `race-menu`, `race-leave` and `confirm-leave` open the race menu, ask to leave
 ///   and leave; `race-home` and `race-again` are the results' buttons; `rejoin` taps Home's Rejoin race;
 ///   `leaderboard` opens the live leaderboard, `last-race` the Last race sheet; `race-ended` closes the fake race
-///   with the queue's stream lagging, so Rejoin race finds none.
+///   with the queue's stream lagging, so Rejoin race finds none. The lobby's (#142): `boat-card` opens the first other
+///   sailor's boat card once the lobby has lines, `blocked-players` pushes Settings → Blocked players.
 /// - `-myBoat <design-id>` opens My boat with that design tried on (#136): the stand-in for results' Try it deep link.
 /// - `-keepMyBoat` (with `-uitesting`) keeps My boat's livery, owned designs and races from the last launch, which UI
 ///   tests otherwise empty at launch: a relaunch that checks what was saved.
@@ -115,6 +117,8 @@ struct LaunchOptions: Equatable {
         /// Leave and lost connection, each waiting for `takeover`.
         case settings
         case practiceSetup = "practice-setup"
+        /// The profile page (#139), pushed for the design gate's screenshots.
+        case profile
         case startPractice = "start-practice"
         case ready
         case takeover
@@ -139,6 +143,10 @@ struct LaunchOptions: Equatable {
         case lastRace = "last-race"
         /// The fake race closes with the queue's stream lagging: Rejoin race is still up, and finds no race.
         case raceEnded = "race-ended"
+        /// The lobby (#142): the first other sailor's boat card, once the lobby has lines, and Settings → Blocked
+        /// players.
+        case boatCard = "boat-card"
+        case blockedPlayers = "blocked-players"
     }
     #endif
 
@@ -203,6 +211,8 @@ struct LaunchOptions: Equatable {
     #if DEBUG
     var tuning = false
     var fps120 = false
+    /// `-captureAppAttestFixture`: writes #175's App Attest fixture on a device (`AppAttestFixtureCapture`, #158).
+    var captureAppAttestFixture = false
     /// `-beatMetres`: honoured only with `-uitesting` (`AppModel`).
     var beatMetres: Double?
     /// `-devIdentity <n>`: signed in as the dev player `n` against a dev server, in place of Game Center (#161).
@@ -241,6 +251,7 @@ struct LaunchOptions: Equatable {
             #if DEBUG
             case "-tuning": tuning = true
             case "-fps120": fps120 = true
+            case "-captureAppAttestFixture": captureAppAttestFixture = true
             case "-fakeServices", "-referenceRace", "-beatMetres", "-devIdentity", "-devRestrictions", "-termsVersion", "-tap":
                 guard let value = takeValue(of: argument, from: &rest) else { continue }
                 apply(argument, value)
@@ -274,7 +285,7 @@ struct LaunchOptions: Equatable {
                           "-thermal", "-cuesOnly",
                           "-onlineResults"]
         #if DEBUG
-        flags.formUnion(["-tuning", "-fps120", "-fakeServices", "-referenceRace", "-beatMetres", "-devIdentity", "-devRestrictions",
+        flags.formUnion(["-tuning", "-fps120", "-captureAppAttestFixture", "-fakeServices", "-referenceRace", "-beatMetres", "-devIdentity", "-devRestrictions",
                          "-termsVersion", "-tap"])
         #endif
         return flags

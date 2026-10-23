@@ -181,4 +181,57 @@ struct EndToEndTests {
             await seated.close()
         }
     }
+
+    /// #158, Fable's T5: under `SeatAuthPolicy.raceToken` (staging, production) a race connection's Hello isn't
+    /// attested (status 0: the race token is its credential), and nothing but a JoinRace with a valid token gets a seat.
+    @Test func raceTokenPolicyRefusesASeatWithoutAValidToken() async throws {
+        var config = ServerConfig.dev(host: "127.0.0.1", port: 0)
+        config.environment = .staging
+        config.auth = try SeatAuthPolicy.for(.staging)
+        #expect(config.auth == .raceToken)
+        // Outside dev the bypass must be off, in the config and in the endpoint (the review's finding 3).
+        config.appAttest.bypass = false
+        var serviceConfig = ServerConfig.dev()
+        serviceConfig.appAttest.bypass = false
+        let server = try await RegattaHTTPServer.start(config: config, services: try ServiceEndpoint.make(config: serviceConfig, store: InMemoryAccountStore()))
+        let options = LoadClientOptions(host: "127.0.0.1", port: server.port, timeout: .seconds(60))
+        defer { Task { await server.shutdown() } }
+        func greeted() async throws -> WebSocketRaceTransport {
+            let transport = try await connect(options)
+            try send(.hello(Hello(clientBuild: "test", files: [])), on: transport)
+            guard case .helloAck(let ack)? = try await frames(on: transport).first?.message else {
+                Issue.record("no HelloAck")
+                return transport
+            }
+            #expect(ack.attestation == .notChecked)
+            return transport
+        }
+        // A malformed token, an expired one, one signed with another key, and no JoinRace at all.
+        let raceID = UUID(), later = Int64(Date().timeIntervalSince1970) + 600
+        let tokens: [[UInt8]] = [
+            [1, 2, 3],
+            try #require(RaceToken(raceID: raceID, seat: 0, expiresAt: 1).signed(with: config.tokenKey)),
+            try #require(RaceToken(raceID: raceID, seat: 0, expiresAt: later).signed(with: .init(size: .bits256))),
+        ]
+        for token in tokens {
+            let transport = try await greeted()
+            try send(.joinRace(JoinRace(token: token)), on: transport)
+            #expect(try await frames(on: transport).isEmpty)
+            #expect(try await closed(transport))
+            #expect(transport.closeReason.code == .policyViolation)
+            await transport.close()
+        }
+        let hellos = try await greeted()
+        try send(.hello(Hello(clientBuild: "test", files: [])), on: hellos)
+        #expect(try await closed(hellos))
+        #expect(hellos.closeReason.code == .policyViolation)
+        await hellos.close()
+        // A valid token for a race that isn't running is told so, as in dev.
+        let valid = try await greeted()
+        try send(.joinRace(JoinRace(token: try #require(RaceToken(raceID: raceID, seat: 0, expiresAt: later).signed(with: config.tokenKey)))), on: valid)
+        #expect(try await frames(on: valid).first?.message.type == .raceCancelled)
+        await valid.close()
+        // And the dev instant race isn't there to mint one.
+        #expect(Route.resolve(method: .POST, path: ServerPath.instantRace, environment: config.environment) == .notFound)
+    }
 }

@@ -1,6 +1,7 @@
 import RegattaCore
 import RegattaServices
 import SwiftUI
+import UIKit
 
 /// The one home screen (#25): Race online leading Practice, the lobby area below, and the toolbar's pages
 /// pushed on top. No tab bar.
@@ -35,11 +36,30 @@ struct HomeView: View {
     }
 
     private var lastRace: RaceResultViewModel? { fixture?.lastRace ?? model.lastRace }
+    /// The lobby (#142): the feed and composer, held by the online status.
+    private var lobby: LobbyModel? { fixture?.lobby ?? onlineStatus?.lobby }
+    @Environment(\.screenSize) private var screenSize
+
+    /// What the lobby area shows (the brief's visibility matrix).
+    private var lobbyState: LobbyPanelState {
+        LobbyPanelState(isOnline: isOnline, status: lobbyStatus, retryLine: onlineStatus?.lobbyRetryLine, lobby: lobby?.phase ?? .open)
+    }
+
+    /// Typing in the lobby on a phone (G1): the on-screen keyboard leaves no room for Race online and Practice, so the
+    /// lobby takes the window until the keyboard goes. An iPad keeps them, and so does a phone typing on a hardware
+    /// keyboard: with no keyboard on screen the room is all there, and the lobby taking it would only stretch the feed.
+    private var lobbyTakesTheWindow: Bool {
+        lobby?.isFieldFocused == true && keyboardIsUp && (screenSize?.height ?? 0) < 900
+    }
+    /// Whether an on-screen keyboard is up: taller than a hardware keyboard's shortcut bar.
+    @State private var keyboardIsUp = false
 
     var body: some View {
         NavigationStack(path: $model.path) {
-            ScrollView {
-                VStack(spacing: 20) {
+            // Home's top stays put; the lobby fills the rest of the window with its own scroll, the composer pinned at
+            // its bottom (G1), and the keyboard pushes it up.
+            VStack(spacing: 20) {
+                if !lobbyTakesTheWindow {
                     if let notice = model.notice {
                         NoticeRow(notice: notice)
                     }
@@ -55,16 +75,26 @@ struct HomeView: View {
                     if let lastRace {
                         LastRaceRow(lastRace: lastRace) { model.sheet = .lastRace }
                     }
-                    LobbyPanel(state: LobbyPanelState(isOnline: isOnline, status: lobbyStatus,
-                                                      retryLine: onlineStatus?.lobbyRetryLine),
-                               onSignIn: online.signIn, onReviewTerms: { model.sheet = .terms })
                 }
-                .padding(.vertical, 20)
-                .readableColumn()
-                // UI tests check the home screen is up.
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("home")
+                LobbyView(state: lobbyState, model: lobby, leaderboardTop: onlineStatus?.leaderboardTop,
+                          onSignIn: online.signIn, onReviewTerms: { model.sheet = .terms },
+                          onShowLeaderboard: { onlineStatus?.leaderboard.showLeaderboard() },
+                          onOpenCard: { model.sheet = .boatCard($0) })
+                if !lobbyState.fillsHome { Spacer(minLength: 0) }
             }
+            .padding(.top, lobbyTakesTheWindow ? 8 : 20)
+            .padding(.bottom, 12)
+            .readableColumn()
+            .animation(.default, value: lobbyTakesTheWindow)
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+                keyboardIsUp = Self.keyboardIsUp(note)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+                keyboardIsUp = false
+            }
+            // UI tests check the home screen is up.
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("home")
             #if DEBUG
             .safeAreaInset(edge: .bottom) {
                 if model.launchOptions.showsBuildIdentity { buildIdentity }
@@ -75,7 +105,7 @@ struct HomeView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbar }
             .navigationDestination(for: AppModel.Page.self) { page in
-                MenuPageView(page: page, model: model)
+                MenuPageView(page: page, model: model, online: online)
             }
         }
         // Outside the stack, so every pushed page has it, above the navigation bar; a half-height sheet sits below it.
@@ -85,6 +115,8 @@ struct HomeView: View {
             if sheet == .terms {
                 TermsSheet(version: lobbyStatus.termsVersion, saveFailed: onlineStatus?.termsSaveFailed ?? false,
                            agree: online.agreeToTerms, close: { model.sheet = nil })
+            } else if case .boatCard(let author) = sheet {
+                BoatCardSheet(author: author, model: lobby, close: { model.sheet = nil })
             } else if sheet == .lastRace, let lastRace = model.lastRace {
                 // Your last race's results, reopened (#24, #132): large, with Close only.
                 ResultsView(model: lastRace, buttons: .reopened(close: { model.sheet = nil }), presentation: .page)
@@ -96,6 +128,15 @@ struct HomeView: View {
                 MenuSheetView(sheet: sheet)
             }
         }
+    }
+
+    /// Whether a keyboard frame change leaves an on-screen keyboard up: more than a hardware keyboard's shortcut bar
+    /// showing above the screen's bottom.
+    static func keyboardIsUp(_ note: Notification) -> Bool {
+        guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+              let screen = (note.object as? UIScreen) ?? UIApplication.shared.connectedScenes
+                .compactMap({ ($0 as? UIWindowScene)?.screen }).first else { return false }
+        return screen.bounds.intersection(frame).height > 150
     }
 
     /// Rejoin race, with the race clock counted on each second (#141): straight back to the water.
@@ -221,12 +262,34 @@ struct HomeView: View {
             .accessibilityAddTraits(.isHeader)
         }
         ToolbarItem(placement: .topBarLeading) {
-            pageButton(.profile, "Profile", systemImage: "person.crop.circle", id: "toolbar-profile")
+            profileButton
         }
         ToolbarItemGroup(placement: .topBarTrailing) {
             pageButton(.myBoat, "My boat", systemImage: "sailboat", id: "toolbar-myboat")
             pageButton(.help, "Help", systemImage: "questionmark.circle", id: "toolbar-help")
             pageButton(.settings, "Settings", systemImage: "gearshape", id: "toolbar-settings")
+        }
+    }
+
+    /// Profile, as her Game Center photo once it's loaded (#25, #139 G6); the symbol until then, or with none.
+    @ViewBuilder private var profileButton: some View {
+        if let photo = onlineStatus?.playerPhoto {
+            Button {
+                model.path.append(.profile)
+            } label: {
+                Label {
+                    Text("Profile")
+                } icon: {
+                    Image(uiImage: photo)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 28, height: 28)
+                        .clipShape(.circle)
+                }
+            }
+            .accessibilityIdentifier("toolbar-profile")
+        } else {
+            pageButton(.profile, "Profile", systemImage: "person.crop.circle", id: "toolbar-profile")
         }
     }
 
@@ -245,16 +308,64 @@ struct HomeView: View {
 struct HomeFixture {
     var rejoin: OnlineRaceController.RejoinEntry?
     var lastRace: RaceResultViewModel?
+    /// The lobby's lines, as read, in place of the online status's (#142). Few enough to fit an iPhone's feed unscrolled,
+    /// so the render never catches a scroll.
+    var lobby: LobbyModel?
 
-    /// 12 minutes 41 seconds into a race.
-    static let rejoin = HomeFixture(rejoin: OnlineRaceController.RejoinEntry(tick: 761 * Race.tickRate,
-                                                                              readAt: RenderFixture.QueueFixture.moment))
+    /// 12 minutes 41 seconds into a race, so the lobby is in its silence window (G11): "Back after your race".
+    @MainActor static var rejoin: HomeFixture {
+        let entry = OnlineRaceController.RejoinEntry(tick: 761 * Race.tickRate, readAt: RenderFixture.QueueFixture.moment)
+        return HomeFixture(rejoin: entry, lobby: LobbyModel(fixture: [], me: LobbyFixture.me, phase: .silent))
+    }
 
-    /// The fake services' rated online race, closed, its rating in: third of six, "+12".
+    /// The fake services' rated online race, closed, its rating in: third of six, "+12". The lobby open on a short
+    /// feed after it, few enough lines that the Last race row and the feed fit unscrolled.
     @MainActor static var lastRaceRating: HomeFixture {
         let last = FakeServiceScenario.onlineRace(rated: true).lastRace
-        return HomeFixture(lastRace: last.map { RaceResultViewModel(lastRace: $0, livery: FleetLiveries.yours) })
+        return HomeFixture(lastRace: last.map { RaceResultViewModel(lastRace: $0, livery: FleetLiveries.yours) },
+                           lobby: LobbyModel(fixture: LobbyFixture.afterRace, me: LobbyFixture.me))
     }
+
+    /// The lobby open (#142, G15): a gun, an established and a provisional sailor, the winner, her own line and her
+    /// post the filter blocked, free text open.
+    @MainActor static var lobby: HomeFixture {
+        HomeFixture(lobby: LobbyModel(fixture: LobbyFixture.lines, me: LobbyFixture.me))
+    }
+}
+
+/// The lobby gallery's lines (#142, G15): every kind a feed shows.
+enum LobbyFixture {
+    static let me = GamePlayerID("G:fake-1")
+
+    private static func author(_ id: String, _ nickname: String, _ rating: Int, provisional: Bool, _ deck: String,
+                               _ sail: String) -> LobbyAuthor {
+        LobbyAuthor(gamePlayerID: GamePlayerID(id), nickname: nickname, rating: Rating(value: rating, isProvisional: provisional),
+                    chip: LiveryChip(deck: SwatchID(deck), sail: SwatchID(sail)))
+    }
+    private static let wren = author("G:fake-2", "Wren", 1610, provisional: false, "charcoal", "white")
+    private static let kestrel = author("G:fake-3", "Kestrel", 1500, provisional: true, "pale-bluish-green", "white")
+    private static let sailor = author(me.rawValue, "Sailor", 1500, provisional: true, "sky-blue", "white")
+
+    private static func messages(_ kinds: [LobbyMessage.Kind]) -> [LobbyMessage] {
+        kinds.enumerated().map { LobbyMessage(id: MessageID("fixture-\($0.offset + 1)"), kind: $0.element) }
+    }
+
+    static let lines: [LobbyMessage] = messages([
+        .system(.gun(venue: "Fellmere", boats: 10, humans: 2)),
+        .post(LobbyPost(author: wren, body: .quickChat(.oneMore))),
+        .post(LobbyPost(author: kestrel, body: .text("That last beat was close"))),
+        .system(.winner(venue: "Fellmere", nickname: "Wren")),
+        .post(LobbyPost(author: sailor, body: .quickChat(.gg))),
+        .post(LobbyPost(author: sailor, body: .text("see you on the next start"), delivery: .notSent)),
+    ])
+
+    /// The Last race gallery's feed (#142): the race's winner and a few lines after it, short enough to sit under
+    /// the Last race row unscrolled.
+    static let afterRace: [LobbyMessage] = messages([
+        .system(.winner(venue: "Fellmere", nickname: "Wren")),
+        .post(LobbyPost(author: kestrel, body: .text("That last beat was close"))),
+        .post(LobbyPost(author: sailor, body: .quickChat(.gg))),
+    ])
 }
 
 struct HomeOnlineActions {
@@ -276,13 +387,21 @@ enum LobbyPanelState: Equatable {
     case signIn
     case acceptTerms
     /// Hide lobby chat is on, or Game Center restricts the player's chat (#17, #34): the queue's size and the
-    /// leaderboard instead of the chat.
+    /// leaderboard instead of the chat. No lobby call.
     case chatHidden(queuedPlayers: Int?)
+    /// Past Home's gates, the lobby's history read is out (#142).
+    case loading
+    /// The read failed, or the lobby said closed for a reason Home's gates don't: "Can't reach the lobby".
+    case unreachable
+    /// The silence window, from her fleet lock until she finishes (#17).
+    case silent
+    /// The lobby is open: the feed and the composer.
     case lobby
 
     /// `retryLine`: Game Center has her on the phone, and the server didn't answer her last tap or refused the
-    /// sign-in (#161).
-    init(isOnline: Bool, status: LobbyStatus, retryLine: RestrictionLine? = nil) {
+    /// sign-in (#161). `lobby`: where the lobby's reads stand, once Home's gates pass; the service's answer never
+    /// overrides the gates.
+    init(isOnline: Bool, status: LobbyStatus, retryLine: RestrictionLine? = nil, lobby: LobbyModel.Phase = .open) {
         let access = status.access(isOnline: isOnline)
         if !isOnline {
             self = .offline
@@ -293,90 +412,41 @@ enum LobbyPanelState: Equatable {
         } else if status.hidesChat || !access.chatVisible {
             self = .chatHidden(queuedPlayers: status.queuedPlayers)
         } else {
-            self = .lobby
-        }
-    }
-}
-
-/// The lobby area: static panels until the lobby (#109 and later) fills it.
-private struct LobbyPanel: View {
-    let state: LobbyPanelState
-    var onSignIn: () -> Void
-    var onReviewTerms: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            content
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(ChromePalette.surface, in: .rect(cornerRadius: 16))
-        // UI tests check it fits the window.
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("lobby-panel")
-    }
-
-    @ViewBuilder private var content: some View {
-        switch state {
-        case .offline:
-            heading("You're offline", systemImage: "wifi.slash")
-            detail("Practice races work offline.")
-        case .tryAgain(let line):
-            // The words under Race online: neither line carries a date.
-            heading(line.text(now: .now),
-                    systemImage: line == .unreachable ? "icloud.slash" : "person.crop.circle.badge.exclamationmark")
-            // Signing in again: with Game Center there already, that is the session alone.
-            // TODO-COPY (#171)
-            Button("Try again", action: onSignIn)
-                .buttonStyle(.bordered)
-                .accessibilityIdentifier("lobby-retry")
-        case .signIn:
-            heading("Sign in to Game Center to chat", systemImage: "person.crop.circle.badge.checkmark")
-            Button("Sign in", action: onSignIn)
-                .buttonStyle(.bordered)
-                .accessibilityIdentifier("lobby-sign-in")
-        case .acceptTerms:
-            heading("Accept the terms to chat and race online", systemImage: "doc.text")
-            Button("Review terms", action: onReviewTerms)
-                .buttonStyle(.bordered)
-                .accessibilityIdentifier("lobby-terms")
-        case .chatHidden(let queuedPlayers):
-            heading("Queue", systemImage: "person.3")
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(queuedPlayers.map { "\($0)" } ?? "–").font(MenuFont.number(.largeTitle))
-                detail("in the queue")
+            switch lobby {
+            case .closed, .loading: self = .loading
+            case .unreachable: self = .unreachable
+            case .silent: self = .silent
+            case .open: self = .lobby
             }
-            heading("Leaderboard", systemImage: "list.number")
-            detail("The leaderboard arrives here.")
-        case .lobby:
-            heading("Lobby", systemImage: "bubble.left.and.bubble.right")
-            detail("Chat with other sailors between races. The lobby arrives here.")
         }
     }
 
-    private func heading(_ title: String, systemImage: String) -> some View {
-        Label(title, systemImage: systemImage)
-            .font(MenuFont.heading(.headline))
-            .accessibilityAddTraits(.isHeader)
-    }
-
-    private func detail(_ text: String) -> some View {
-        Text(text)
-            .font(MenuFont.body(.subheadline))
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-    }
+    /// The open lobby fills the rest of Home (G1); every other panel is as tall as it needs.
+    var fillsHome: Bool { self == .lobby }
 }
 
-/// A notice at the top of the home screen, such as an update or maintenance message.
-private struct NoticeRow: View {
-    let notice: AppModel.Notice
+/// A notice at the top of the home screen, such as an update or maintenance message, or of the profile (its racing
+/// suspension, #139).
+struct NoticeRow: View {
+    let title: String
+    var message = ""
+    var id = "home-notice"
+
+    init(notice: AppModel.Notice) {
+        self.init(title: notice.title, message: notice.message)
+    }
+
+    init(title: String, message: String = "", id: String = "home-notice") {
+        self.title = title
+        self.message = message
+        self.id = id
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(notice.title).font(MenuFont.heading(.headline))
-            if !notice.message.isEmpty {
-                Text(notice.message).font(MenuFont.body(.subheadline)).foregroundStyle(.secondary)
+            Text(title).font(MenuFont.heading(.headline))
+            if !message.isEmpty {
+                Text(message).font(MenuFont.body(.subheadline)).foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -389,7 +459,7 @@ private struct NoticeRow: View {
                 .frame(width: 6)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("home-notice")
+        .accessibilityIdentifier(id)
     }
 }
 

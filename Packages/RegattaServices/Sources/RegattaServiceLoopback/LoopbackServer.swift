@@ -259,6 +259,7 @@ public enum ServiceAnswers {
                 })
             case .reportMessage(let id): try await service.report(message: MessageID(id))
             case .reportPlayer(let id): try await service.report(player: GamePlayerID(id))
+            case .boatCard(let id): return .boatCard(try await service.boatCard(GamePlayerID(id)).wire)
             case .reportRace(let raceID, let seat, let reason):
                 try await service.report(race: RaceID(raceID), seat: seat, reason: RaceReportReason(wire: reason))
             case .openFeed: return nil

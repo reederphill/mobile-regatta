@@ -85,3 +85,14 @@ enum EndpointDatabase {
         }
     }
 }
+
+/// The review's finding 2 against Postgres (#158): two copies of one attestation checked at once on the Postgres key
+/// store; its insert-only `register` (`RETURNING`) verifies exactly one.
+@Suite(EndpointDatabase.available, .timeLimit(.minutes(1))) struct AppAttestPersistenceTests {
+    @Test func sameAttestationTwiceConcurrentlyIsVerifiedOnceOnPostgres() async throws {
+        try await EndpointDatabase.withMigratedSchema { database in
+            let race = try await AppAttestReviewTests.race(20) { PostgresAppAttestKeyStore(database) }
+            #expect(race.both == 0 && race.neither == 0)
+        }
+    }
+}

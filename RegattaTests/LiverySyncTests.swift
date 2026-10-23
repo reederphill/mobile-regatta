@@ -12,6 +12,9 @@ import Testing
         var myLivery: Livery
         var isLiveryLocked = false
         let myBoatDefaults: UserDefaults
+        private(set) var adoptedCounts: [Int] = []
+
+        func adoptServerCount(_ count: Int) { adoptedCounts.append(count) }
 
         /// On defaults of its own, emptied first.
         init(_ livery: Livery) {
@@ -26,6 +29,7 @@ import Testing
     /// The server's profile, as far as the livery goes.
     nonisolated final class Profiles: ProfileService, @unchecked Sendable {
         var stored: Livery
+        var completedRaces = 0
         var failure: (any Error)?
         private(set) var asked = 0
         private(set) var saves: [Livery] = []
@@ -36,7 +40,7 @@ import Testing
             asked += 1
             if let failure { throw failure }
             return Profile(gamePlayerID: GamePlayerID("G:wren"), nickname: "Wren", rating: Rating(value: 1500, isProvisional: true),
-                           completedRaces: 0, wins: 0, suspension: nil, progress: EarnedProgress(earned: [], next: nil), livery: stored)
+                           completedRaces: completedRaces, wins: 0, suspension: nil, progress: EarnedProgress(earned: [], next: nil), livery: stored)
         }
 
         func saveLivery(_ livery: Livery) throws -> Livery {
@@ -86,6 +90,26 @@ import Testing
         host.isLiveryLocked = true
         await sync.sessionOpened()
         #expect(host.myLivery == Self.servers && profiles.asked == 1)
+    }
+
+    /// The server's count of her completed races comes down with its livery (#139, T3), even when the livery is the
+    /// device's already; never in a locked fleet or for a gated player, and not on a read that failed.
+    @Test func theServerCountComesDownAtSignIn() async {
+        let (sync, host, profiles) = rig(server: Self.local)
+        profiles.completedRaces = 32
+        await sync.sessionOpened()
+        #expect(host.adoptedCounts == [32] && host.myLivery == Self.local)
+
+        profiles.completedRaces = 33
+        host.isLiveryLocked = true
+        await sync.sessionOpened()
+        host.isLiveryLocked = false
+        sync.mayAskService = { false }
+        await sync.sessionOpened()
+        sync.mayAskService = { true }
+        profiles.failure = OnlineSessionError.notConnected
+        await sync.sessionOpened()
+        #expect(host.adoptedCounts == [32])
     }
 
     @Test func aSaveWhileOnlineIsStored() async {

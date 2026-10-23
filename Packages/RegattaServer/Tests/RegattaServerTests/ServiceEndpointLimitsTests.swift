@@ -24,7 +24,7 @@ import Testing
         ServiceEndpoint(
             config: ServiceEndpointConfig(signInDeadline: signIn, idleTimeout: idle),
             sessions: sessions ?? SessionAuthority(store: store, verifier: StubVerifier()),
-            backends: ServiceBackends(queue: { _ in queue }))
+            backends: ServiceBackends(queue: { _ in queue }), attestation: .devDefault())
     }
 
     /// Waits up to `limit` for `condition`, checking every 20 ms.

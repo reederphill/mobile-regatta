@@ -21,6 +21,12 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     /// Opens a hand-off's race connection (#141): `/race` on the services' host with a session (#162), the Debug fake
     /// race host on the fakes; with neither (no endpoint) nothing answers.
     let raceConnector: RaceConnector
+    /// The profile's Game Center photo and leaderboard (#139): GameKit's where the identity is Game Center's, else
+    /// no photo and a leaderboard that only counts its taps.
+    let playerPhotos: any PlayerPhotoSource
+    let leaderboard: any LeaderboardPresenter
+    /// The leaderboard's top, the hidden lobby panel's (#142): GameKit's beside Game Center, a fixed five otherwise.
+    let leaderboardTop: any LeaderboardTopSource
 
     override init() {
         var (services, online, connector) = AppDelegate.makeServices(launchOptions: .current)
@@ -32,6 +38,11 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         }
         #endif
         (self.services, self.online, raceConnector) = (services, online, connector)
+        if AppDelegate.usesGameCenter(.current) {
+            (playerPhotos, leaderboard, leaderboardTop) = (GameKitPlayerPhoto(), GameKitLeaderboardPresenter(), GameKitLeaderboardTop())
+        } else {
+            (playerPhotos, leaderboard, leaderboardTop) = (NoPlayerPhoto(), RecordingLeaderboardPresenter(), FixedLeaderboardTop())
+        }
         super.init()
     }
     /// Usage analytics (#128), one for the app over its one set of `analytics.` keys: every scene logs to it. Sent at
@@ -41,7 +52,8 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
 
     private static func makeServices(launchOptions: LaunchOptions) -> (ServiceSet, OnlineStatus.Session?, RaceConnector) {
         // The fakes' online results scenarios fill in live, a sleep apart (the services package keeps no clock).
-        var services = launchOptions.fakeServices.map { ServiceSet.fake($0, wait: { try? await Task.sleep(for: $0) }) }
+        var services = launchOptions.fakeServices.map { ServiceSet.fake($0, wait: { try? await Task.sleep(for: $0) },
+                                                                                  clock: { Int(Date().timeIntervalSince1970) }) }
             ?? ServiceSet.unconnected(connectivity: PathConnectivityService())
         // A scripted queue plays at a pace a person can watch: a state a second, at `-timescale` (#140).
         if launchOptions.fakeServices != nil {
@@ -85,15 +97,19 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         return (services, online, connector)
     }
 
-    /// The online session on the real transport, the Keychain and the system's clock (#161).
+    /// The online session on the real transport, the Keychain and the system's clock (#161), proving each connection
+    /// with App Attest (#158; `unsupported` on the simulator).
     private static func makeSession(url: URL, device: any DeviceIdentitySource) -> OnlineSession {
+        let keys = KeychainAttestationKeyStore()
+        keys.purgeOnFreshInstall(defaults: .standard)
         let tokens = KeychainSessionTokenStore()
         tokens.purgeOnFreshInstall(defaults: .standard)
+        let attester = ConnectionAttester(attestor: DeviceAppAttestor(), store: keys, nonce: { DeviceAppAttestor.nonce() })
         let log = Logger(subsystem: "com.phillreeder.regatta", category: "session")
         return OnlineSession(OnlineSession.Dependencies(
             connect: { try await URLSessionServiceLink.connect(to: url) }, device: device, tokens: tokens,
             sleep: { try await Task.sleep(for: $0) }, jitter: { Double.random(in: -1...1) },
-            clientBuild: OnlineLaunch.clientBuild,
+            clientBuild: OnlineLaunch.clientBuild, attester: attester,
             // An event names no player and carries no token or signature; private all the same.
             log: { event in log.info("session: \(String(describing: event), privacy: .private)") }))
     }
@@ -120,6 +136,9 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         if let gameKit = (online?.device as? GameKitDeviceIdentity)?.gameKit { gameKit.start() }
         // The session follows the device's player from here; it opens nothing until she can use it (#161).
         if let session = online?.session { Task { await session.start() } }
+        #if DEBUG
+        if LaunchOptions.current.captureAppAttestFixture { AppAttestFixtureCapture.run() }
+        #endif
         Task { await analytics.flush() }
         return true
     }

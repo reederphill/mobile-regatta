@@ -1,21 +1,32 @@
 import Foundation
 import NIOHTTP1
+import AppAttest
 import RegattaDevAPI
 @testable import RegattaServerKit
 import Testing
 
-/// #67: the server has dev auth only, so it refuses to start unless `ENV=dev`, and the instant race
-/// exists only in dev.
+/// #67, #158: the server starts only with `ENV` exactly dev, staging or production; outside dev it needs Apple's root,
+/// the moderation key and Postgres, and refuses the App Attest bypass. The instant race exists only in dev.
 struct DevGateTests {
-    // MARK: Dev auth refuses to start without ENV=dev
+    /// What a staging or production server must be given, but `ENV`.
+    static func required() throws -> [String: String] {
+        let pem = FileManager.default.temporaryDirectory.appendingPathComponent("regatta-devgate-root-\(UUID()).pem")
+        try AppleAppAttestRoot.pem.write(to: pem, atomically: true, encoding: .utf8)
+        return ["REGATTA_APPLE_ROOT_PEM": pem.path, "OPENAI_MODERATION_API_KEY": "sk-test",
+                "REGATTA_DATABASE_URL": "postgres://regatta@localhost:5432/regatta"]
+    }
 
-    @Test func devAuthRefusesToStartWithoutEnvDev() async throws {
-        #expect(throws: ServerConfigError.devAuthOutsideDev("(unset)")) { try ServerConfig.load(from: [:]) }
-        for value in ["prod", "production", "staging", "DEV", "dev ", ""] {
-            #expect(throws: ServerConfigError.devAuthOutsideDev(value)) { try ServerConfig.load(from: ["ENV": value]) }
+    // MARK: Unknown environments refuse to start
+
+    @Test func unknownEnvironmentsRefuseToStart() async throws {
+        #expect(throws: ServerConfigError.unknownEnvironment("(unset)")) { try ServerConfig.load(from: [:]) }
+        for value in ["prod", "Production", "STAGING", "DEV", "dev ", ""] {
+            #expect(throws: ServerConfigError.unknownEnvironment(value)) { try ServerConfig.load(from: ["ENV": value]) }
             #expect(throws: ServerConfigError.self) { try SeatAuthPolicy.for(ServerEnvironment(env: value)) }
         }
         #expect(try SeatAuthPolicy.for(ServerEnvironment(env: "dev")) == .dev)
+        #expect(try SeatAuthPolicy.for(ServerEnvironment(env: "staging")) == .raceToken)
+        #expect(try SeatAuthPolicy.for(ServerEnvironment(env: "production")) == .raceToken)
         let config = try ServerConfig.load(from: ["ENV": "dev", "PORT": "0"])
         #expect(config.environment == .dev)
         #expect(config.port == 0)
@@ -23,12 +34,62 @@ struct DevGateTests {
         #expect(config.host == "127.0.0.1")
         #expect(try ServerConfig.load(from: ["ENV": "dev", "HOST": "0.0.0.0"]).host == "0.0.0.0")
 
-        // Even a config built by hand can't start a server outside dev.
-        var production = ServerConfig.dev()
-        production.environment = .other("prod")
-        await #expect(throws: ServerConfigError.devAuthOutsideDev("prod")) {
-            _ = try await RegattaHTTPServer.start(config: production)
+        // Even a config built by hand can't start a server in an unknown environment.
+        var unknown = ServerConfig.dev()
+        unknown.environment = .other("prod")
+        await #expect(throws: ServerConfigError.unknownEnvironment("prod")) {
+            _ = try await RegattaHTTPServer.start(config: unknown)
         }
+    }
+
+    // MARK: Staging and production (#158)
+
+    @Test func stagingAndProductionLoadWithWhatTheyNeed() throws {
+        let required = try Self.required()
+        let staging = try ServerConfig.load(from: required.merging(["ENV": "staging"]) { $1 })
+        #expect(staging.environment == .staging && staging.auth == .raceToken)
+        // Staging takes both: TestFlight builds attest as production.
+        #expect(!staging.appAttest.bypass && staging.appAttest.environments == [.development, .production])
+        #expect(staging.identity.database != nil)
+        let production = try ServerConfig.load(from: required.merging(["ENV": "production"]) { $1 })
+        #expect(production.environment == .production && production.auth == .raceToken)
+        #expect(!production.appAttest.bypass && production.appAttest.environments == [.production])
+        // `off` is accepted outside dev, and staging may be narrowed to development keys.
+        #expect(try !ServerConfig.load(from: required.merging(["ENV": "production", "APP_ATTEST_BYPASS": "off"]) { $1 }).appAttest.bypass)
+        #expect(try ServerConfig.load(from: required.merging(["ENV": "staging", "APP_ATTEST_ENVIRONMENT": "development"]) { $1 })
+            .appAttest.environments == [.development])
+        // Dev: the bypass on and both environments, unless told otherwise.
+        let dev = try ServerConfig.load(from: ["ENV": "dev"])
+        #expect(dev.appAttest.bypass && dev.appAttest.environments == [.development, .production] && dev.auth == .dev)
+        #expect(try !ServerConfig.load(from: ["ENV": "dev", "APP_ATTEST_BYPASS": "off"]).appAttest.bypass)
+        #expect(try ServerConfig.load(from: ["ENV": "dev", "APP_ATTEST_ENVIRONMENT": "production"]).appAttest.environments == [.production])
+    }
+
+    /// The ticket's acceptance: a production config rejects the bypass. Five refusals.
+    @Test func productionConfigRejectsBypass() throws {
+        let required = try Self.required()
+        // 1, 2: the bypass on, in production and in staging.
+        for env in ["production", "staging"] {
+            #expect(throws: ServerConfigError.invalid(variable: "APP_ATTEST_BYPASS", value: "on", expected: "off or unset outside ENV=dev")) {
+                try ServerConfig.load(from: required.merging(["ENV": env, "APP_ATTEST_BYPASS": "on"]) { $1 })
+            }
+        }
+        // 3: production with development keys (or both).
+        for value in ["development", "both"] {
+            #expect(throws: ServerConfigError.invalid(variable: "APP_ATTEST_ENVIRONMENT", value: value, expected: "production in ENV=production")) {
+                try ServerConfig.load(from: required.merging(["ENV": "production", "APP_ATTEST_ENVIRONMENT": value]) { $1 })
+            }
+        }
+        // 4: production without Postgres: keys in memory would be forgotten at a restart.
+        var noDatabase = required.merging(["ENV": "production"]) { $1 }
+        noDatabase["REGATTA_DATABASE_URL"] = nil
+        #expect(throws: ServerConfigError.invalid(variable: "REGATTA_DATABASE_URL", value: "(unset)", expected: "Postgres outside ENV=dev")) {
+            try ServerConfig.load(from: noDatabase)
+        }
+        // 5: values that aren't the variables' own, anywhere.
+        #expect(throws: ServerConfigError.self) { try ServerConfig.load(from: required.merging(["ENV": "production", "APP_ATTEST_BYPASS": "yes"]) { $1 }) }
+        #expect(throws: ServerConfigError.self) { try ServerConfig.load(from: ["ENV": "dev", "APP_ATTEST_BYPASS": "true"]) }
+        #expect(throws: ServerConfigError.self) { try ServerConfig.load(from: ["ENV": "dev", "APP_ATTEST_ENVIRONMENT": "sandbox"]) }
     }
 
     @Test func configRejectsBadValues() {
@@ -38,14 +99,23 @@ struct DevGateTests {
     }
 
     #if os(macOS) || os(Linux)
-    /// The real executable, in its own process: exit status 78 and the reason, and it never listens.
-    @Test func serverExecutableRefusesToStartWithoutEnvDev() throws {
+    /// The real executable, in its own process: exit status 78 and the reason, and it never listens. For an unknown
+    /// environment, and for production with the bypass on (everything else it needs given).
+    @Test func serverExecutableRefusesToStart() throws {
         let executable = try #require(productExecutable("RegattaServer"), "RegattaServer not found next to the test bundle")
-        for env in [nil, "prod"] as [String?] {
+        var production: [String: String?] = try Self.required().mapValues { $0 }
+        production["ENV"] = "production"
+        production["APP_ATTEST_BYPASS"] = "on"
+        let cases: [([String: String?], String)] = [
+            (["ENV": nil], "refuses to start unless ENV is dev, staging or production"),
+            (["ENV": "prod"], "refuses to start unless ENV is dev, staging or production"),
+            (production, "APP_ATTEST_BYPASS=on is invalid"),
+        ]
+        for (variables, reason) in cases {
             let process = Process()
             process.executableURL = executable
             var environment = ProcessInfo.processInfo.environment
-            environment["ENV"] = env
+            for (name, value) in variables { environment[name] = value }
             environment["PORT"] = "0"
             process.environment = environment
             let errors = Pipe()
@@ -59,9 +129,9 @@ struct DevGateTests {
             if started { process.terminate() }
             process.waitUntilExit()
             let printed = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            #expect(!started, "RegattaServer was still running after 10 s with ENV=\(env ?? "(unset)")")
+            #expect(!started, "RegattaServer was still running after 10 s with \(variables)")
             #expect(process.terminationStatus == 78)
-            #expect(printed.contains("refuses to start unless ENV=dev"))
+            #expect(printed.contains(reason), "\(printed)")
         }
     }
     #endif
@@ -69,7 +139,7 @@ struct DevGateTests {
     // MARK: Instant-race endpoint refused when ENV != dev
 
     @Test func instantRaceEndpointRefusedWhenEnvIsNotDev() async throws {
-        for env in [ServerEnvironment.other(nil), .other("prod"), .other("staging")] {
+        for env in [ServerEnvironment.other(nil), .other("prod"), .staging, .production] {
             #expect(Route.resolve(method: .POST, path: ServerPath.instantRace, environment: env) == .notFound)
             #expect(Route.resolve(method: .GET, path: ServerPath.instantRace, environment: env) == .notFound)
             // The rest of the server is the same.

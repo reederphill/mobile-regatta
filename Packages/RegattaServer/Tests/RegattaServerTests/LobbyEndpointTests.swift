@@ -24,7 +24,8 @@ import Testing
             let hub = LobbyHub(ratings: book, wordList: ChatWordList(entries: ["bitch"]))
             self.hub = hub
             endpoint = ServiceEndpoint(config: ServiceEndpointConfig(), sessions: SessionAuthority(store: store, verifier: StubVerifier()),
-                                       backends: ServiceBackends(lobby: { ServerLobbyService(hub: hub, player: $0) }), lobby: hub)
+                                       backends: ServiceBackends(lobby: { ServerLobbyService(hub: hub, player: $0) }), lobby: hub,
+                                       attestation: .devDefault())
         }
 
         /// A connection signed in as `name`, who has accepted the terms and completed a race.

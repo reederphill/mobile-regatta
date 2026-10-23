@@ -342,6 +342,22 @@ private let stripe = Livery(design: DesignID("skiff-stripe"),
         #expect(defaults.object(forKey: CompletedRacesStore.key) == nil, "kept in the UI tests' own suite")
     }
 
+    /// The server's count (#139, T3) replaces the device's, results' +1 and all: the stored count and My boat's.
+    @Test func theServerCountReplacesTheDevicesOwn() {
+        let defaults = emptySuite()
+        let app = AppModel(launchOptions: options(), defaults: defaults)
+        let completed = CompletedRacesStore(defaults: app.myBoatDefaults)
+        completed.countCompletion(of: "race-1")
+        app.myBoat.completedRaces = completed.count
+        app.adoptServerCount(32)
+        #expect(completed.count == 32 && app.myBoat.completedRaces == 32)
+        // Lower too: the server's is the count.
+        app.adoptServerCount(9)
+        #expect(completed.count == 9 && app.myBoat.completedRaces == 9)
+        // A race the device already counted isn't counted again after the server's count came in.
+        #expect(!completed.countCompletion(of: "race-1"))
+    }
+
     /// A design bought before launch is owned from the first frame, not once the ownership stream yields.
     @Test func ownedDesignsAreSeededAtLaunch() {
         let defaults = emptySuite()

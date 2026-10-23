@@ -5,6 +5,9 @@ import SwiftUI
 struct MenuPageView: View {
     let page: AppModel.Page
     @Bindable var model: AppModel
+    /// Home's online actions: the profile's Sign in and Try again are the lobby area's (#139).
+    var online = HomeOnlineActions()
+    @Environment(\.onlineStatus) private var onlineStatus
 
     var body: some View {
         switch page {
@@ -13,12 +16,13 @@ struct MenuPageView: View {
         case .myBoat:
             MyBoatView(model: model.myBoat)
         case .profile:
-            PlaceholderPage(title: "Profile", systemImage: "person.crop.circle", id: "page-profile",
-                            message: "Your rating, races and badges arrive here.")
+            ProfileView(model: model, status: onlineStatus, online: online)
         case .help:
             HelpPage()
         case .settings:
             SettingsView(model: model)
+        case .blockedPlayers:
+            BlockedPlayersPage()
         #if DEBUG
         case .tuning:
             TuningView(model: model.tuning)
@@ -125,45 +129,6 @@ struct PracticeSetupView: View {
     }
 }
 
-/// A page whose content a later ticket builds.
-private struct PlaceholderPage<Extra: View>: View {
-    let title: String
-    let systemImage: String
-    let id: String
-    let message: String
-    let extra: Extra
-
-    init(title: String, systemImage: String, id: String, message: String, @ViewBuilder extra: () -> Extra = { EmptyView() }) {
-        self.title = title
-        self.systemImage = systemImage
-        self.id = id
-        self.message = message
-        self.extra = extra()
-    }
-
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 12) {
-                Image(systemName: systemImage)
-                    .font(.largeTitle)
-                    .foregroundStyle(ChromePalette.tint)
-                    .accessibilityHidden(true)
-                Text(message)
-                    .font(MenuFont.body())
-                    .multilineTextAlignment(.center)
-                extra
-            }
-            .padding(.vertical, 40)
-            .readableColumn()
-            // UI tests check the page was pushed.
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier(id)
-        }
-        .menuBackground()
-        .navigationTitle(title)
-    }
-}
-
 #if DEBUG
 /// The dev race server Race online joins in a Debug build (#68), `host:port`, and the dev player it signs in as there
 /// in place of Game Center (#162: a number; empty for Game Center, or the dev instant race). `-onlineHost` and
@@ -192,7 +157,7 @@ struct DevRaceServerField: View {
 }
 #endif
 
-/// A brief sheet over the home screen (#25). A placeholder until the lobby's boat card.
+/// A brief sheet over the home screen (#25): what `HomeView` has no view of its own for.
 struct MenuSheetView: View {
     let sheet: AppModel.Sheet
     @Environment(\.dismiss) private var dismiss
@@ -215,7 +180,7 @@ struct MenuSheetView: View {
         }
         .tint(ChromePalette.tint)
         .presentationDetents([.medium])
-        .accessibilityIdentifier("sheet-\(sheet.rawValue)")
+        .accessibilityIdentifier("sheet-\(sheet.name)")
     }
 
     private var title: String {
@@ -230,7 +195,8 @@ struct MenuSheetView: View {
         switch sheet {
         // `HomeView` always shows `TermsSheet` for the terms.
         case .terms: ""
-        case .boatCard: "A sailor's boat card arrives here."
+        // `HomeView` always shows `BoatCardSheet` for a card.
+        case .boatCard: ""
         // `HomeView` shows the results themselves; this only when there are none to show.
         case .lastRace: "No last race yet."
         }

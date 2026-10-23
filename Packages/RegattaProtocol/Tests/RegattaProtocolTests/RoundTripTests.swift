@@ -193,7 +193,7 @@ import Testing
 
     @Test func varintsMustBeShortestAndStringsValidUTF8() throws {
         let header: [UInt8] = [MessageType.helloAck.rawValue, 0, 0, 0, 0, 0, 0, 0, 0]
-        #expect(try Frame(decoding: header + [1, 0x41]).message == .helloAck(HelloAck(serverBuild: "A")))
+        #expect(try Frame(decoding: header + [1, 0x41, 0]).message == .helloAck(HelloAck(serverBuild: "A")))
         #expect(throws: WireError.invalidValue("serverBuild")) { try Frame(decoding: header + [0x81, 0x00, 0x41]) }
         #expect(throws: WireError.invalidValue("serverBuild")) { try Frame(decoding: header + [2, 0xC3, 0x28]) }
         #expect(throws: WireError.tooLong("serverBuild")) { try Frame(decoding: header + [0x81, 0x02] + Array(repeating: 0x41, count: 257)) }

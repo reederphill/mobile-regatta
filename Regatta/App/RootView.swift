@@ -41,7 +41,7 @@ struct RootView: View {
             case .livery: LiveryGalleryView()
             case .briefing(let fixture): BriefingGalleryView(fixture: fixture)
             case .briefingLocked: BriefingGalleryView(fixture: nil)
-            case .practiceSetup, .pauseMenu, .myBoat, .help, .queueBar, .rejoin, .lastRaceRating:
+            case .practiceSetup, .pauseMenu, .myBoat, .help, .queueBar, .rejoin, .lastRaceRating, .profile, .lobby:
                 MenuGalleryView(gallery: fixtureGallery, model: model)
             case .results(let stage, let rivalSkill): ResultsGalleryView(stage: stage, rivalSkill: rivalSkill)
             }
@@ -218,6 +218,7 @@ struct RootView: View {
                 if model.sheet == .terms { agreeToTerms() }
             case .settings: model.path = [.settings]
             case .practiceSetup: model.path = [.practiceSetup]
+            case .profile: model.path = [.profile]
             case .startPractice: model.beginPractice()
             case .ready: model.finishBriefing()
             case .takeover:
@@ -239,6 +240,15 @@ struct RootView: View {
                 }
             case .lastRace: model.sheet = .lastRace
             case .raceEnded: FakeRaceDirector.current?.endQuietly()
+            case .boatCard:
+                let linesBy = ContinuousClock.now + .seconds(10)
+                func firstOther() -> LobbyAuthor? {
+                    guard let lobby = onlineStatus?.lobby else { return nil }
+                    return lobby.feed.lines.lazy.compactMap { lobby.opensCard($0.message) }.first
+                }
+                while firstOther() == nil, ContinuousClock.now < linesBy { try? await Task.sleep(for: .milliseconds(100)) }
+                if let author = firstOther() { model.sheet = .boatCard(author) }
+            case .blockedPlayers: model.path = [.settings, .blockedPlayers]
             case .home:
                 let homeBy = ContinuousClock.now + .seconds(300)
                 while model.phase != .home, ContinuousClock.now < homeBy { try? await Task.sleep(for: .milliseconds(100)) }

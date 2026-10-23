@@ -65,7 +65,10 @@ final class OnlineQueueRaceUITests: XCTestCase {
     /// Home with the session open and the terms accepted: the lobby area asks for nothing.
     @MainActor private func waitForTheSession(_ app: XCUIApplication) {
         XCTAssertTrue(app.buttons["race-online"].waitForExistence(timeout: 30), "no Race online")
-        XCTAssertTrue(app.staticTexts["Lobby"].waitForExistence(timeout: 30), "no session for a player with the terms accepted")
+        // Past the gates: the lobby's own panels (before #164 a session's lobby can't be reached, so "Can't reach the
+        // lobby"), never Sign in or the terms.
+        let pastTheGates = app.descendants(matching: .any).matching(NSPredicate(format: "identifier IN %@", ["lobby-feed", "lobby-unreachable", "lobby-loading"]))
+        XCTAssertTrue(pastTheGates.firstMatch.waitForExistence(timeout: 30), "no session for a player with the terms accepted")
     }
 
     /// Race online, into the queue: the bar, not the stand-in alert.
@@ -243,13 +246,33 @@ final class OnlineQueueRaceUITests: XCTestCase {
         joinTheQueue(app)
         // The lock is 30 s after whichever of the two joined first.
         XCTAssertTrue(app.buttons["briefing-leave"].waitForExistence(timeout: 60), "the fleet never locked: no takeover")
-        let second = fleetRows(app, named: "Dev \(Self.secondPlayer)").firstMatch
-        XCTAssertTrue(second.waitForExistence(timeout: 10), "the second person isn't in the briefing's fleet")
-        XCTAssertFalse(second.label.contains("Bot"), "the second person is listed as a bot: \(second.label)")
-        let mine = fleetRows(app, named: "You").firstMatch
-        XCTAssertTrue(mine.exists, "her own boat isn't in the briefing's fleet")
-        XCTAssertFalse(mine.label.contains("Bot"), "her own boat is listed as a bot: \(mine.label)")
+        // Both rows from one snapshot of the briefing: it is up for seconds, and on a loaded simulator a query per row
+        // can outlast it (main 39785610313: the second row's query took 4 s, hers began after the race had replaced
+        // the briefing and took 74 s over the race's tree).
+        let rows = try briefingFleetLabels(app)
+        let second = rows.first { $0.contains("Dev \(Self.secondPlayer)") }
+        XCTAssertNotNil(second, "the second person isn't in the briefing's fleet: \(rows)")
+        XCTAssertFalse(second?.contains("Bot") ?? false, "the second person is listed as a bot: \(second ?? "")")
+        let mine = rows.first { $0.contains("You") }
+        XCTAssertNotNil(mine, "her own boat isn't in the briefing's fleet: \(rows)")
+        XCTAssertFalse(mine?.contains("Bot") ?? false, "her own boat is listed as a bot: \(mine ?? "")")
         XCTAssertTrue(app.staticTexts["race-clock"].waitForExistence(timeout: 60), "no race clock on the water")
+    }
+
+    /// The labels of the briefing's fleet rows (`briefing-fleet-<seat>`), read from one snapshot of the app, retried
+    /// for up to 10 s until the fleet is listed.
+    @MainActor private func briefingFleetLabels(_ app: XCUIApplication) throws -> [String] {
+        let until = Date().addingTimeInterval(10)
+        var labels: [String] = []
+        repeat {
+            labels = []
+            var stack: [any XCUIElementSnapshot] = [try app.snapshot()]
+            while let node = stack.popLast() {
+                if node.identifier.hasPrefix("briefing-fleet-") { labels.append(node.label) }
+                stack.append(contentsOf: node.children)
+            }
+        } while labels.isEmpty && Date() < until
+        return labels
     }
 
     // MARK: The kill phase
