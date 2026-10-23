@@ -55,14 +55,44 @@ import RegattaCore
         #expect(fleet.fleet.map(\.standingLook) == nominal, "the hulls, heel or rig moved with the tier")
     }
 
-    /// `-cuesOnly` (#127's UI test) hides every sail; the hulls still stand.
+    /// `-cuesOnly` (#127's UI test) hides every sail and boom; the hulls still stand.
     @Test func cuesOnlyHidesEverySail() throws {
         let (scene, _) = try GameSceneTests.scene(fixture: "cues")
         let fleet = try #require(scene.standingFleet)
-        #expect(fleet.fleet.allSatisfy { !$0.sailLook.isHidden })
+        #expect(fleet.fleet.allSatisfy { !$0.sailLook.isHidden && !$0.sailLook.boomIsHidden })
         scene.drawsCuesOnly = true
         scene.update(0)
-        #expect(fleet.fleet.allSatisfy { $0.sailLook.isHidden })
+        #expect(fleet.fleet.allSatisfy { $0.sailLook.isHidden && $0.sailLook.boomIsHidden })
+    }
+
+    /// With the sails hidden (`-cuesOnly`) the boom is hidden too and sits at its trim with no flutter or luff
+    /// shiver, so a far boat at `.farReduced` draws her rig the same as a near one or the full tier: nothing hidden
+    /// moves with the thermal tier (#597).
+    @Test func hiddenSailsDrawTheSameRigAtEveryTier() {
+        let boat = WakeTests.boat(speed: 6)
+        var pose = BoatPose(boat, ease: false, isGhost: false, boatClass: WakeTests.boatClass, style: Self.style)
+        pose.flutter = 1
+        pose.luffLift = 1
+        func drawn(_ detail: SailDetail, hulls: Double, hidesSail: Bool) -> Boat3D {
+            let drawn = Self.boat3D()
+            drawn.update(pose: pose, style: Self.style, x: 0, z: 0, yaw: 0, sailDetail: detail, hullsFromYou: hulls,
+                         hidesSail: hidesSail, time: 1.3, dt: 0, settled: true)
+            return drawn
+        }
+        let side: Float = pose.sailSide == .port ? -1 : 1
+        let trim = Float(pose.sailTrim) * side
+        // Shown, the near boat flutters and the far one doesn't: the tier shows.
+        #expect(abs(drawn(.farReduced, hulls: 2, hidesSail: false).sailLook.boom
+                    - drawn(.farReduced, hulls: 20, hidesSail: false).sailLook.boom) > 1e-3)
+
+        let far = drawn(.farReduced, hulls: 20, hidesSail: true)
+        #expect(far.sailLook.isHidden && far.sailLook.boomIsHidden)
+        #expect(abs(far.sailLook.boom - trim) < 1e-5)
+        for near in [drawn(.farReduced, hulls: 2, hidesSail: true), drawn(.full, hulls: 20, hidesSail: true),
+                     drawn(.farReduced, hulls: 0, hidesSail: true)] {
+            #expect(near.sailLook.boom == far.sailLook.boom, "the hidden boom's turn moved with the tier")
+            #expect(near.standingLook == far.standingLook)
+        }
     }
 
     /// The buoys take the chart's tones each frame (#15): the active leg's marks orange, the rest grey, the pin

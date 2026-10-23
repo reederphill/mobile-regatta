@@ -165,6 +165,7 @@ final class WaterNode: SKNode {
 
     /// Draws `world` as seen through `view`, `dt` simulated seconds after the last frame (0 when settled).
     func update(_ world: WaterWorld, view: WaterView, dt: Double) {
+        setClock(world.time)
         updatePressure(world, view: view)
         updateRipple(world, view: view, dt: dt)
         updatePuffs(world.puffs)
@@ -356,15 +357,30 @@ final class WaterNode: SKNode {
         shader.uniformNamed("u_band")?.floatValue = Float(1 - style.glintBand)
     }
 
+    /// The wave's and glint's clock: race seconds, wrapped at 600 (`setClock`), never SpriteKit's `u_time`, so a
+    /// frozen render fixture draws the same water in every frame and a paused race holds still (as
+    /// `TurbulenceTrailLayer`'s `u_clock`). The wave's is shared, as its shader is; the glint's is its own.
+    private static let waveClock = SKUniform(name: "u_clock", float: 0)
+    /// Race time as the wave's and glint's shaders read it, for tests.
+    var shaderClock: (wave: Float, glint: Float) {
+        (Self.waveClock.floatValue, glint.shader?.uniformNamed("u_clock")?.floatValue ?? .nan)
+    }
+
+    private func setClock(_ time: Double) {
+        let clock = Float(time - 600 * (time / 600).rounded(.down))
+        Self.waveClock.floatValue = clock
+        glint.shader?.uniformNamed("u_clock")?.floatValue = clock
+    }
+
     /// Shared by every water node: the ripple tiles batch on one shader.
     private static let waveShader = SKShader(source: """
     void main() {
         vec2 uv = v_tex_coord;
-        uv.y += 0.01 * sin(u_time * 2.0 + uv.x * 12.0);
+        uv.y += 0.01 * sin(u_clock * 2.0 + uv.x * 12.0);
         vec4 t = texture2D(u_texture, uv);
         gl_FragColor = vec4(v_color_mix.rgb * t.a, t.a) * v_color_mix.a;
     }
-    """)
+    """, uniforms: [waveClock])
 
     /// The glint's own shader (its uniforms are this node's): a gaussian band at `u_band`, a haze along it and
     /// sparkles hashed per cell, each twinkling on its own rate while `u_twinkle` is 1, held at its phase at 0.
@@ -376,7 +392,7 @@ final class WaterNode: SKNode {
             float band = exp(-d * d * 1.6);
             vec2 cell = floor(uv * vec2(260.0, 560.0));
             float r = fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5453);
-            float t = u_time * u_twinkle;
+            float t = u_clock * u_twinkle;
             float twinkle = 0.5 + 0.5 * sin(t * (1.5 + 3.0 * r) + r * 40.0);
             float sparkle = step(0.965, r) * pow(twinkle, 6.0);
             float a = band * u_alpha * (0.125 + sparkle);
@@ -384,7 +400,7 @@ final class WaterNode: SKNode {
         }
         """)
         shader.uniforms = [SKUniform(name: "u_band", float: 0.7), SKUniform(name: "u_alpha", float: 0.2),
-                           SKUniform(name: "u_twinkle", float: 1)]
+                           SKUniform(name: "u_twinkle", float: 1), SKUniform(name: "u_clock", float: 0)]
         return shader
     }
 

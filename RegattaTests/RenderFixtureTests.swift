@@ -747,8 +747,10 @@ import UIKit
             }
             let sceneRect = skView.convert(skView.bounds, to: window)
             #expect(sceneRect.width < window.bounds.width - 100, "\(vision): not letterboxed: \(sceneRect)")
-            #expect(session.scene.camera.map { $0.xScale != 1 && $0.position != .zero } == true,
-                    "\(vision): the camera isn't scaled and moved")
+            // The camera stays at the origin and zooms (#597); the world moves under it, to −centre.
+            #expect(session.scene.camera.map { $0.xScale != 1 } == true, "\(vision): the camera isn't scaled")
+            #expect(session.scene.childNode(withName: "//water")?.parent.map { $0.position != .zero } == true,
+                    "\(vision): the world isn't moved")
             #expect(session.scene.filter == nil && !session.scene.shouldEnableEffects, "\(vision): the scene filters itself")
 
             let tree = Self.tree(window.layer, in: window.layer)

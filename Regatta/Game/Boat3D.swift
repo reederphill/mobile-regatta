@@ -341,7 +341,8 @@ final class Boat3D {
     /// Draws her in `pose` at ground point (`x`, `z`) turned `yaw`, at race time `time` (every flutter swings on it).
     /// `settled` trims the sail straight to its target (a frozen render fixture). At `sailDetail` `.farReduced` and
     /// `hullsFromYou` past `style.farBoatHulls` she draws her sail at its trim and fullness alone (#127); a ghost and
-    /// your boat (0 hulls) always in full. `hidesSail` hides it (`-cuesOnly`).
+    /// your boat (0 hulls) always in full. `hidesSail` hides it and the boom (`-cuesOnly`), the boom at its trim alone
+    /// whatever the tier, so a hidden rig draws the same near and far.
     func update(pose: BoatPose, style: BoatStyle, x: Float, z: Float, yaw: Float, sailDetail: SailDetail = .full,
                 hullsFromYou: Double = 0, hidesSail: Bool = false, time: Double, dt: Double, settled: Bool) {
         root.position = SCNVector3(x, 0, z)
@@ -359,9 +360,12 @@ final class Boat3D {
         let target = Float(pose.sailTrim) * side
         sailAngle += (target - sailAngle) * (settled ? 1 : min(1, Float(dt) * 8))
         let phase = Double(seat) * style.flutterPhaseStep
-        let swing = sin(time * style.flutterSwingRate + phase) * style.flutterDegrees * .pi / 180 * pose.flutter * detail
+        // Hidden (`-cuesOnly`), the boom swings with no tier: at its trim.
+        let swingDetail = hidesSail ? 0 : detail
+        let swing = sin(time * style.flutterSwingRate + phase) * style.flutterDegrees * .pi / 180 * pose.flutter
+            * swingDetail
         // Pinched (#219): the leading edge lifts, a small quick shiver at the luff on top of any flutter.
-        let luff = sin(time * 37 + phase) * style.pinchLuffDegrees * .pi / 180 * pose.luffLift * detail
+        let luff = sin(time * 37 + phase) * style.pinchLuffDegrees * .pi / 180 * pose.luffLift * swingDetail
         boomPivot.eulerAngles = SCNVector3(0, sailAngle + Float(swing + luff), 0)
         // A flapping sail loses its belly; a ghost's hangs limp. Pinched it flattens, footed it fills (#219).
         let belly = pose.isGhost ? style.ghostSailBelly
@@ -369,13 +373,14 @@ final class Boat3D {
                 * (0.5 + 0.5 * sin(time * style.flapBellyRate + phase)))
         sailNode.scale = SCNVector3(side * Float(max(belly, 0.05)), 1, 1)
         sailNode.isHidden = hidesSail
+        boomPivot.isHidden = hidesSail
         let transparency = pose.isGhost ? CGFloat(style.ghostAlpha) : 1
         for material in materials where material.transparency != transparency { material.transparency = transparency }
     }
 
-    /// What the tiers may change (#127): the boom's turn and the sail's belly, and whether the sail shows.
-    var sailLook: (boom: Float, belly: Float, isHidden: Bool) {
-        (boomPivot.eulerAngles.y, sailNode.scale.x, sailNode.isHidden)
+    /// What the tiers may change (#127): the boom's turn and the sail's belly, and whether the sail and the boom show.
+    var sailLook: (boom: Float, belly: Float, isHidden: Bool, boomIsHidden: Bool) {
+        (boomPivot.eulerAngles.y, sailNode.scale.x, sailNode.isHidden, boomPivot.isHidden)
     }
     /// What no tier changes: the hull's, mast's, boom's and sail's places in her frame, her heel and her trim.
     var standingLook: [SIMD3<Float>] {

@@ -59,21 +59,25 @@ import RegattaCore
         return session
     }
 
-    /// The world (every layer, the water's included) and the camera (the edge arrow) stop drawing, and come back.
+    /// The world (every layer, the water's included, under the tilt node with the land's rim, #597) and the camera
+    /// (the edge arrow) stop drawing, and come back.
     @Test func paintsWorldHidesTheWorldAndTheCamera() throws {
         let session = Self.presented()
         let scene = session.scene
         let world = try #require(scene.childNode(withName: "//water")?.parent)
+        // Scene ← tilt node ← rotor ← world.
+        let tilt = try #require(world.parent?.parent)
         let cam = try #require(scene.camera)
-        #expect(scene.children.contains(world) && scene.children.contains(cam))
-        #expect(scene.paintsWorld && !world.isHidden && !cam.isHidden, "a normal launch paints")
+        #expect(scene.children.contains(tilt) && scene.children.contains(cam))
+        #expect(tilt.childNode(withName: "landRim") != nil, "the land's rim is under the tilt node")
+        #expect(scene.paintsWorld && !tilt.isHidden && !world.isHidden && !cam.isHidden, "a normal launch paints")
 
         scene.paintsWorld = false
-        #expect(world.isHidden && cam.isHidden)
+        #expect(tilt.isHidden && cam.isHidden)
         #expect(scene.children.filter { !$0.isHidden }.isEmpty, "nothing in the scene is left to draw")
 
         scene.paintsWorld = true
-        #expect(!world.isHidden && !cam.isHidden)
+        #expect(!tilt.isHidden && !world.isHidden && !cam.isHidden)
     }
 
     /// A hidden world (`-hideScene`) builds no ribbons, the bulk of a big fleet's render (#377); painted again, the

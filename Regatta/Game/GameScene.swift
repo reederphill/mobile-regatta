@@ -88,6 +88,8 @@ final class GameScene: SKScene {
     /// speed. The HUD and results are SwiftUI's.
     var paintsWorld = true {
         didSet {
+            // The tilt node holds the world and the land's rim (#597).
+            tiltNode.isHidden = !paintsWorld
             world.isHidden = !paintsWorld
             cam.isHidden = !paintsWorld
             // Its own flag too: an SK3DNode under a hidden camera must not render its SceneKit scene either.
