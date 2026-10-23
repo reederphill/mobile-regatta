@@ -10,7 +10,9 @@ import RegattaCore
 /// **Information, not foresight** (ADR 0001): the planner's world is built from her `SeatView` and nothing else, by
 /// construction (`PerceivedWind`): the wind at her boat, the puffs and lulls drawn on the water within her perception
 /// (`Tactics.puffRange`) drifting as they are drawn to, and the pressure map as the water shows it (`SeatView.pressure`,
-/// at most `PressureMap.refreshTicks` old). The wind there holds as it is now: no shift is forecast, no key is read.
+/// at most `PressureMap.refreshTicks` old). No key is read: her shift off the course's axis (the public mean wind)
+/// fades back to it over `BotTunables.plannerShiftReversion` seconds, as a player expects an oscillating breeze to swing
+/// back, and the rest of the leg past her horizon is reckoned in the mean wind.
 ///
 /// Rules and the fleet stay the heuristics' (`upwindTack`'s tack interval, fleet tactics, cover, laylines and corridor,
 /// and everything off the open beat and run): the planner is asked only where they would weigh the shift.
@@ -51,19 +53,35 @@ struct BotPlanner: Sendable, Equatable {
     struct PerceivedWind {
         /// The wind at her boat now: direction, and its speed less the puffs on her.
         let direction: Double
+        /// The course's axis (`CourseLayout.axis`, the public mean wind), and how fast her shift off it fades, seconds
+        /// (an e-folding time); 0, it never does.
+        let mean: Double
+        let reversion: Double
         let baseSpeed: Double
         let here: Pressure?
         let pressure: SeatView.PressureMap?
         let puffs: [SeatView.DrawnPuff]
 
         /// From `view`, seeing puffs and pressure out to `range` metres (`Tactics.puffRange`); none when 0.
-        init(_ view: SeatView, range: Double) {
+        init(_ view: SeatView, range: Double, reversion: Double = 0) {
             let b = view.own
             direction = b.windDirection
+            mean = view.course.axis
+            self.reversion = reversion
             pressure = range > 0 ? view.pressure : nil
             here = pressure?.sample(at: b.position)
             puffs = range > 0 ? view.puffs.filter { ($0.center - b.position).length - $0.radius <= range } : []
             baseSpeed = b.polarWindSpeed / Self.puffFactor(puffs, at: b.position, after: 0)
+        }
+
+        /// e^−x for x ≥ 0, from the stdlib-free series RegattaBots keeps to (a few terms of `(1 + x/n)^−n` are close
+        /// enough for a forecast): 1 at 0, falling to 0.
+        static func fade(_ x: Double) -> Double {
+            guard x > 0 else { return 1 }
+            guard x < 40 else { return 0 }
+            var y = 1 + x / 64
+            for _ in 0..<6 { y *= y }
+            return 1 / y
         }
 
         /// A puff's or lull's change on the wind, as the race's `(1 − d²)²` falloff: its tone at its centre.
@@ -82,6 +100,7 @@ struct BotPlanner: Sendable, Equatable {
         /// puffs drifted there.
         func at(_ p: Vec2, after seconds: Double) -> (direction: Double, speed: Double) {
             var direction = self.direction
+            if reversion > 0 { direction = mean + wrapAngle(self.direction - mean) * Self.fade(seconds / reversion) }
             var speed = baseSpeed
             if let here, let there = pressure?.sample(at: p), here.factor > 0 {
                 speed *= there.factor / here.factor
@@ -128,7 +147,8 @@ struct BotPlanner: Sendable, Equatable {
     /// left her in the wind she sees there (two tacks or gybes where it can't be fetched), plus what her speed below
     /// her target there costs to make up.
     static func seconds(_ sailed: Sailed, to target: Vec2, wind: PerceivedWind, boatClass: BoatClass) -> Double {
-        let w = wind.at(sailed.state.position, after: sailed.seconds)
+        // The rest of the leg in the wind she expects for it: the mean's, where her shift fades.
+        let w = wind.at(sailed.state.position, after: wind.reversion > 0 ? 1e9 : sailed.seconds)
         let polar = SteadyPolar(boatClass: boatClass, tws: w.speed)
         let run = target - sailed.state.position
         let distance = run.length
@@ -155,9 +175,9 @@ struct BotPlanner: Sendable, Equatable {
     /// Seconds turning now gains on holding on, to `target`, for her in `view` sailing `twa` (her groove's angle on
     /// either side), at `depth`, seeing out to `range` metres: positive, the turn gets her there sooner.
     static func turnGain(_ view: SeatView, twa: Double, isPlaning: Bool, target: Vec2, depth: Depth,
-                         range: Double) -> Double {
+                         range: Double, reversion: Double = 0) -> Double {
         let b = view.own
-        let wind = PerceivedWind(view, range: range)
+        let wind = PerceivedWind(view, range: range, reversion: reversion)
         let kite: Spinnaker = view.boatClass.spinnaker.map { b.twa >= $0.hoistAboveTWA ? .up : .down } ?? .down
         let start = BoatDynamics.State(position: b.position, heading: b.heading, speed: b.speed, rudder: b.rudder,
                                        boomSide: b.boomSide, isPlaning: isPlaning, spinnaker: kite)

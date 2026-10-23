@@ -338,8 +338,9 @@ extension BotBrain {
     /// Inside her tack interval only a lee-bow tacks her (#329, `FleetTactics.leeBowInsideTackInterval`): it answers a
     /// crossing, not a tack of her choosing.
     ///
-    /// A bot that plans (`BotBrain.planning`, #583 stage 3) asks her planner (`plannedTurn`) in place of the shift, puff
-    /// and pressure's degrees against her threshold, `target` being where she sails for; the rest stands.
+    /// A bot that plans (`BotBrain.planning`, #583 stage 3) puts the tack her shift, puffs and pressure call to her
+    /// planner (`plannedGain`), `target` being where she sails for: it may veto it, or call one they don't; the rest
+    /// stands.
     mutating func upwindTack(_ b: SeatView.OwnBoat, _ view: SeatView, planned tack: Tack, target: Vec2? = nil,
                              overstood: (Tack) -> Bool = { _ in false }) -> Tack {
         // Only a play noted in this evaluation counts for her tap (`BotDecision.play`).
@@ -380,33 +381,33 @@ extension BotBrain {
         if tactics.covers, let rival = coverTarget(b, view), rival.tack != tack, headed > -threshold {
             return rival.tack
         }
-        if let target, let turns = plannedTurn(b, view, tack: tack, groove: .upwind, target: target) {
-            // Dirty air and a boat to pass are hers to see, not the planner's: worth their degrees off its margin.
-            let clearAir = headed - shifted - pressure - (tactics.seeksPuffs ? puffAdvantage(b, view, over: tack) : 0)
-            return turns(rad2deg(clearAir) * tunables.plannerSecondsPerDegree) && !overstood(tack.other) ? tack.other : tack
-        }
         let bar = tactics.goesToThePressure && neutral && pressure > threshold / 2 ? threshold / 2 : threshold
-        return headed > bar ? tack.other : tack
+        let tacks = headed > bar
+        if let target, let gain = plannedGain(b, view, tack: tack, groove: .upwind, target: target) {
+            if tacks { return gain > -tunables.plannerVetoMargin ? tack.other : tack }
+            return gain > tunables.plannerMargin && !overstood(tack.other) ? tack.other : tack
+        }
+        return tacks ? tack.other : tack
     }
 
     /// Her planner's answer (#583 stage 3, `BotPlanner`) for turning off `tack` now, sailing `groove`'s angle, to
-    /// `target`: a test of the seconds the turn gains against its margin less `credit` seconds; nil when she doesn't plan
-    /// (no depth, or not on `tack`, or in a turn). She plans again `BotPlanner.replanSeconds` after her last plan, or
-    /// on a new tack, and holds the gain between.
-    mutating func plannedTurn(_ b: SeatView.OwnBoat, _ view: SeatView, tack: Tack, groove: Autohelm.Groove,
-                              target: Vec2) -> ((Double) -> Bool)? {
+    /// `target`: the seconds the turn gains on holding on; nil when she doesn't plan (no depth, or not on `tack`, or in a
+    /// turn). She plans again `BotPlanner.replanSeconds` after her last plan, or on a new tack, and holds the gain
+    /// between. Her heuristics propose and the planner disposes: a turn they call goes unless it loses more than
+    /// `BotTunables.plannerVetoMargin`; one they don't, when it gains more than `plannerMargin`.
+    mutating func plannedGain(_ b: SeatView.OwnBoat, _ view: SeatView, tack: Tack, groove: Autohelm.Groove,
+                              target: Vec2) -> Double? {
         guard let planning, b.status == .racing, tack == b.tack, handTurn == nil else { return nil }
         let gain: Double
         if let last = lastPlan, last.tack == tack, view.time - last.time < BotPlanner.replanSeconds {
             gain = last.gain
         } else {
             gain = BotPlanner.turnGain(view, twa: grooveAngle(groove, b, view), isPlaning: senses.planing, target: target,
-                                       depth: planning, range: tactics.puffRange)
+                                       depth: planning, range: tactics.puffRange, reversion: tunables.plannerShiftReversion)
             lastPlan = (view.time, tack, gain)
             plans += 1
         }
-        let margin = tunables.plannerMargin
-        return { credit in gain > margin - credit }
+        return gain
     }
 
     /// Notes the fleet tactic that turns her plan to the other tack now (`lastFleetPlay`, #337).
@@ -563,18 +564,19 @@ extension BotBrain {
     /// (`Tactics.gybesOutOfShadow`): on a run every boat shadowing her is astern of her, up the course.
     mutating func downwindGybe(_ b: SeatView.OwnBoat, _ view: SeatView, planned gybe: Tack, target: Vec2? = nil) -> Tack {
         guard view.time - lastTackTime > tactics.tackInterval else { return gybe }
-        // A bot that plans (#583 stage 3) asks her planner, her shadow's degrees off its margin.
-        if let target, let turns = plannedTurn(b, view, tack: gybe, groove: .downwind, target: target) {
-            let shadow = tactics.gybesOutOfShadow && gybe == b.tack && b.shadow < Self.dirtyAir ? tunables.downwindShadowWeight : 0
-            return turns(rad2deg(shadow) * tunables.plannerSecondsPerDegree) ? gybe.other : gybe
+        let planned = target.flatMap { plannedGain(b, view, tack: gybe, groove: .downwind, target: $0) }
+        guard let threshold = tactics.downwindShiftThreshold else {
+            // A bot that plans (#583 stage 3) with no shift of her own to gybe on: her planner alone.
+            return planned.map { $0 > tunables.plannerMargin } == true ? gybe.other : gybe
         }
-        guard let threshold = tactics.downwindShiftThreshold else { return gybe }
         let direction = (senses.direction ?? b.windDirection) + senses.directionRate * tactics.anticipation
         let shift = wrapAngle(direction - view.course.axis)
         var away = gybe == .starboard ? shift : -shift
         if tactics.runsToPressure { away += downwindPressureAdvantage(b, view, over: gybe) }
         if tactics.gybesOutOfShadow && gybe == b.tack && b.shadow < Self.dirtyAir { away += tunables.downwindShadowWeight }
-        return away > threshold ? gybe.other : gybe
+        let gybes = away > threshold
+        if let gain = planned { return (gybes ? gain > -tunables.plannerVetoMargin : gain > tunables.plannerMargin) ? gybe.other : gybe }
+        return gybes ? gybe.other : gybe
     }
 
     /// Downwind, the shadow of a boat behind her is worth this much shift (#105): with a degree of shift the way it

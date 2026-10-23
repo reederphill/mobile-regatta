@@ -20,8 +20,9 @@ import RegattaCore
 ///   her close-hauled speed she tacks at), `replaneStep` and `luffStep` (turning up to plane, a decision).
 /// - Her planner (#583 stage 3, `BotPlanner`): `plannerHorizon` (seconds she plans ahead at the top of the National
 ///   band; 0, no bot plans), `plannerStartHorizon` (at the skill planning starts), `plannerStart` (where through the
-///   Regional band it starts), `plannerMargin` (the seconds a turn must gain) and `plannerSecondsPerDegree` (what a
-///   degree of the heuristics' dirty air is worth against it).
+///   Regional band it starts), `plannerMargin` (the seconds a turn her heuristics don't call must gain),
+///   `plannerVetoMargin` (the seconds a turn they do call may lose and still go), `plannerShiftReversion` (seconds over which she expects her
+///   shift off the course's axis to fade; 0, never).
 public struct BotTunables: Codable, Hashable, Sendable {
     public var tacticianHeaderThreshold: Double
     public var tacticianTackInterval: Double
@@ -47,7 +48,8 @@ public struct BotTunables: Codable, Hashable, Sendable {
     public var plannerStartHorizon: Double
     public var plannerStart: Double
     public var plannerMargin: Double
-    public var plannerSecondsPerDegree: Double
+    public var plannerVetoMargin: Double
+    public var plannerShiftReversion: Double
 
     /// The constants as they were before #583 made them data: `bot-tunables@1.json`.
     public static let original = BotTunables(
@@ -56,7 +58,8 @@ public struct BotTunables: Codable, Hashable, Sendable {
         pressureWeight: deg2rad(14), spotPressureWeight: deg2rad(30), dirtyAirWeight: deg2rad(2),
         downwindShadowWeight: deg2rad(4), laneEdgePressure: 0.1, lullHeatUp: deg2rad(12), pinchRange: 60,
         pinchAngle: deg2rad(38), laylineLead: 15, tackingSpeed: 0.75, replaneStep: deg2rad(9), luffStep: deg2rad(6),
-        plannerHorizon: 0, plannerStartHorizon: 8, plannerStart: 0.5, plannerMargin: 1, plannerSecondsPerDegree: 1)
+        plannerHorizon: 0, plannerStartHorizon: 8, plannerStart: 0.5, plannerMargin: 1, plannerVetoMargin: 1,
+        plannerShiftReversion: 0)
 
     public init(tacticianHeaderThreshold: Double, tacticianTackInterval: Double, tacticianAnticipation: Double,
                 tacticianCorridor: Double, tacticianDownwindShift: Double, liveHeaderThreshold: Double,
@@ -64,7 +67,7 @@ public struct BotTunables: Codable, Hashable, Sendable {
                 dirtyAirWeight: Double, downwindShadowWeight: Double, laneEdgePressure: Double, lullHeatUp: Double,
                 pinchRange: Double, pinchAngle: Double, laylineLead: Double, tackingSpeed: Double, replaneStep: Double,
                 luffStep: Double, plannerHorizon: Double, plannerStartHorizon: Double, plannerStart: Double,
-                plannerMargin: Double, plannerSecondsPerDegree: Double) {
+                plannerMargin: Double, plannerVetoMargin: Double, plannerShiftReversion: Double) {
         self.tacticianHeaderThreshold = tacticianHeaderThreshold
         self.tacticianTackInterval = tacticianTackInterval
         self.tacticianAnticipation = tacticianAnticipation
@@ -89,7 +92,8 @@ public struct BotTunables: Codable, Hashable, Sendable {
         self.plannerStartHorizon = plannerStartHorizon
         self.plannerStart = plannerStart
         self.plannerMargin = plannerMargin
-        self.plannerSecondsPerDegree = plannerSecondsPerDegree
+        self.plannerVetoMargin = plannerVetoMargin
+        self.plannerShiftReversion = plannerShiftReversion
     }
 
     /// One tunable: its key in the file and in `--tune`, whether the file writes it in degrees, the range a search keeps
@@ -141,7 +145,8 @@ public struct BotTunables: Codable, Hashable, Sendable {
         .init(name: "plannerStartHorizonSeconds", degrees: false, range: 2...40, keyPath: \.plannerStartHorizon),
         .init(name: "plannerStart", degrees: false, range: 0...1, keyPath: \.plannerStart),
         .init(name: "plannerMarginSeconds", degrees: false, range: -2...6, keyPath: \.plannerMargin),
-        .init(name: "plannerSecondsPerDegree", degrees: false, range: 0...4, keyPath: \.plannerSecondsPerDegree),
+        .init(name: "plannerVetoMarginSeconds", degrees: false, range: -6...20, keyPath: \.plannerVetoMargin),
+        .init(name: "plannerShiftReversionSeconds", degrees: false, range: 0...240, keyPath: \.plannerShiftReversion),
     ]
 
     // MARK: - The file
