@@ -124,10 +124,24 @@ final class OnlineQueueRaceUITests: XCTestCase {
         let mine = fleetRows(app, named: "You").firstMatch
         XCTAssertTrue(mine.waitForExistence(timeout: 10), "her own boat isn't in the briefing's fleet")
         XCTAssertFalse(mine.label.contains("Bot"), "her own boat is listed as a bot: \(mine.label)")
+        let briefed = sailNumber(in: mine.label)
+        XCTAssertNotNil(briefed, "no sail number in her briefing row: \(mine.label)")
         XCTAssertTrue(app.otherElements["race-viewport"].waitForExistence(timeout: 40), "the briefing didn't lead to the race")
         XCTAssertTrue(app.staticTexts["race-clock"].waitForExistence(timeout: 30), "no race clock on the water: the race link never joined")
         // The sequence is 60 s, the race 12 s.
         XCTAssertTrue(app.staticTexts["race-results"].waitForExistence(timeout: 120), "no results at the close")
+        // #163: the server's closed report reached the sheet. The live frame's sheet has no rating caption; the closed
+        // report of a race with no other human at the gun reads unrated.
+        let rating = app.staticTexts["results-rating"]
+        XCTAssertTrue(rating.waitForExistence(timeout: 30), "no rating caption: the server's report never reached the sheet")
+        let unrated = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "No other humans at the gun, unrated"),
+                                                object: rating)
+        XCTAssertEqual(XCTWaiter().wait(for: [unrated], timeout: 30), .completed, "not the closed report's caption: \(rating.label)")
+        XCTAssertEqual(sailingRows(app), 0, "a closed race's rows still say Sailing")
+        // #163, the owner's livery bug: her results row wears the briefing's sail number.
+        if let briefed {
+            XCTAssertTrue(myResultsRow(app, sailNumber: briefed).exists, "her results row isn't the briefing's sail number \(briefed)")
+        }
         let home = app.buttons["results-menu"]
         XCTAssertTrue(home.waitForExistence(timeout: 10), "no Home on the online results")
         home.tap()
@@ -135,6 +149,80 @@ final class OnlineQueueRaceUITests: XCTestCase {
         XCTAssertTrue(app.buttons["last-race"].waitForExistence(timeout: 20), "the closed race isn't Home's Last race")
         XCTAssertFalse(app.buttons["race-rejoin"].exists, "a closed race offers a rejoin")
         XCTAssertFalse(element(app, "home-notice").exists, "a notice after a race that closed: \(element(app, "home-notice").label)")
+    }
+
+    /// #163, the ticket's second acceptance: Home's Last race reopens the race's results until her next race ends. A
+    /// relaunch (which empties the device's Last race under `-uitesting`) reads it from the server; while she waits in
+    /// the queue it is still race 1; once race 2 closes, it is race 2. `last-race`'s value is the race's id under UI
+    /// tests.
+    @MainActor func testLastRaceReopensUntilTheNextRaceEnds() async throws {
+        let host = try host(inPhase: Self.racePhase)
+        let player = newPlayer()
+        try await arrange(host: host, player: player, service: "QueueService", situation: "joinable")
+        var app = launch(host: host, player: player)
+        sailAQueueRaceToItsClose(app, "race 1")
+        let lastRace = app.buttons["last-race"]
+        XCTAssertTrue(lastRace.waitForExistence(timeout: 20), "race 1 isn't Home's Last race")
+        let first = try XCTUnwrap(raceID(of: lastRace), "no race id on the Last race row")
+        lastRace.tap()
+        let close = app.buttons["results-close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 10), "the Last race row didn't reopen the results")
+        XCTAssertGreaterThan(app.descendants(matching: .any).matching(identifier: "results-row").count, 0, "the reopened results have no rows")
+        XCTAssertEqual(sailingRows(app), 0, "the reopened results aren't final")
+        close.tap()
+        XCTAssertTrue(close.waitForNonExistence(timeout: 10), "Close left the results up")
+
+        // A relaunch: the device's Last race is gone, so the row is the server's.
+        app = launch(host: host, player: player)
+        waitForTheSession(app)
+        let fetched = app.buttons["last-race"]
+        XCTAssertTrue(fetched.waitForExistence(timeout: 30), "a relaunch has no Last race: the server's wasn't fetched")
+        XCTAssertEqual(raceID(of: fetched), first, "the relaunch's Last race isn't race 1")
+
+        // Queued for race 2: race 1 is still her last race.
+        joinTheQueue(app)
+        XCTAssertEqual(raceID(of: app.buttons["last-race"]), first, "queued for race 2, the Last race isn't race 1")
+        sailAQueueRaceToItsClose(app, "race 2", joined: true)
+        let second = app.buttons["last-race"]
+        XCTAssertTrue(second.waitForExistence(timeout: 20), "race 2 isn't Home's Last race")
+        let replaced = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value != %@", first), object: second)
+        XCTAssertEqual(XCTWaiter().wait(for: [replaced], timeout: 20), .completed, "race 2's close didn't replace race 1")
+    }
+
+    /// Race online (unless `joined`), the briefing, the race, its close 12 s after the gun, and Home from the results.
+    @MainActor private func sailAQueueRaceToItsClose(_ app: XCUIApplication, _ race: String, joined: Bool = false) {
+        if !joined { joinTheQueue(app) }
+        XCTAssertTrue(app.buttons["briefing-leave"].waitForExistence(timeout: 30), "\(race): the fleet never locked")
+        XCTAssertTrue(app.otherElements["race-viewport"].waitForExistence(timeout: 40), "\(race): no race after the briefing")
+        XCTAssertTrue(app.staticTexts["race-results"].waitForExistence(timeout: 120), "\(race): no results at the close")
+        let home = app.buttons["results-menu"]
+        XCTAssertTrue(home.waitForExistence(timeout: 10), "\(race): no Home on the results")
+        home.tap()
+        waitForRaceOnlineOpen(app, "\(race): after the close")
+    }
+
+    /// The race id Home's Last race row carries under UI tests (#163).
+    @MainActor private func raceID(of row: XCUIElement) -> String? {
+        guard row.exists, let value = row.value as? String, !value.isEmpty else { return nil }
+        return value
+    }
+
+    /// How many boats on the results read "Sailing": still racing, so the rows aren't final.
+    @MainActor private func sailingRows(_ app: XCUIApplication) -> Int {
+        app.staticTexts.matching(NSPredicate(format: "label == %@", "Sailing")).count
+    }
+
+    /// Her results row ("You") wearing sail number `number`.
+    @MainActor private func myResultsRow(_ app: XCUIApplication, sailNumber number: Int) -> XCUIElement {
+        app.descendants(matching: .any).matching(identifier: "results-row")
+            .containing(NSPredicate(format: "label == %@", "You"))
+            .containing(NSPredicate(format: "label == %@", "Sail number \(number)"))
+            .firstMatch
+    }
+
+    /// The sail number in a briefing fleet row's label ("…, 4509"): its last number.
+    private func sailNumber(in label: String) -> Int? {
+        label.split(whereSeparator: { !$0.isNumber }).last.flatMap { Int($0) }
     }
 
     /// Leave in the locked fleet's briefing: Home at once, and no way back into that race.
@@ -257,6 +345,44 @@ final class OnlineQueueRaceUITests: XCTestCase {
         XCTAssertNotNil(mine, "her own boat isn't in the briefing's fleet: \(rows)")
         XCTAssertFalse(mine?.contains("Bot") ?? false, "her own boat is listed as a bot: \(mine ?? "")")
         XCTAssertTrue(app.staticTexts["race-clock"].waitForExistence(timeout: 60), "no race clock on the water")
+
+        // #163, the ticket's "rating push arrives while queued": past the gun she leaves the race (RET, rated: two
+        // humans were at the gun), and queues again. The close, 12 s after the gun, pushes her rating change, and
+        // Home's Last race shows it while the queue bar is up.
+        try await waitForTheGun(app)
+        let menu = app.buttons["race-pause"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 10), "no menu button on the race")
+        menu.tap()
+        let leave = app.buttons["pause-leave"]
+        XCTAssertTrue(leave.waitForExistence(timeout: 10), "no Leave race in the race menu")
+        leave.tap()
+        let confirm = app.buttons["race-leave-confirm-leave"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 10), "Leave race didn't ask")
+        confirm.tap()
+        XCTAssertTrue(app.otherElements["race-viewport"].waitForNonExistence(timeout: 15), "Leave left the race up")
+        waitForRaceOnlineOpen(app, "after leaving after the gun")
+        joinTheQueue(app)
+        // The badge first ("Rating plus/minus …" in the row's label), then its sign.
+        let row = app.buttons["last-race"]
+        let rated = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "Rating "), object: row)
+        XCTAssertEqual(XCTWaiter().wait(for: [rated], timeout: 60), .completed,
+                       "no rating badge on the Last race row while queued: \(row.exists ? row.label : "no row")")
+        XCTAssertTrue(element(app, "queue-bar").exists, "the badge landed after the queue bar went")
+        // Retired against Dev 7001, who sailed on: she lost rating.
+        XCTAssertTrue(row.label.contains("Rating minus"), "the retired race's badge isn't a loss: \(row.label)")
+    }
+
+    /// The race clock (its value is the race tick) 2 s past the gun or more: a leave now is a retirement.
+    @MainActor private func waitForTheGun(_ app: XCUIApplication) async throws {
+        let clock = app.staticTexts["race-clock"]
+        let until = Date().addingTimeInterval(90)
+        var tick: Int?
+        repeat {
+            tick = (clock.value as? String).flatMap { Int($0) }
+            if let tick, tick >= 2 * 30 { return }
+            try await Task.sleep(nanoseconds: 500_000_000)
+        } while Date() < until
+        XCTFail("the gun never came: the race clock reads \(tick.map(String.init) ?? "nothing")")
     }
 
     /// The labels of the briefing's fleet rows (`briefing-fleet-<seat>`), read from one snapshot of the app, retried
