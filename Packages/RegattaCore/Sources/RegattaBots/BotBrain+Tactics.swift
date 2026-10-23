@@ -126,7 +126,7 @@ struct Tactics: Sendable, Equatable {
             // player would.
             let weaknesses = weaknesses ?? BotWeaknesses(skill: skill)
             let willingness = style?.tackWillingness ?? 0.5
-            let threshold = tunables.liveHeaderThreshold + deg2rad(2 * (1 - willingness) + 12 * max(0, 0.75 - skill))
+            let threshold = deg2rad(tunables.liveHeaderThresholdDegrees + 2 * (1 - willingness) + 12 * max(0, 0.75 - skill))
             self.init(headerThreshold: threshold, tackInterval: tunables.liveTackInterval * (1.3 - 0.6 * willingness),
                       replanes: true,
                       seeksPuffs: weaknesses.puffPerception > 0, seeksPressure: weaknesses.puffPerception > 0)

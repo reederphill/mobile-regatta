@@ -10,8 +10,8 @@ import RegattaCore
 /// - The tactician's tactics (`Tactics(profile: .tactician)`), which a live bot ramps to through the National band
 ///   (#366): `tacticianHeaderThreshold`, `tacticianTackInterval`, `tacticianAnticipation`, `tacticianCorridor`,
 ///   `tacticianDownwindShift`.
-/// - A live bot's own tactics below the ramp (`Tactics(profile: nil)`): `liveHeaderThreshold` (her threshold at full
-///   willingness and skill) and `liveTackInterval` (her tack interval at middling willingness).
+/// - A live bot's own tactics below the ramp (`Tactics(profile: nil)`): `liveHeaderThresholdDegrees` (her threshold at full
+///   willingness and skill, in degrees here too: it is summed in degrees, as it always was) and `liveTackInterval` (her tack interval at middling willingness).
 /// - The weights the tactics put on what they read (`BotBrain+Tactics.swift`), in radians of shift they're worth:
 ///   `puffWeight`, `pressureWeight`, `spotPressureWeight`, `dirtyAirWeight`, `downwindShadowWeight`, and
 ///   `laneEdgePressure`, the pressure gain at which a lane's bend counts in full.
@@ -29,7 +29,7 @@ public struct BotTunables: Codable, Hashable, Sendable {
     public var tacticianAnticipation: Double
     public var tacticianCorridor: Double
     public var tacticianDownwindShift: Double
-    public var liveHeaderThreshold: Double
+    public var liveHeaderThresholdDegrees: Double
     public var liveTackInterval: Double
     public var puffWeight: Double
     public var pressureWeight: Double
@@ -54,7 +54,7 @@ public struct BotTunables: Codable, Hashable, Sendable {
     /// The constants as they were before #583 made them data: `bot-tunables@1.json`.
     public static let original = BotTunables(
         tacticianHeaderThreshold: deg2rad(4), tacticianTackInterval: 15, tacticianAnticipation: 6, tacticianCorridor: 0.5,
-        tacticianDownwindShift: deg2rad(5), liveHeaderThreshold: deg2rad(3), liveTackInterval: 15, puffWeight: deg2rad(14),
+        tacticianDownwindShift: deg2rad(5), liveHeaderThresholdDegrees: 3, liveTackInterval: 15, puffWeight: deg2rad(14),
         pressureWeight: deg2rad(14), spotPressureWeight: deg2rad(30), dirtyAirWeight: deg2rad(2),
         downwindShadowWeight: deg2rad(4), laneEdgePressure: 0.1, lullHeatUp: deg2rad(12), pinchRange: 60,
         pinchAngle: deg2rad(38), laylineLead: 15, tackingSpeed: 0.75, replaneStep: deg2rad(9), luffStep: deg2rad(6),
@@ -62,7 +62,7 @@ public struct BotTunables: Codable, Hashable, Sendable {
         plannerShiftReversion: 0)
 
     public init(tacticianHeaderThreshold: Double, tacticianTackInterval: Double, tacticianAnticipation: Double,
-                tacticianCorridor: Double, tacticianDownwindShift: Double, liveHeaderThreshold: Double,
+                tacticianCorridor: Double, tacticianDownwindShift: Double, liveHeaderThresholdDegrees: Double,
                 liveTackInterval: Double, puffWeight: Double, pressureWeight: Double, spotPressureWeight: Double,
                 dirtyAirWeight: Double, downwindShadowWeight: Double, laneEdgePressure: Double, lullHeatUp: Double,
                 pinchRange: Double, pinchAngle: Double, laylineLead: Double, tackingSpeed: Double, replaneStep: Double,
@@ -73,7 +73,7 @@ public struct BotTunables: Codable, Hashable, Sendable {
         self.tacticianAnticipation = tacticianAnticipation
         self.tacticianCorridor = tacticianCorridor
         self.tacticianDownwindShift = tacticianDownwindShift
-        self.liveHeaderThreshold = liveHeaderThreshold
+        self.liveHeaderThresholdDegrees = liveHeaderThresholdDegrees
         self.liveTackInterval = liveTackInterval
         self.puffWeight = puffWeight
         self.pressureWeight = pressureWeight
@@ -126,7 +126,7 @@ public struct BotTunables: Codable, Hashable, Sendable {
         .init(name: "tacticianAnticipationSeconds", degrees: false, range: 0...20, keyPath: \.tacticianAnticipation),
         .init(name: "tacticianCorridor", degrees: false, range: 0.1...1.2, keyPath: \.tacticianCorridor),
         .init(name: "tacticianDownwindShiftDegrees", degrees: true, range: 1...20, keyPath: \.tacticianDownwindShift),
-        .init(name: "liveHeaderThresholdDegrees", degrees: true, range: 1...12, keyPath: \.liveHeaderThreshold),
+        .init(name: "liveHeaderThresholdDegrees", degrees: false, range: 1...12, keyPath: \.liveHeaderThresholdDegrees),
         .init(name: "liveTackIntervalSeconds", degrees: false, range: 4...40, keyPath: \.liveTackInterval),
         .init(name: "puffWeightDegrees", degrees: true, range: 0...40, keyPath: \.puffWeight),
         .init(name: "pressureWeightDegrees", degrees: true, range: 0...40, keyPath: \.pressureWeight),
