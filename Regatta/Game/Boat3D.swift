@@ -2,10 +2,14 @@ import SceneKit
 import SpriteKit
 import RegattaCore
 
-/// #596 PROTOTYPE (probe branch, never merged): the fleet, the buoys and the committee boat as one SceneKit scene in
-/// one `SK3DNode` on the camera, drawn by an orthographic camera at the scene's tilt, so a ground point lands where
-/// the squashed flat world draws it (`ChartGeometry.obliqueSquash`) and every standing thing rises off the water.
-/// Units are world points (`GameScene.pointsPerMeter` a metre); the ground is XZ, Y up, screen-up is -Z.
+/// The fleet, the buoys and the committee boat standing up (#596, #597): one SceneKit scene in one `SK3DNode` on the
+/// camera, drawn by an orthographic camera at the scene's tilt, so a ground point lands where the squashed flat world
+/// draws it (`ChartGeometry.obliqueSquash`) and every standing thing rises off the water. The only render path for the
+/// boats at every tilt: what lies flat under them (heel shadow, glows, wakes) stays `BoatNode`'s. One light, fixed on
+/// the screen, plus ambient; no cheaper tier (#597: within 2 fps and a draw of the flat fleet at 10 boats). The
+/// thermal tiers' sail cut (`SailDetail.farReduced`) drops a far boat's flutter, luff shiver and belly pump; her hull,
+/// heel, mast, boom and trim never change by tier. Units are world points (`GameScene.pointsPerMeter` a metre); the
+/// ground is XZ, Y up, screen-up is -Z.
 final class Fleet3D {
     let node: SK3DNode
     private let scene = SCNScene()
@@ -70,7 +74,8 @@ final class Fleet3D {
         let hull = style.committeeHull
         // A low hull and a small cabin on it, so she reads as a boat, not a block.
         let box = SCNBox(width: hull.width * ppm * 0.8, height: 0.9 * ppm, length: hull.height * ppm, chamferRadius: 0.35 * ppm)
-        box.materials = [Fleet3D.lambert(UIColor(white: 0.82, alpha: 1))]
+        // White, as the flat chart drew her: the light shades her sides.
+        box.materials = [Fleet3D.lambert(UIColor(white: 0.93, alpha: 1))]
         committee = SCNNode(geometry: box)
         let cabinBox = SCNBox(width: hull.width * ppm * 0.5, height: 0.9 * ppm, length: hull.height * ppm * 0.4,
                               chamferRadius: 0.2 * ppm)
@@ -115,10 +120,19 @@ final class Fleet3D {
         return m
     }
 
+    /// The boats, in seat order, for tests.
+    var fleet: [Boat3D] { boats }
+    /// Each buoy's colour as drawn, pin last, and the committee boat's, for tests.
+    var buoyTones: [UIColor] { buoys.compactMap { $0.material.diffuse.contents as? UIColor } }
+    var committeeColor: UIColor? { committee.geometry?.firstMaterial?.diffuse.contents as? UIColor }
+
     /// Places everything for the camera of this frame: `center` (world points), `rotation` (`CameraRig.cameraRotation`)
-    /// `cameraScale` and `tiltDegrees`.
+    /// `cameraScale` and `tiltDegrees`. `sailDetail` is the sails' tier (#127): at `.farReduced` a boat more than
+    /// `style.farBoatHulls` from yours draws no flutter, luff shiver or belly pump. `hidesSails` hides every sail
+    /// (`-cuesOnly`).
     func update(_ world: RenderWorld, poses: [BoatPose], style: BoatStyle, center: CGPoint, rotation: CGFloat,
-                cameraScale: CGFloat, tiltDegrees: Double, sceneSize: CGSize, time: Double, dt: Double, settled: Bool) {
+                cameraScale: CGFloat, tiltDegrees: Double, sceneSize: CGSize, sailDetail: SailDetail = .full,
+                hidesSails: Bool = false, time: Double, dt: Double, settled: Bool) {
         pitch(toDegrees: tiltDegrees)
         node.viewportSize = sceneSize
         camera.orthographicScale = Double(sceneSize.height / 2 * cameraScale)
@@ -128,19 +142,24 @@ final class Fleet3D {
             let dx = w.x - center.x, dy = w.y - center.y
             return (Float(dx * c - dy * s), -Float(dx * s + dy * c))
         }
-        for (i, boat) in world.boats.enumerated() where i < boats.count {
+        let me = world.me.position
+        let hull = max(world.boatClass.hull.length, 1e-6)
+        for (i, boat) in world.boats.enumerated() where i < boats.count && i < poses.count {
             let at = ground(CGPoint(x: boat.position.x * ppm, y: boat.position.y * ppm))
+            let hullsFromYou = i == world.myBoatIndex ? 0 : (boat.position - me).length / hull
             boats[i].update(pose: poses[i], style: style, x: at.x, z: at.z, yaw: Float(-boat.heading + Double(rho)),
+                            sailDetail: sailDetail, hullsFromYou: hullsFromYou, hidesSail: hidesSails,
                             time: time, dt: dt, settled: settled)
         }
-        let me = world.me
-        let leg = ChartMarks.leg(in: course, status: me.status, legIndex: me.legIndex)
-        let lineTone = ChartMarks.tone(isActive: ChartMarks.isLineActive(status: me.status, leg: leg)).uiColor
+        // The active leg's marks orange, the rest grey (#15), as the flat chart tones them.
+        let mine = world.me
+        let leg = ChartMarks.leg(in: course, status: mine.status, legIndex: mine.legIndex)
+        let lineTone = ChartMarks.tone(isActive: ChartMarks.isLineActive(status: mine.status, leg: leg)).uiColor
         for buoy in buoys {
             let at = ground(CGPoint(x: buoy.mark.position.x * ppm, y: buoy.mark.position.y * ppm))
             buoy.node.position = SCNVector3(at.x, Float(0.6 * ppm), at.z)
             let tone = buoy.isPin ? lineTone
-                : ChartMarks.tone(of: buoy.mark, in: course, status: me.status, legIndex: me.legIndex).uiColor
+                : ChartMarks.tone(of: buoy.mark, in: course, status: mine.status, legIndex: mine.legIndex).uiColor
             buoy.material.diffuse.contents = tone
         }
         let at = ground(committeePosition)
@@ -259,8 +278,19 @@ final class Boat3D {
     private let heelNode = SCNNode()
     private let boomPivot = SCNNode()
     private let sailNode: SCNNode
+    private let hullNode: SCNNode
+    private let mastNode: SCNNode
+    /// Every material she draws with: a ghost fades them all (`BoatStyle.ghostAlpha`).
+    private var materials: [SCNMaterial] = []
+    /// Her seat: each boat's flutter swings on its own phase (`BoatStyle.flutterPhaseStep`), so a flapping fleet
+    /// doesn't flap in step.
     private let seat: Int
     private var sailAngle: Float = 0
+    /// Whether she is far from your boat (`FarBoat`), kept across frames for its dead band.
+    private(set) var isFar = false
+    /// How much of her sail animation detail draws, 0…1: eased to 0 while she is far at `SailDetail.farReduced` and
+    /// back to 1 otherwise, so a boat crossing the line doesn't pop (#127).
+    private(set) var sailDetailShare: Double = 1
 
     init(geometry g: Geometry, color: UIColor, seat: Int) {
         self.seat = seat
@@ -275,6 +305,7 @@ final class Boat3D {
         sailMaterial.isDoubleSided = true
         let sparMaterial = Fleet3D.lambert(UIColor(white: 0.25, alpha: 1))
 
+        materials = [hullMaterial, deckMaterial, cockpitMaterial, sailMaterial, sparMaterial]
         let hull = SCNNode(geometry: g.hull.copy() as? SCNGeometry)
         hull.geometry?.materials = [hullMaterial]
         let deck = SCNNode(geometry: g.deck.copy() as? SCNGeometry)
@@ -287,6 +318,8 @@ final class Boat3D {
         mastGeometry.materials = [sparMaterial]
         let mast = SCNNode(geometry: mastGeometry)
         mast.position = SCNVector3(0, Float(g.freeboard + g.mastHeight / 2), Float(g.mastZ))
+        hullNode = hull
+        mastNode = mast
 
         boomPivot.position = SCNVector3(0, Float(g.freeboard + g.boomHeight), Float(g.mastZ))
         let boomGeometry = SCNCylinder(radius: g.spar, height: g.boomLength)
@@ -305,24 +338,50 @@ final class Boat3D {
         root.addChildNode(heelNode)
     }
 
-    func update(pose: BoatPose, style: BoatStyle, x: Float, z: Float, yaw: Float, time: Double, dt: Double,
-                settled: Bool) {
+    /// Draws her in `pose` at ground point (`x`, `z`) turned `yaw`, at race time `time` (every flutter swings on it).
+    /// `settled` trims the sail straight to its target (a frozen render fixture). At `sailDetail` `.farReduced` and
+    /// `hullsFromYou` past `style.farBoatHulls` she draws her sail at its trim and fullness alone (#127); a ghost and
+    /// your boat (0 hulls) always in full. `hidesSail` hides it (`-cuesOnly`).
+    func update(pose: BoatPose, style: BoatStyle, x: Float, z: Float, yaw: Float, sailDetail: SailDetail = .full,
+                hullsFromYou: Double = 0, hidesSail: Bool = false, time: Double, dt: Double, settled: Bool) {
         root.position = SCNVector3(x, 0, z)
         root.eulerAngles = SCNVector3(0, yaw, 0)
         // Heel leans the whole rig toward her lee side (+x is starboard): 28° at full heel.
         let lee: Float = pose.leeSide == .starboard ? -1 : 1
         heelNode.eulerAngles = SCNVector3(0, 0, lee * Float(pose.heel) * 28 * .pi / 180)
 
+        isFar = FarBoat.isFar(hullsFromYou: hullsFromYou, wasFar: isFar, hulls: style.farBoatHulls)
+        let reduced = sailDetail == .farReduced && isFar && !pose.isGhost
+        sailDetailShare += ((reduced ? 0 : 1) - sailDetailShare) * (settled ? 1 : min(1, dt * 2))
+        let detail = sailDetailShare
+
         let side: Float = pose.sailSide == .port ? -1 : 1
         let target = Float(pose.sailTrim) * side
         sailAngle += (target - sailAngle) * (settled ? 1 : min(1, Float(dt) * 8))
         let phase = Double(seat) * style.flutterPhaseStep
-        let swing = sin(time * style.flutterSwingRate + phase) * style.flutterDegrees * .pi / 180 * pose.flutter
-        boomPivot.eulerAngles = SCNVector3(0, sailAngle + Float(swing), 0)
+        let swing = sin(time * style.flutterSwingRate + phase) * style.flutterDegrees * .pi / 180 * pose.flutter * detail
+        // Pinched (#219): the leading edge lifts, a small quick shiver at the luff on top of any flutter.
+        let luff = sin(time * 37 + phase) * style.pinchLuffDegrees * .pi / 180 * pose.luffLift * detail
+        boomPivot.eulerAngles = SCNVector3(0, sailAngle + Float(swing + luff), 0)
+        // A flapping sail loses its belly; a ghost's hangs limp. Pinched it flattens, footed it fills (#219).
         let belly = pose.isGhost ? style.ghostSailBelly
-            : pose.sailFullness * (1 - style.flapBellyLoss * pose.flutter
+            : pose.sailFullness * (1 - style.flapBellyLoss * pose.flutter * detail
                 * (0.5 + 0.5 * sin(time * style.flapBellyRate + phase)))
         sailNode.scale = SCNVector3(side * Float(max(belly, 0.05)), 1, 1)
-        root.opacity = pose.isGhost ? CGFloat(style.ghostAlpha) : 1
+        sailNode.isHidden = hidesSail
+        let transparency = pose.isGhost ? CGFloat(style.ghostAlpha) : 1
+        for material in materials where material.transparency != transparency { material.transparency = transparency }
     }
+
+    /// What the tiers may change (#127): the boom's turn and the sail's belly, and whether the sail shows.
+    var sailLook: (boom: Float, belly: Float, isHidden: Bool) {
+        (boomPivot.eulerAngles.y, sailNode.scale.x, sailNode.isHidden)
+    }
+    /// What no tier changes: the hull's, mast's, boom's and sail's places in her frame, her heel and her trim.
+    var standingLook: [SIMD3<Float>] {
+        [root.position, root.eulerAngles, heelNode.eulerAngles, hullNode.position, mastNode.position,
+         boomPivot.position, sailNode.position].map { SIMD3<Float>($0) }
+    }
+    /// Her materials' transparency (1 opaque), for tests.
+    var transparency: [CGFloat] { materials.map(\.transparency) }
 }

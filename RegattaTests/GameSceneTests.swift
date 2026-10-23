@@ -68,3 +68,25 @@ import RegattaCore
                 "vane at \(vaneOnScreen), hull at \(hull)")
     }
 }
+
+extension GameSceneTests {
+    /// Every node under `node`, itself excluded.
+    static func nodeCount(_ node: SKNode) -> Int {
+        node.children.reduce(0) { $0 + 1 + nodeCount($1) }
+    }
+
+    /// The scene's nodes (`nodeCount`) in the fleet fixture (8 boats, the largest fleet fixture) on main before #597
+    /// (4c7e1554): every boat drew a flat hull, outline and sail sprite besides today's shadow and glows, and the
+    /// scene had no tilt or rotor node, SK3DNode, glint or land rim. 746 today + 3 × 8 sprites − those 5 nodes.
+    static let flatFleetNodeCount = 765
+
+    /// The standing fleet costs the scene no more nodes than the flat one did, give or take two (#597): its one
+    /// SK3DNode holds every boat, buoy and the committee boat, and each boat drops three sprites.
+    @Test func tiltedFleetDrawsWithinBudget() throws {
+        let (scene, session) = try Self.scene(fixture: "fleet")
+        let boats = session.driver.currentFrame.boats.count
+        let count = Self.nodeCount(scene)
+        #expect(boats == 8)
+        #expect(count <= Self.flatFleetNodeCount + 2, "\(count) nodes with \(boats) boats, flat \(Self.flatFleetNodeCount)")
+    }
+}

@@ -90,6 +90,8 @@ final class GameScene: SKScene {
         didSet {
             world.isHidden = !paintsWorld
             cam.isHidden = !paintsWorld
+            // Its own flag too: an SK3DNode under a hidden camera must not render its SceneKit scene either.
+            fleet3D?.node.isHidden = !paintsWorld
         }
     }
     /// The race's pace since the first frame that stepped it (#361), for UI tests (`PaceProbe`).
@@ -113,8 +115,10 @@ final class GameScene: SKScene {
     private var tiltDegrees: Double { shownTilt ?? targetTilt }
     /// Screen-up's share of its length at the tilt drawn (`ChartGeometry.obliqueSquash`).
     var squash: CGFloat { ChartGeometry.obliqueSquash(tiltDegrees: tiltDegrees) }
-    /// The fleet, buoys and committee boat standing up (#596).
+    /// The fleet, buoys and committee boat standing up (#596, #597): every boat's hull, rig and sail.
     private var fleet3D: Fleet3D?
+    /// The standing fleet, for tests.
+    var standingFleet: Fleet3D? { fleet3D }
     /// The land's extruded rim (#596), a child of `tiltNode`.
     private let landRim = SKShapeNode()
     /// The light's glint band on the water (#596), on the camera.
@@ -232,12 +236,13 @@ final class GameScene: SKScene {
         let fleet = Fleet3D(boats: frame.boats, colors: frame.boats.map { Palette.boat($0.colorIndex) },
                             boatClass: driver.boatClass, course: driver.course, pointsPerMeter: ppm,
                             tiltDegrees: tiltDegrees, sceneSize: size)
-        // Over the fleet layer's shadows and glows (global z ≈ 8…14), under the rule cues (16) and the edge arrow (20).
-        fleet.node.zPosition = 15
+        // Over the fleet layer's shadows and glows (global z ≈ 8…14), under the rule cues (16) and the edge arrow (20)
+        // (`DrawOrder`).
+        fleet.node.zPosition = DrawOrder.standingFleet
         fleet.node.name = "fleet3D"
+        fleet.node.isHidden = !paintsWorld
         cam.addChild(fleet.node)
         fleet3D = fleet
-        boatNodes.forEach { $0.drawsFlatHull = false }
 
         landRim.fillColor = ChartPalette.landmark.uiColor
         landRim.strokeColor = .clear
@@ -412,20 +417,16 @@ final class GameScene: SKScene {
         // Simulated seconds since the last frame drawn.
         let dt = settled ? 0 : max(0, world.time - (lastRenderTime ?? world.time))
         lastRenderTime = world.time
-        let me = world.me.position
-        let hull = max(world.boatClass.hull.length, 1e-6)
         var poses: [BoatPose] = []
         for (i, boat) in world.boats.enumerated() {
             let pose = BoatPose(boat, ease: world.ease(ofSeat: i), isGhost: world.isGhost(ofSeat: i),
                                 boatClass: world.boatClass, style: boatStyle, autohelm: world.autohelm(ofSeat: i))
             poses.append(pose)
-            let hullsFromYou = i == world.myBoatIndex ? 0 : (boat.position - me).length / hull
             let backwind = world.backwind(ofSeat: i)
             boatNodes[i].hidesDecoration = drawsCuesOnly
             boatNodes[i].update(with: boat, pose: pose, style: boatStyle, wakeQuality: wakeQuality,
-                                sailDetail: sailDetail, hullsFromYou: hullsFromYou, time: world.time, dt: dt,
-                                settled: settled, backwindSail: backwind.sail, backwindSide: backwind.side,
-                                justSeated: world.frame.isJustSeated)
+                                time: world.time, dt: dt, settled: settled, backwindSail: backwind.sail,
+                                backwindSide: backwind.side, justSeated: world.frame.isJustSeated)
         }
         // The sim's ribbons at the time drawn, between the last two ticks (`ribbons(of:time:)`). Not while the world
         // isn't painted (`-hideScene`): they are pure paint and most of a 16-boat frame's render (#377), so a hidden
@@ -453,9 +454,11 @@ final class GameScene: SKScene {
 
         // The active leg's marks orange, the rest grey (#15); strokes kept steady on screen as the camera zooms.
         chart.update(status: world.me.status, legIndex: world.me.legIndex, cameraScale: rig.cameraScale)
-        if let fleet3D {
+        // Not while the world isn't painted (`-hideScene`): the standing fleet is pure paint.
+        if let fleet3D, paintsWorld {
             fleet3D.update(world, poses: poses, style: boatStyle, center: rig.center, rotation: rig.cameraRotation,
-                           cameraScale: rig.cameraScale, tiltDegrees: tiltDegrees, sceneSize: size, time: world.time, dt: dt, settled: settled)
+                           cameraScale: rig.cameraScale, tiltDegrees: tiltDegrees, sceneSize: size,
+                           sailDetail: sailDetail, hidesSails: drawsCuesOnly, time: world.time, dt: dt, settled: settled)
             updateLandRim()
             glint?.size = size
         }

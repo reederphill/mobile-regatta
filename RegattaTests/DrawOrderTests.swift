@@ -21,21 +21,20 @@ import Testing
             let layers = Set(shared.values.flatMap { $0.map(\.layer) }).sorted()
             #expect(shared.isEmpty, "\(name): \(shared.count) z's drawn by more than one node, in \(layers)")
             // Each boat's backwind and wake string (#121), hidden ones too (the ribbons are their own layer, under
-            // them); each boat's heel shadow, right-of-way glow (#348, drawn hidden or not), hull, outline and sail;
-            // and your glow (the roll ring went with the Tack button, #460).
+            // them); each boat's heel shadow and right-of-way glow (#348, drawn hidden or not); and your glow (the roll
+            // ring went with the Tack button, #460). Hulls and sails stand in `Fleet3D`'s one SK3DNode (#597).
             #expect(boats > 1, "\(name)")
-            // The wake and sail are named for the render-quality ladder (#127), so they read as layers of their own here.
+            // The wake is named for the render-quality ladder (#127), so it reads as a layer of its own here.
             let effects = drawn.filter { ["effects", "wake", "cornerWake"].contains($0.layer) }
-            let fleet = drawn.filter { ["fleet", "sail"].contains($0.layer) }
+            let fleet = drawn.filter { $0.layer == "fleet" }
             // And her stern-corner wakes (#492), one node a boat, under her wake.
             #expect(effects.count == 3 * boats, "\(name)")
             #expect(drawn.filter { $0.layer == "cornerWake" }.count == boats, "\(name)")
             #expect(drawn.filter { $0.layer == "wake" }.count == boats, "\(name)")
-            #expect(drawn.filter { $0.layer == "sail" }.count == boats, "\(name)")
             let ribbons = drawn.filter { $0.layer == "turbulenceTrails" }
             let effectsBottom = effects.map(\.z).min() ?? 0
             #expect(ribbons.allSatisfy { $0.z < effectsBottom }, "\(name): the ribbons under every boat's effects")
-            #expect(fleet.count == 5 * boats + 1, "\(name)")
+            #expect(fleet.count == 2 * boats + 1, "\(name)")
             #expect(drawn.filter { $0.layer == "course" }.count > 4, "\(name)")
             // The chart (#115): the boundary's band and line, the land and its relief, a landmark; shallows where
             // the venue has a current.
