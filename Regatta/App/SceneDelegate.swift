@@ -23,7 +23,8 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         self.windowScene = windowScene
         onlineStatus = OnlineStatus(services: app.services, isInitiallyOnline: OnlineStatus.isInitiallyOnline(.current),
                                     session: app.online,
-                                    raceTimescale: LaunchOptions.current.fakeServices == nil ? 1 : LaunchOptions.current.timescale)
+                                    raceTimescale: LaunchOptions.current.fakeServices == nil ? 1 : LaunchOptions.current.timescale,
+                                    photos: app.playerPhotos, leaderboard: app.leaderboard)
         let launchOptions = LaunchOptions.current
         showWindow(launchOptions: launchOptions)
         if launchOptions.uiTesting {

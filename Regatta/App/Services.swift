@@ -73,16 +73,30 @@ final class OnlineStatus {
     let race: OnlineRaceController
     /// The livery between My boat and the server (#162).
     let livery: LiverySync
+    /// Game Center's alias for her, while signed in (#139): the profile's name before its read. Set with the rest of
+    /// the account, so it falls back to the phone's player as `lobbyStatus` does.
+    private(set) var signedInAlias: String?
+    /// Her Game Center photo, loaded once a sign-in and kept in memory only (#139); nil with none.
+    private(set) var playerPhoto: UIImage?
+    /// Whose photo `playerPhoto` is, or is being loaded.
+    private var photoPlayerID: GamePlayerID?
+    private let photos: any PlayerPhotoSource
+    /// Game Center's leaderboard, the profile's last row (#139).
+    let leaderboard: any LeaderboardPresenter
     private let session: Session?
     private let now: () -> Date
 
     /// `isOnline` starts at `isInitiallyOnline` until the connectivity service says: optimistic for the device's
     /// path, so Race online doesn't flash "Offline", and `isInitiallyOnline(_:)` for a launch's fakes, so the
     /// offline scenario isn't online for its first frame (#314).
+    /// `photos` and `leaderboard` are Game Center's on a device (`AppDelegate`), stand-ins otherwise.
     init(services: ServiceSet, isInitiallyOnline: Bool = true, session: Session? = nil, raceTimescale: Double = 1,
-         now: @escaping () -> Date = Date.init) {
+         photos: any PlayerPhotoSource = NoPlayerPhoto(),
+         leaderboard: any LeaderboardPresenter = RecordingLeaderboardPresenter(), now: @escaping () -> Date = Date.init) {
         self.services = services
         self.session = session
+        self.photos = photos
+        self.leaderboard = leaderboard
         self.now = now
         isOnline = isInitiallyOnline
         // Until a window attaches its app model's link: a race nobody answers.
@@ -234,6 +248,22 @@ final class OnlineStatus {
         lobbyStatus.termsVersion = termsPrompt == .updateRequired ? nil : terms?.current
         lobbyStatus.canChat = player?.canChat ?? true
         lobbyStatus.canRaceOnline = player?.canRaceOnline ?? true
+        signedInAlias = player?.alias
+        loadPhoto(for: player?.gamePlayerID)
+    }
+
+    /// Loads the photo of a player newly signed in, and forgets it on sign-out (#139, T5).
+    private func loadPhoto(for player: GamePlayerID?) {
+        guard player != photoPlayerID else { return }
+        photoPlayerID = player
+        playerPhoto = nil
+        guard player != nil else { return }
+        Task { [weak self, photos] in
+            let photo = await photos.photo()
+            // Signed out, or someone else, meanwhile: not hers.
+            guard let self, photoPlayerID == player else { return }
+            playerPhoto = photo
+        }
     }
 
     /// The gating matrix now (#138).

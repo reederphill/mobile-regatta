@@ -209,8 +209,18 @@ final class AppModel {
         path = [.myBoat]
     }
 
+    /// The server's count of the online races you've completed (#139, T3): what Profile shows, so My boat's
+    /// "n / N races" reads the same. Taken at each session's open (`LiverySync`) and at each profile read; it replaces
+    /// the device's own count, the results' +1 included.
+    func adoptServerCount(_ count: Int) {
+        let completed = CompletedRacesStore(defaults: myBoatDefaults)
+        completed.count = count
+        myBoat.completedRaces = completed.count
+    }
+
     /// An online race's results stream (#133), counting from the online races completed so far: its close, when it
-    /// counts (G6), adds one, so the earned line's Try it lands on an unlocked design. #163 later sets the server's count.
+    /// counts (G6), adds one on the device at once, so the earned line's Try it lands on an unlocked design. That +1
+    /// is a stopgap: the server's count replaces it at the next profile read (`adoptServerCount`).
     func onlineResults(service: any RaceSessionService, raceID: RaceID?) -> OnlineResults {
         let completed = CompletedRacesStore(defaults: myBoatDefaults)
         let results = OnlineResults(service: service, raceID: raceID, completedBefore: completed.count)
