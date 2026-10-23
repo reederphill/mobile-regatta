@@ -87,10 +87,18 @@ final class OnlineStatus {
     let leaderboardTop: any LeaderboardTopSource
     /// The lobby on Home (#142, T1): held here so pushed pages and sheets keep its feed.
     let lobby: LobbyModel
-    /// The scene is in front: in the background the lobby lets its feed go.
-    private var isSceneActive = true
     private let session: Session?
     private let now: () -> Date
+    /// Usage analytics (#128, #166): sent as the session comes through the terms and on going to the background.
+    let analytics: Analytics
+    /// Whether this window is in a race (`AppModel.race`): analytics wait for the next trigger then. Set by the window.
+    var isRacing: () -> Bool = { false }
+    /// How long going to the background waits for analytics before the socket closes (T2).
+    var backgroundFlushLimit = Duration.seconds(3)
+    /// The flush the last trigger started, for tests to wait on.
+    private(set) var analyticsFlush: Task<Void, Never>?
+    /// The scene's last word: a background flush that ends after a return to the foreground leaves the socket open.
+    private var isSceneActive = true
 
     /// `isOnline` starts at `isInitiallyOnline` until the connectivity service says: optimistic for the device's
     /// path, so Race online doesn't flash "Offline", and `isInitiallyOnline(_:)` for a launch's fakes, so the
@@ -99,10 +107,12 @@ final class OnlineStatus {
     init(services: ServiceSet, isInitiallyOnline: Bool = true, session: Session? = nil, raceTimescale: Double = 1,
          photos: any PlayerPhotoSource = NoPlayerPhoto(),
          leaderboard: any LeaderboardPresenter = RecordingLeaderboardPresenter(),
-         leaderboardTop: any LeaderboardTopSource = FixedLeaderboardTop(), now: @escaping () -> Date = Date.init,
+         leaderboardTop: any LeaderboardTopSource = FixedLeaderboardTop(), analytics: Analytics = .discarding(),
+         now: @escaping () -> Date = Date.init,
          lobbySleep: @escaping @Sendable (Duration) async -> Void = { try? await Task.sleep(for: $0) }) {
         self.services = services
         self.session = session
+        self.analytics = analytics
         self.photos = photos
         self.leaderboard = leaderboard
         self.leaderboardTop = leaderboardTop
@@ -225,23 +235,65 @@ final class OnlineStatus {
         lobby.setAllowed(gates == .lobby && mayAskLobby && isSceneActive)
     }
 
-    /// The session opened, or the terms were just accepted on it: a race she dropped out of may still run (a cold
-    /// launch after a drop), and the livery is brought in line with the server's.
+    /// The session opened, or the terms were just accepted on it: what waits in the analytics buffer goes (a chat-only
+    /// player's too), a race she dropped out of may still run (a cold launch after a drop), and the livery is brought
+    /// in line with the server's.
     private func throughTheGate() {
-        guard session != nil, mayAskService else { return }
+        guard session != nil else { return }
+        if isSessionOpen, lobbyStatus.hasAcceptedTerms { flushAnalytics() }
+        guard mayAskService else { return }
         race.sessionOpened()
         Task { await livery.sessionOpened() }
     }
 
     /// The scene became active, or went to the background: the queue is left there (#140), and the session's socket
-    /// follows (#161).
+    /// follows (#161). In the background the analytics buffer goes first, for up to `backgroundFlushLimit` in a
+    /// background task, while the socket is still open (#166, T2); then the socket closes, unless the scene came back
+    /// meanwhile.
     func setSceneActive(_ active: Bool) {
         isSceneActive = active
         updateLobby()
         queue.sceneChanged(isBackground: !active)
         race.sceneChanged(isBackground: !active)
-        guard let session else { return }
-        Task { await session.session.setActive(active) }
+        if active {
+            guard let session else { return }
+            Task { await session.session.setActive(true) }
+            return
+        }
+        let awake = BackgroundAssertion(name: "Analytics")
+        let flush = flushAnalytics()
+        let (limit, session) = (backgroundFlushLimit, session)
+        Task { [weak self] in
+            if let flush { await Self.wait(for: flush, atMost: limit) }
+            if self?.isSceneActive != true { await session?.session.setActive(false) }
+            awake.end()
+        }
+    }
+
+    /// Sends what waits in the analytics buffer, unless a race is on (the next trigger takes it). Share usage data
+    /// off, `Analytics` sends nothing.
+    @discardableResult private func flushAnalytics() -> Task<Void, Never>? {
+        guard !isRacing() else { return nil }
+        let analytics = analytics
+        let flush = Task { await analytics.flush() }
+        analyticsFlush = flush
+        return flush
+    }
+
+    /// Returns when `task` ends or `limit` has passed, whichever is first; `task` runs on either way.
+    private static func wait(for task: Task<Void, Never>, atMost limit: Duration) async {
+        let (done, finish) = AsyncStream<Void>.makeStream()
+        let finished = Task {
+            await task.value
+            finish.finish()
+        }
+        let timer = Task {
+            try? await Task.sleep(for: limit)
+            finish.finish()
+        }
+        for await _ in done {}
+        finished.cancel()
+        timer.cancel()
     }
 
     /// The line under Race online for what the server or the session says, when the gating matrix has none of its

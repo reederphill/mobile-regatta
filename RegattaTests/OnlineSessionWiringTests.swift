@@ -14,8 +14,12 @@ nonisolated final class StubService: Sendable {
         var terms = WireTermsStatus.needsAcceptance(current: 1, lastAccepted: nil)
         var queue = QueueState.idle
         var connects = 0
-        /// The queue, race session and profile calls asked of it (#162), by name.
+        /// The queue, race session and profile calls asked of it (#162), by name; analytics batches as "analytics <n>"
+        /// and the deletion's "plan" and "delete" (#166).
         var calls: [String] = []
+        /// The answers to the deletion's plan and delete (#166).
+        var plan = DeletionResult.plan(WireDeletionPlan(deletes: WireOnlineData.allCases, anonymisesRaceLogs: true, confirmation: "stub"))
+        var delete = DeletionResult.deleted
     }
 
     let state = OSAllocatedUnfairLock(initialState: State())
@@ -76,6 +80,22 @@ nonisolated final class StubLink: SessionLink {
         case .profileRequest(let request):
             service.state.withLock { $0.calls.append(request.call == .profile ? "profile" : "saveLivery") }
             deliver(.profileReply(ServiceReply(id: request.id, result: .notSignedIn)))
+        case .analyticsRequest(let request):
+            let events = request.call.events.count
+            service.state.withLock { $0.calls.append("analytics \(events)") }
+            deliver(.analyticsReply(ServiceReply(id: request.id, result: .receipt(accepted: events, duplicates: 0))))
+        case .deletionRequest(let request):
+            let result = service.state.withLock { state -> DeletionResult in
+                switch request.call {
+                case .plan:
+                    state.calls.append("plan")
+                    return state.plan
+                case .delete:
+                    state.calls.append("delete")
+                    return state.delete
+                }
+            }
+            deliver(.deletionReply(ServiceReply(id: request.id, result: result)))
         default:
             // The queue's stream is opened and never answered: the tests show the status its states themselves.
             break

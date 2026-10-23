@@ -25,7 +25,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
                                     session: app.online,
                                     raceTimescale: LaunchOptions.current.fakeServices == nil ? 1 : LaunchOptions.current.timescale,
                                     photos: app.playerPhotos, leaderboard: app.leaderboard,
-                                    leaderboardTop: app.leaderboardTop)
+                                    leaderboardTop: app.leaderboardTop, analytics: app.analytics)
         let launchOptions = LaunchOptions.current
         showWindow(launchOptions: launchOptions)
         if launchOptions.uiTesting {
@@ -67,29 +67,8 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     func sceneWillEnterForeground(_ scene: UIScene) { sceneState.phase = .inactive }
     func sceneDidEnterBackground(_ scene: UIScene) {
         sceneState.phase = .background
+        // The analytics buffer goes first, in a little background time, then the socket closes (#166, T2).
         onlineStatus?.setSceneActive(false)
-        guard let analytics = AppDelegate.current?.analytics else { return }
-        // A little background time to send what's waiting, after any flush already running; whatever doesn't go
-        // waits for the next launch.
-        let background = BackgroundTime()
-        background.begin()
-        Task {
-            await analytics.flush()
-            background.end()
-        }
-    }
-}
-
-/// Background time asked for once and given back once, by the work or by the system's expiry.
-private final class BackgroundTime {
-    private var task = UIBackgroundTaskIdentifier.invalid
-
-    func begin() { task = UIApplication.shared.beginBackgroundTask(withName: "analytics") { [self] in end() } }
-
-    func end() {
-        guard task != .invalid else { return }
-        UIApplication.shared.endBackgroundTask(task)
-        task = .invalid
     }
 }
 
@@ -142,6 +121,8 @@ final class RootHostingController: UIHostingController<AppRoot> {
         let connector = AppDelegate.current?.raceConnector ?? { _ in UnansweredRaceConnection() }
         let raceSession = onlineStatus.services.raceSession
         onlineStatus.race.attach(host: model)
+        // Analytics never go during a race (#166, T2).
+        onlineStatus.isRacing = { [weak model] in model?.race != nil }
         // My boat's livery follows the server's, and its saves go there (#162).
         onlineStatus.livery.attach(model)
         onlineStatus.race.makeLink = { [model] handOff in

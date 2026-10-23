@@ -1,3 +1,4 @@
+import RegattaServices
 import SwiftUI
 
 /// Settings (#110, #25): one page, in sections: Controls, On the water, Hints, Sound, Lobby, Purchases, Usage
@@ -6,15 +7,14 @@ import SwiftUI
 /// A scroll view and a column like the other pages, not a `Form`: an identifier on a `Form` doesn't reach the
 /// accessibility tree, and UI tests find the page by `page-settings`.
 struct SettingsView: View {
-    /// What Delete my online data does once confirmed, and the notice it leaves: the seam the deletion service's plan
-    /// and confirmation fill in #166.
-    typealias OnlineDataDeletion = () async -> String
-    /// Until #166: nothing is deleted, and the notice says so.
-    static let deletionArrivesLater: OnlineDataDeletion = { "Deleting online data arrives with online accounts." }
-
     @Bindable var model: AppModel
-    var deleteOnlineData: OnlineDataDeletion = Self.deletionArrivesLater
+    /// Delete my online data (#166): the plan on the tap, then the dialog's Delete.
+    var deleter = OnlineDataDeleter.unconnected
     @State private var confirmsDeletion = false
+    /// The plan the dialog confirms.
+    @State private var deletionPlan: DeletionPlan?
+    /// A plan or a delete is on its way: the row waits.
+    @State private var isDeleting = false
     @State private var notice = SettingsNotice()
 
     var body: some View {
@@ -71,7 +71,7 @@ struct SettingsView: View {
                     .accessibilityIdentifier("settings-blockedPlayers")
                 }
                 section("Purchases") {
-                    // Restores through the store service once purchases are wired (#166).
+                    // Restores through the store service once purchases are wired (#137).
                     buttonRow("Restore purchases", id: "settings-restorePurchases") {
                         notice.arrive("Purchases are restored once the shop opens.")
                     }
@@ -82,9 +82,9 @@ struct SettingsView: View {
                 }
                 section("Online data") {
                     buttonRow("Delete my online data", role: .destructive, id: "settings-deleteOnlineData") {
-                        confirmsDeletion = true
-                        notice.dialogIsUp = true
+                        prepareDeletion()
                     }
+                    .disabled(isDeleting)
                     footnote("Deletes your profile, rating, chat and reports from the server. Purchases stay with your Apple ID.")
                 }
                 section("About") {
@@ -127,9 +127,15 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .confirmationDialog("Delete your online data?", isPresented: $confirmsDeletion, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
-                Task { notice.arrive(await deleteOnlineData()) }
+                guard let plan = deletionPlan else { return }
+                deletionPlan = nil
+                isDeleting = true
+                Task {
+                    notice.arrive(await deleter.confirm(plan))
+                    isDeleting = false
+                }
             }
-            Button("Cancel", role: .cancel) {}
+            Button("Cancel", role: .cancel) { deletionPlan = nil }
         } message: {
             Text("Your profile, rating, chat history and reports are deleted, and your name comes off the leaderboard. Race results keep a random name in your place.")
         }
@@ -137,6 +143,23 @@ struct SettingsView: View {
         .onChange(of: confirmsDeletion) { _, isUp in notice.dialogIsUp = isUp }
         .alert(notice.shown ?? "", isPresented: Binding(get: { notice.shown != nil }, set: { if !$0 { notice.shown = nil } })) {
             Button("OK", role: .cancel) {}
+        }
+    }
+
+    /// The row's tap (#166, T4): the server's plan first; the dialog only with one, else its notice.
+    private func prepareDeletion() {
+        isDeleting = true
+        Task {
+            let step = await deleter.prepare()
+            isDeleting = false
+            switch step {
+            case .confirm(let plan):
+                deletionPlan = plan
+                confirmsDeletion = true
+                notice.dialogIsUp = true
+            case .notice(let text):
+                notice.arrive(text)
+            }
         }
     }
 

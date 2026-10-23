@@ -40,6 +40,12 @@ struct CompletedRacesStore {
     /// The last race counted here, so a race counts once however often its close is read (#133).
     static let lastCountedKey = "lastCountedOnlineRace"
 
+    /// Back to none (#166): her online data was deleted, and the server's count with it.
+    func reset() {
+        defaults.removeObject(forKey: Self.key)
+        defaults.removeObject(forKey: Self.lastCountedKey)
+    }
+
     /// Counts `race` as completed, once: false if it was the last one counted.
     @discardableResult
     func countCompletion(of race: String) -> Bool {

@@ -51,4 +51,6 @@ struct LastHandOffStore {
         guard let data = try? JSONEncoder().encode(fleet) else { return }
         defaults.set(data, forKey: Self.key)
     }
+
+    func clear() { defaults.removeObject(forKey: Self.key) }
 }

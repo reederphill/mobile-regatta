@@ -20,7 +20,7 @@ struct MenuPageView: View {
         case .help:
             HelpPage()
         case .settings:
-            SettingsView(model: model)
+            SettingsView(model: model, deleter: onlineStatus.map { .app(status: $0, model: model) } ?? .unconnected)
         case .blockedPlayers:
             BlockedPlayersPage()
         #if DEBUG

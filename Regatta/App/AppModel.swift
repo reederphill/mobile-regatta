@@ -561,6 +561,22 @@ final class AppModel {
 
     func keepHandOff(_ fleet: RaceFleet) { lastHandOff = fleet }
 
+    /// Delete my online data went through (#166, T5): what the device kept of her online racing goes. An online Last
+    /// race and the last hand-off's fleet are cleared (a practice Last race stays); the completed-race count resets,
+    /// so earned designs lock again (O3); her livery stays on the device and waits to be uploaded, so a return sends
+    /// it rather than taking a fresh profile's default. Bought designs, practice history and settings are untouched.
+    func forgetOnlineData() {
+        if lastRace?.online != nil {
+            lastRace = nil
+            LastRaceStore(defaults: practiceDefaults).clear()
+        }
+        lastHandOff = nil
+        LastHandOffStore(defaults: practiceDefaults).clear()
+        CompletedRacesStore(defaults: myBoatDefaults).reset()
+        myBoat.completedRaces = 0
+        myBoatDefaults.set(true, forKey: LiverySync.pendingKey)
+    }
+
     /// Whether the server's last race, `raceID`, read as a session opens (#163, T4), replaces Home's Last race: (a)
     /// Home has none; (b) it is the same race, now closed and rated; (c) it is the race this device was last handed and
     /// Home's isn't it (the app was killed in or after it), unless a practice race has been kept since. Otherwise
@@ -633,6 +649,8 @@ struct LastRaceStore {
         guard let data = try? JSONEncoder().encode(results) else { return }
         defaults.set(data, forKey: Self.key)
     }
+
+    func clear() { defaults.removeObject(forKey: Self.key) }
 }
 
 /// Your practice history (#235): your recent practice finishes, oldest first (`Rivals.kept` of them), as JSON in the
