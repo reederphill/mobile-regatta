@@ -183,6 +183,10 @@ struct LaunchOptions: Equatable {
     var raceSeconds: Int?
     var startSeconds: Int?
     var laps: Int?
+    /// `-tilt <deg>` (#596 prototype): the race scene drawn from a fixed oblique tilt off vertical, 0…80; 0 is flat.
+    var tilt: Double = 0
+    /// `-boats <n>` (#596 prototype): the launch race's fleet, 2…16.
+    var boats: Int?
     var hidesScene = false
     var appearance: Appearance?
     var vision: VisionFilter?
@@ -242,6 +246,7 @@ struct LaunchOptions: Equatable {
                 apply(argument, value)
             #endif
             case "-seed", "-fixture", "-fixtures", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps",
+                 "-tilt", "-boats",
                  "-appearance", "-vision", "-briefing", "-myBoat", "-completedRaces", "-thermal":
                 guard let value = takeValue(of: argument, from: &rest) else { continue }
                 apply(argument, value)
@@ -264,6 +269,7 @@ struct LaunchOptions: Equatable {
     private static let flags: Set<String> = {
         var flags: Set = ["-autostart", "-demo", "-perf", "-uitesting", "-resetSettings", "-online", "-hideScene", "-seed",
                           "-fixture", "-fixtures", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps",
+                          "-tilt", "-boats",
                           "-appearance", "-vision", "-briefing", "-myBoat", "-keepMyBoat", "-completedRaces",
                           "-thermal", "-cuesOnly",
                           "-onlineResults"]
@@ -317,6 +323,10 @@ struct LaunchOptions: Equatable {
             if let n = Int(value), (1...60).contains(n) { startSeconds = n } else { reject(argument, value, "a whole number of seconds, 1…60") }
         case "-laps":
             if let n = Int(value), (1...9).contains(n) { laps = n } else { reject(argument, value, "a whole number of laps, 1…9") }
+        case "-tilt":
+            if let n = Double(value), (0...80).contains(n) { tilt = n } else { reject(argument, value, "degrees off vertical, 0…80") }
+        case "-boats":
+            if let n = Int(value), (2...16).contains(n) { boats = n } else { reject(argument, value, "a whole number of boats, 2…16") }
         case "-appearance":
             if let style = Appearance(rawValue: value) { appearance = style } else { reject(argument, value, "light or dark") }
         case "-vision":
@@ -456,6 +466,7 @@ struct LaunchOptions: Equatable {
         var config = raceConfig(from: config)
         config.botSailsYourBoat = demo || perf
         if perf { config.opponents = Self.perfFleetSize - 1 }
+        if let boats { config.opponents = boats - 1 }
         return config
     }
 }

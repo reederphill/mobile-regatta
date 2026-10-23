@@ -318,6 +318,11 @@ final class WaterNode: SKNode {
         let cap: SKSpriteNode
     }
 
+    /// #596 prototype: a shader on every ripple streak (one shared shader, so the tiles still batch).
+    var rippleShader: SKShader? {
+        didSet { tileNodes.forEach { $0.streak.shader = rippleShader } }
+    }
+
     private func makeTile() -> Tile {
         // A z each, from its slot (`DrawOrder`; a view takes a few hundred): a frame gives the slots out in
         // lattice order, so the same view draws its tiles in the same order whatever the pool held before. The
@@ -327,6 +332,7 @@ final class WaterNode: SKNode {
         streak.color = ChartPalette.lull.uiColor
         streak.colorBlendFactor = 1
         streak.zPosition = z
+        streak.shader = rippleShader
         let cap = SKSpriteNode(texture: whitecapTexture, size: CGSize(width: 20, height: 20))
         cap.color = ChartPalette.foam.uiColor
         cap.colorBlendFactor = 1

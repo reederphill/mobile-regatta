@@ -96,6 +96,19 @@ final class GameScene: SKScene {
     private(set) var pace = PaceMeter()
 
     private let world = SKNode()
+    /// #596 prototype: the oblique projection. Scene ← `tiltNode` (y squashed by `cos(tilt)`) ← `rotor` (the camera's
+    /// turn) ← `world` (at −centre). The camera stays at the origin, unturned, carrying only the zoom.
+    private let tiltNode = SKNode()
+    private let rotor = SKNode()
+    /// Degrees off vertical (`-tilt`); 0 draws today's flat look.
+    private let tiltDegrees = LaunchOptions.current.tilt
+    private var isTilted: Bool { tiltDegrees > 0 }
+    /// The fleet, buoys and committee boat standing up (#596): nil when flat.
+    private var fleet3D: Fleet3D?
+    /// The land's extruded rim (#596), a child of `tiltNode`.
+    private let landRim = SKShapeNode()
+    /// The light's glint band on the water (#596), on the camera.
+    private var glint: SKSpriteNode?
     private let cam = SKCameraNode()
     private let water = WaterNode(pointsPerMeter: Double(GameScene.pointsPerMeter))
     private let effectsLayer = SKNode()
@@ -187,16 +200,94 @@ final class GameScene: SKScene {
         let layers: [(SKNode, String)] = [(water, "water"), (effectsLayer, "effects"), (courseLayer, "course"),
                                           (cueLayer, "cues"), (boatLayer, "fleet")]
         for (layer, name) in layers { layer.name = name }
-        addChild(world)
+        tiltNode.yScale = ChartGeometry.obliqueSquash(tiltDegrees: tiltDegrees)
+        rotor.addChild(world)
+        tiltNode.addChild(rotor)
+        addChild(tiltNode)
 
         addChild(cam)
         camera = cam
         cam.setScale(rig.cameraScale)
-        cam.position = point(driver.renderWorld.me.position)
+        cam.position = .zero
 
         buildCues()
         buildCourse()
         buildBoats()
+        buildTilt()
+    }
+
+    /// #596 prototype: the standing fleet, the land's rim and the glint, only when tilted.
+    private func buildTilt() {
+        guard isTilted else { return }
+        let frame = driver.currentFrame
+        let fleet = Fleet3D(boats: frame.boats, colors: frame.boats.map { Palette.boat($0.colorIndex) },
+                            boatClass: driver.boatClass, course: driver.course, pointsPerMeter: ppm,
+                            tiltDegrees: tiltDegrees, sceneSize: size)
+        // Over the fleet layer's shadows and glows (global z ≈ 8…14), under the rule cues (16) and the edge arrow (20).
+        fleet.node.zPosition = 15
+        fleet.node.name = "fleet3D"
+        cam.addChild(fleet.node)
+        fleet3D = fleet
+        boatNodes.forEach { $0.drawsFlatHull = false }
+
+        landRim.fillColor = ChartPalette.landmark.uiColor
+        landRim.strokeColor = .clear
+        landRim.lineWidth = 0
+        // Just under the land's top fill (`ChartLayer.landZ` = −2), over the water (−10) and shallows.
+        landRim.zPosition = -2.5
+        landRim.name = "landRim"
+        tiltNode.addChild(landRim)
+
+        let band = SKSpriteNode(color: .white, size: size)
+        band.blendMode = .add
+        band.zPosition = -9.5
+        band.name = "glint"
+        band.shader = SKShader(source: """
+        void main() {
+            vec2 uv = v_tex_coord;
+            float centre = 1.0 - 0.3;
+            float d = (uv.y - centre) / 0.15;
+            float band = exp(-d * d * 1.6);
+            float s1 = sin(uv.x * 95.0 + u_time * 1.9 + sin(uv.y * 40.0 + u_time * 0.7) * 2.0);
+            float s2 = sin(uv.x * 41.0 - u_time * 2.6 + uv.y * 70.0);
+            float sparkle = max(s1 * s2, 0.0);
+            float a = band * (0.035 + 0.16 * sparkle * sparkle);
+            gl_FragColor = vec4(a, a, a, a);
+        }
+        """)
+        cam.addChild(band)
+        glint = band
+        water.rippleShader = SKShader(source: """
+        void main() {
+            vec2 uv = v_tex_coord;
+            uv.y += 0.01 * sin(u_time * 2.0 + uv.x * 12.0);
+            vec4 t = texture2D(u_texture, uv);
+            gl_FragColor = vec4(v_color_mix.rgb * t.a, t.a) * v_color_mix.a;
+        }
+        """)
+    }
+
+    /// The land's rim (#596): each coast edge's quad hanging `h` down the screen from it, in `rotor` space (before the
+    /// squash), so a coast facing the viewer shows a face and one facing away hides under the land's fill.
+    private func updateLandRim() {
+        let polygons = driver.venue.land.map(\.points)
+        guard !polygons.isEmpty else { return }
+        let rho = -rig.cameraRotation, c = cos(rho), s = sin(rho)
+        let centre = rig.center
+        func turned(_ v: Vec2) -> CGPoint {
+            let dx = CGFloat(v.x) * ppm - centre.x, dy = CGFloat(v.y) * ppm - centre.y
+            return CGPoint(x: dx * c - dy * s, y: dx * s + dy * c)
+        }
+        // 6 m standing, shown sin(tilt) tall; the node is squashed by cos(tilt).
+        let drop = 6 * ppm * ChartGeometry.obliqueRise(tiltDegrees: tiltDegrees)
+            / ChartGeometry.obliqueSquash(tiltDegrees: tiltDegrees)
+        let path = CGMutablePath()
+        for edge in ChartGeometry.coastEdges(of: polygons) {
+            let a = turned(edge.a), b = turned(edge.b)
+            path.addLines(between: [a, b, CGPoint(x: b.x, y: b.y - drop), CGPoint(x: a.x, y: a.y - drop)])
+            path.closeSubpath()
+        }
+        landRim.path = path
     }
 
     private func buildCourse() {
@@ -313,9 +404,11 @@ final class GameScene: SKScene {
         lastRenderTime = world.time
         let me = world.me.position
         let hull = max(world.boatClass.hull.length, 1e-6)
+        var poses: [BoatPose] = []
         for (i, boat) in world.boats.enumerated() {
             let pose = BoatPose(boat, ease: world.ease(ofSeat: i), isGhost: world.isGhost(ofSeat: i),
                                 boatClass: world.boatClass, style: boatStyle, autohelm: world.autohelm(ofSeat: i))
+            poses.append(pose)
             let hullsFromYou = i == world.myBoatIndex ? 0 : (boat.position - me).length / hull
             let backwind = world.backwind(ofSeat: i)
             boatNodes[i].hidesDecoration = drawsCuesOnly
@@ -334,17 +427,28 @@ final class GameScene: SKScene {
         var cameraWorld = CameraWorld(world)
         cameraWorld.area = chart.framing
         rig.advance(cameraWorld, sceneSize: size, dt: dt, settled: settled)
-        cam.position = rig.center
+        // #596: the camera stays at the origin, unturned; the world moves and turns under the squash instead.
+        cam.position = .zero
         cam.setScale(rig.cameraScale)
-        cam.zRotation = rig.cameraRotation
+        cam.zRotation = 0
+        self.world.position = CGPoint(x: -rig.center.x, y: -rig.center.y)
+        rotor.zRotation = -rig.cameraRotation
         pointShimmer(world)
 
-        let view = WaterView(center: cam.position, sceneSize: size, scale: cam.xScale, rotation: cam.zRotation)
+        let squash = ChartGeometry.obliqueSquash(tiltDegrees: tiltDegrees)
+        let view = WaterView(center: rig.center, sceneSize: CGSize(width: size.width, height: size.height / squash),
+                             scale: rig.cameraScale, rotation: rig.cameraRotation)
         water.hidesRipple = drawsCuesOnly
         Signpost.waterUpdate.measure { water.update(WaterWorld(world), view: view, dt: dt) }
 
         // The active leg's marks orange, the rest grey (#15); strokes kept steady on screen as the camera zooms.
-        chart.update(status: world.me.status, legIndex: world.me.legIndex, cameraScale: cam.xScale)
+        chart.update(status: world.me.status, legIndex: world.me.legIndex, cameraScale: rig.cameraScale)
+        if let fleet3D {
+            fleet3D.update(world, poses: poses, style: boatStyle, center: rig.center, rotation: rig.cameraRotation,
+                           cameraScale: rig.cameraScale, sceneSize: size, time: world.time, dt: dt, settled: settled)
+            updateLandRim()
+            glint?.size = size
+        }
 
         updateCues(world, dt: dt, settled: settled)
         ruleCues?.isHidden = !showsRuleCues
@@ -352,7 +456,7 @@ final class GameScene: SKScene {
             let mine = world.myBoatIndex
             servedTurn.follow(world.frame.owed.indices.contains(mine) ? world.frame.owed[mine] : nil)
             ruleCues?.update(world, calls: ruleCalls, served: servedTurn, style: boatStyle, px: cam.xScale,
-                             rotation: cam.zRotation)
+                             rotation: rig.cameraRotation)
         } else {
             ruleCues?.reset()
         }
@@ -463,7 +567,7 @@ final class GameScene: SKScene {
         let me = world.me
         let course = world.course
         let leg = course.legSailed(status: me.status, legIndex: me.legIndex)
-        let centre = Vec2(Double(cam.position.x / ppm), Double(cam.position.y / ppm))
+        let centre = Vec2(Double(rig.center.x / ppm), Double(rig.center.y / ppm))
         ladderScale = cam.xScale
         let radius = Double(hypot(size.width, size.height) * cam.xScale / ppm)
         let path = CGMutablePath()

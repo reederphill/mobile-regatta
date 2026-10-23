@@ -22,6 +22,11 @@ final class BoatNode: SKNode {
     /// under the hull. Your own boat never has one.
     private let rightOfWayGlow: SKSpriteNode
     private let sail: SKSpriteNode
+    /// The flat hull and outline (#596 prototype: hidden when a 3D boat stands over her).
+    private let hullSprite: SKSpriteNode
+    private let outlineSprite: SKSpriteNode
+    /// #596 prototype: hides the flat hull, outline and sail, which a 3D boat draws instead.
+    var drawsFlatHull = true
     private let ppm: CGFloat
     private let beam: CGFloat
     /// Her seat: each boat's flutter swings on its own phase (`BoatStyle.flutterPhaseStep`), so a flapping fleet
@@ -75,6 +80,8 @@ final class BoatNode: SKNode {
         outline.color = CuePalette.hullOutline.uiColor
         outline.colorBlendFactor = 1
         outline.zPosition = Layer.outline
+        hullSprite = hull
+        outlineSprite = outline
         glow = isMine ? SKSpriteNode(texture: art.glow) : nil
         glow?.zPosition = Layer.glow
         rightOfWayGlow = SKSpriteNode(texture: art.rightOfWayGlow)
@@ -134,7 +141,9 @@ final class BoatNode: SKNode {
         updateSail(pose, style: style, detail: Double(sailDetailShare), time: time, dt: dt, settled: settled)
         effects.update(with: boat, pose: pose, style: style, quality: wakeQuality, time: time, dt: dt,
                        settled: settled, backwindSail: backwindSail, backwindSide: backwindSide, justSeated: justSeated)
-        sail.isHidden = hidesDecoration
+        sail.isHidden = hidesDecoration || !drawsFlatHull
+        hullSprite.isHidden = !drawsFlatHull
+        outlineSprite.isHidden = !drawsFlatHull
         if hidesDecoration {
             effects.trail.isHidden = true
             effects.cornerTrail.isHidden = true
