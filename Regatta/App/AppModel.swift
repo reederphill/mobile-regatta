@@ -135,6 +135,15 @@ final class AppModel {
         }
     }
 
+    /// The last online race this device was handed, with its briefing's seat liveries (#163): what that race's results
+    /// and Last race wear. Kept in the practice defaults (`LastHandOffStore`).
+    private(set) var lastHandOff: RaceFleet? {
+        didSet {
+            guard lastHandOff != oldValue, let lastHandOff else { return }
+            LastHandOffStore(defaults: practiceDefaults).save(lastHandOff)
+        }
+    }
+
     /// Your livery (#136, #21): what your boat wears in practice races and briefings, kept on the device as it changes
     /// (`LiveryStore`). #162 sets it from the server's copy on sign-in.
     var myLivery: Livery {
@@ -183,6 +192,7 @@ final class AppModel {
         }
         practiceSetup = PracticeSetup(defaults: practiceDefaults)
         lastRace = LastRaceStore(defaults: practiceDefaults).load()
+        lastHandOff = LastHandOffStore(defaults: practiceDefaults).load()
         let myBoatDefaults = MyBoatDefaults.defaults(for: launchOptions, standard: defaults)
         self.myBoatDefaults = myBoatDefaults
         let boatClass = RaceFiles.defaults.boatClass.ref.id
@@ -501,8 +511,9 @@ final class AppModel {
         let results = onlineResults(service: service, raceID: handOff.raceID)
         // `-timescale` runs the fakes' race, as it does their queue and briefing.
         let timescale = launchOptions.fakeServices == nil ? 1 : launchOptions.timescale
+        let liveries = fleet(of: handOff.raceID)
         return OnlineRaceLink(handOff: handOff, connector: connector, results: results) { [self] connect, token in
-            OnlineLaunch(connect: connect, token: token, timescale: timescale, haptics: haptics, sound: sound,
+            OnlineLaunch(connect: connect, token: token, liveries: liveries, timescale: timescale, haptics: haptics, sound: sound,
                          controls: controls, rulesSeen: rulesSeen, hints: hintEngine, onHintRetired: logsHintRetired,
                          results: results)
         }
@@ -533,9 +544,13 @@ final class AppModel {
     func keepLastRace(_ report: RaceReport, rating: RatingOutcome?) {
         let results = RaceResultViewModel(lastRace: LastRace(report: report, rating: rating.map {
             RatingChange(raceID: report.raceID, outcome: $0)
-        }), livery: myLivery)
+        }), livery: myLivery, fleet: fleet(of: report.raceID))
         if results.keepsAsLastRace { lastRace = results }
     }
+
+    func keepHandOff(_ fleet: RaceFleet) { lastHandOff = fleet }
+
+    func fleet(of raceID: RaceID) -> [Livery]? { lastHandOff?.liveries(of: raceID) }
 
     func setLastRaceRating(_ outcome: RatingOutcome, raceID: RaceID) {
         guard var kept = lastRace, kept.online?.raceID == raceID.rawValue else { return }

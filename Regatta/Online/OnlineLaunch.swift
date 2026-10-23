@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import RegattaClient
+import RegattaCore
 import RegattaProtocol
 import RegattaServices
 
@@ -79,6 +80,9 @@ final class OnlineLaunch {
     /// The race's results from the server's stream (#133), for a race with a hand-off (`AppModel.onlineResults`). Nil
     /// for a Debug dev-instant race, which keeps the live frame's standings and its own loop.
     @ObservationIgnored private let results: OnlineResults?
+    /// The briefing's seat liveries (#163), for a race with a hand-off whose briefing this device kept; nil wears the
+    /// seeded fleet (`FleetLiveries(briefing:setup:mySeat:)`).
+    @ObservationIgnored private let liveries: [Livery]?
 
     init(server: RaceServer, haptics: any Haptics = SilentHaptics(), sound: any SoundOutput = SilentSoundOutput(),
          controls: ControlSettings = ControlSettings(), rulesSeen: RuleSeenStore = RuleSeenStore(),
@@ -89,6 +93,7 @@ final class OnlineLaunch {
         isSequence = false
         connect = { server.raceURL.map { WebSocketTransport(url: $0) } }
         self.results = results
+        liveries = nil
         self.hints = hints
         self.onHintRetired = onHintRetired
         self.haptics = haptics
@@ -100,7 +105,7 @@ final class OnlineLaunch {
 
     /// The race a hand-off seats her in (#141): `connect` opens each connection, `token` gives the token to join
     /// with now.
-    init(connect: @escaping () -> any RaceConnection, token: @escaping () -> [UInt8], timescale: Double = 1,
+    init(connect: @escaping () -> any RaceConnection, token: @escaping () -> [UInt8], liveries: [Livery]? = nil, timescale: Double = 1,
          haptics: any Haptics = SilentHaptics(), sound: any SoundOutput = SilentSoundOutput(),
          controls: ControlSettings = ControlSettings(), rulesSeen: RuleSeenStore = RuleSeenStore(),
          hints: (() -> HintEngine)? = nil, onHintRetired: ((String, HintRetirement) -> Void)? = nil,
@@ -110,6 +115,7 @@ final class OnlineLaunch {
         isSequence = true
         self.connect = { connect() }
         self.results = results
+        self.liveries = liveries
         self.hints = hints
         self.onHintRetired = onHintRetired
         self.haptics = haptics
@@ -176,7 +182,7 @@ final class OnlineLaunch {
             let underway = isSequence && (join.joinedTick ?? Int.min) > -start.setup.startSequenceTicks
             let driver = OnlineDriver(start: start, transport: joined, token: token, clientBuild: Self.clientBuild,
                                       now: clock.now, connect: { connect() ?? UnansweredRaceConnection() },
-                                      joiningUnderway: underway)
+                                      joiningUnderway: underway, liveries: liveries)
             onDriver?(driver)
             let session = GameSession(online: driver, haptics: haptics, sound: sound, controls: controls,
                                       rulesSeen: rulesSeen, hints: hints?())

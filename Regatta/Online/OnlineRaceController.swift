@@ -193,6 +193,8 @@ final class OnlineRaceController: OnlineSequence {
     func begin(_ handOff: HandOff, briefing: BriefingPayload, host: any FleetLockHost) {
         self.host = host
         clearOffer()
+        // The briefing's liveries are the race's: nothing after it carries them (#163).
+        host.keepHandOff(RaceFleet(raceID: handOff.raceID, briefing: briefing))
         sequenceStartTick = -(briefing.gunInSeconds - briefing.briefingSeconds) * Race.tickRate
         phase = .briefing
         start(handOff)
@@ -492,6 +494,8 @@ final class OnlineRaceController: OnlineSequence {
         do {
             let offer = try await raceSession.rejoin()
             guard phase == .idle else { return }
+            await keepBriefingFleet(of: offer.handOff.raceID)
+            guard phase == .idle else { return }
             rejoinEntry = nil
             phase = .racing
             start(offer.handOff)
@@ -503,6 +507,15 @@ final class OnlineRaceController: OnlineSequence {
         } catch {
             // No answer (#162): the row stays for another tap.
         }
+    }
+
+    /// A rejoin's hand-off has no briefing (#163): with no fleet kept for `raceID` (a cold launch on another device,
+    /// or after a reinstall), the service's hand-off, which it keeps for a dropped player until the close, has it. With
+    /// neither, the race wears the seeded fleet.
+    private func keepBriefingFleet(of raceID: RaceID) async {
+        guard host?.fleet(of: raceID) == nil, let handOff = try? await raceSession.handOff(), handOff.raceID == raceID,
+              let briefing = handOff.briefing else { return }
+        host?.keepHandOff(RaceFleet(raceID: raceID, briefing: briefing))
     }
 
     private func clearOffer() {

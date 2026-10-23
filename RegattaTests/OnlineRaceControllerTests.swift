@@ -126,13 +126,17 @@ nonisolated final class CountingQueue: QueueService, @unchecked Sendable {
     static let fresh = RaceToken(bytes: [0xFE])
 
     let clock = QueueControllerTests.FakeClock()
-    let model = AppModel()
+    /// On defaults of its own, so a kept Last race or hand-off is this rig's alone.
+    let model = AppModel(launchOptions: LaunchOptions(arguments: ["/path/to/Regatta"]),
+                         defaults: UserDefaults(suiteName: "SequenceRig.\(UUID().uuidString)")!)
     let session = MutableRaceSession()
     let counting = CountingQueue()
     let race: OnlineRaceController
     let queue: QueueController
     private(set) var links: [ScriptedRaceLink] = []
     private(set) var handOffs: [HandOff] = []
+    /// The seat liveries each link's launch was given (#163): the kept briefing's for its race, or nil.
+    private(set) var fleets: [[Livery]?] = []
 
     init() {
         let clock = clock
@@ -148,6 +152,7 @@ nonisolated final class CountingQueue: QueueService, @unchecked Sendable {
             let link = ScriptedRaceLink()
             links.append(link)
             handOffs.append(handOff)
+            fleets.append(model.fleet(of: handOff.raceID))
             return link
         }
     }
@@ -565,6 +570,32 @@ nonisolated final class CountingQueue: QueueService, @unchecked Sendable {
         rig.race.tick()
         rig.race.home()
         #expect(rig.queue.entry == .ready && rig.model.phase == .home)
+    }
+
+    /// #163, T1: a rejoin's hand-off has no briefing. With none kept for the race, the service's hand-off has it, and
+    /// the launch wears its fleet; with no hand-off either, the seeded fleet (none given). The fleet locked at the
+    /// briefing is the launch's from the start.
+    @Test func rejoinTakesTheBriefingFleetFromTheHandOff() async {
+        let briefing = FakeServiceScenario.briefing()
+        let locked = SequenceRig()
+        await locked.lock()
+        #expect(locked.fleets == [briefing.fleet.map(\.livery)])
+
+        let rig = SequenceRig()
+        rig.session.offer = rig.offer(at: 600)
+        await rig.queue.receive(.fleetLocked)
+        await rig.settle()
+        #expect(rig.model.fleet(of: SequenceRig.raceID) == nil)
+        await rig.race.rejoin()
+        #expect(rig.race.phase == .racing && rig.fleets == [briefing.fleet.map(\.livery)])
+
+        let bare = SequenceRig()
+        bare.session.handOffAnswer = nil
+        bare.session.offer = bare.offer(at: 600)
+        await bare.queue.receive(.fleetLocked)
+        await bare.settle()
+        await bare.race.rejoin()
+        #expect(bare.race.phase == .racing && bare.fleets == [nil])
     }
 
     /// The app was killed in the briefing and is back before the gun: the stream says `.fleetLocked`, there is
