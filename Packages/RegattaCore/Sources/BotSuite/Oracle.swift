@@ -78,6 +78,8 @@ public struct Oracle {
         case angle(boomSide: BoomSide, twa: Double)
         /// The rounding waypoint of the leg she is on; at a gate, by mark `gateMark` (0 the left, 1 the right).
         case waypoint(gateMark: Int)
+        /// A fixed point, steered for as a waypoint is: the start oracle's spot on the line (#584).
+        case point(Vec2)
     }
 
     /// One input she sends: a held input or a tap, for the tick it applies at.
@@ -593,8 +595,13 @@ extension Oracle {
             switch course {
             case .angle(let side, let twa):
                 return side == .port ? wrapAngle(wind - twa) : wrapAngle(wind + twa)
-            case .waypoint(let gateMark):
-                let point = Self.waypoint(boat: boat, gateMark: gateMark, oracle: oracle)
+            case .waypoint, .point:
+                let point: Vec2
+                switch course {
+                case .point(let fixed): point = fixed
+                case .waypoint(let gateMark): point = Self.waypoint(boat: boat, gateMark: gateMark, oracle: oracle)
+                case .angle: preconditionFailure("an angle is steered above")
+                }
                 let bearing = (point - boat.position).bearing
                 let relative = wrapAngle(wind - bearing)
                 let up = oracle.course.steady(tws: boat.polarWindSpeed(in: oracle.course.boatClass)).up.twa

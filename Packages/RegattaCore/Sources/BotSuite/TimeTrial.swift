@@ -124,35 +124,56 @@ public enum TimeTrialSailor: Hashable, Sendable, CustomStringConvertible {
 /// starboard in the wind there, at her polar speed, the rudder centred. A race seats two at least (`RaceSetup.fleetSizes`),
 /// so the second seat is a ghost from the gun, disqualified at the committee end: a ghost casts no shadow, touches
 /// nothing and never opens the finish window, and the race closes once she finishes.
+///
+/// A start trial's course (#584, `init(_:start:)`) begins at the start of the sequence instead: the race seats the
+/// trial's whole fleet, so the line and the opening are that fleet's, and she is in seat `start.seat`'s place of the
+/// opening (or the start row), as she would be racing; every other seat is a ghost from the first tick.
 public final class TimeTrialCourse {
     public let seed: TimeTrialSeed
     public let setup: RaceSetup
     public let files: RaceFiles
     public let windSeed: WindSeed
-    /// The world at the gun, tick 0, with her at the start.
-    public let gun: WorldSnapshot
+    /// The world her trial begins in: the gun, tick 0, with her at the start; a start trial's, the start of the sequence.
+    public let origin: WorldSnapshot
+    /// The lap trial's origin: the world at the gun.
+    public var gun: WorldSnapshot { origin }
+    /// A start trial's fleet and her seat in it (#584); nil for a lap trial.
+    public let start: (fleetSize: Int, seat: Int)?
     /// The race's course, as every race on the setup derives it.
     public let course: CourseLayout
     public let boatClass: BoatClass
     /// The race's base wind strength (`WindSetup.baseStrength`), m/s.
     public let baseWindStrength: Double
 
-    public init(_ seed: TimeTrialSeed) throws {
+    /// The lap trial's course: her at the fixed start at the gun.
+    public convenience init(_ seed: TimeTrialSeed) throws {
+        try self.init(seed, start: nil)
+    }
+
+    /// With `start`, a start trial's (#584): her in seat `start.seat`'s place of a `start.fleetSize` fleet at the start of
+    /// the sequence.
+    public init(_ seed: TimeTrialSeed, start: (fleetSize: Int, seat: Int)?) throws {
         self.seed = seed
+        self.start = start
         let classFile = try BotRaceHarness.bundledClass(seed.boatClass)
         let venue = try dataFileKey(seed.venue)
         let conditions = try dataFileKey(seed.conditions)
-        setup = try RaceSetup(raceSeed: RaceSeed(seed.raceSeed), seats: [.bot, .bot], laps: seed.laps, boatClass: classFile.ref,
+        let seats = Array(repeating: SeatKind.bot, count: start?.fleetSize ?? 2)
+        setup = try RaceSetup(raceSeed: RaceSeed(seed.raceSeed), seats: seats, laps: seed.laps, boatClass: classFile.ref,
                               venue: VenueFile.bundled(id: venue.id, version: venue.version).ref,
                               conditions: ConditionsFile.bundled(id: conditions.id, version: conditions.version).ref,
                               rulesConfiguration: BotRaceHarness.bundledRules(seed.rules).ref)
         files = try RaceFiles(resolving: setup)
         windSeed = WindSeed(seed.windSeed)
         let race = try Race(setup: setup, files: files, mode: .authoritative(windSeed: windSeed))
-        while race.tick < 0 { race.step() }
         course = race.course
         boatClass = race.boatClass
         baseWindStrength = race.windSetup.baseStrength
+        if let start {
+            origin = try Self.startOrigin(race, seat: start.seat)
+            return
+        }
+        while race.tick < 0 { race.step() }
         var snapshot = race.exportSnapshot()
         let upwind = course.upwind
         let position = course.startLine.centre - upwind * (0.5 * boatClass.hull.length + 0.5 * boatClass.hull.length)
@@ -195,13 +216,41 @@ public final class TimeTrialCourse {
         snapshot.touchingObstacles = []
         snapshot.touchingEdges = []
         try race.importSnapshot(snapshot)
-        gun = race.exportSnapshot()
+        origin = race.exportSnapshot()
     }
 
-    /// A race at the gun with her at the start: a new race on the setup, the gun's world imported.
+    /// A start trial's origin (#584): `race` at the start of the sequence with her, seat 0, in `seat`'s place and trim,
+    /// every other seat a ghost, disqualified and out of the way beyond the committee end.
+    private static func startOrigin(_ race: Race, seat: Int) throws -> WorldSnapshot {
+        var snapshot = race.exportSnapshot()
+        let place = snapshot.seats[seat]
+        snapshot.seats[0].boat.position = place.boat.position
+        snapshot.seats[0].boat.heading = place.boat.heading
+        snapshot.seats[0].boat.speed = place.boat.speed
+        snapshot.seats[0].boat.boomSide = place.boat.boomSide
+        snapshot.seats[0].heldInput = place.heldInput
+        let line = race.course.startLine
+        let away = line.committee.position + (line.committee.position - line.pin.position).normalized * 50
+            - race.course.upwind * 50
+        for ghost in snapshot.seats.indices.dropFirst() {
+            var boat = snapshot.seats[ghost].boat
+            boat.position = away
+            boat.speed = 0
+            boat.rudder = 0
+            boat.desiredRudder = 0
+            boat.autohelm = nil
+            boat.status = .dsq
+            snapshot.seats[ghost].boat = boat
+            snapshot.seats[ghost].heldInput = .neutral
+        }
+        try race.importSnapshot(snapshot)
+        return race.exportSnapshot()
+    }
+
+    /// A race where her trial begins (`origin`): a new race on the setup, that world imported.
     public func race() throws -> Race {
         let race = try Race(setup: setup, files: files, mode: .authoritative(windSeed: windSeed))
-        try race.importSnapshot(gun)
+        try race.importSnapshot(origin)
         _ = race.drainEvents()
         return race
     }
