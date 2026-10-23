@@ -53,6 +53,7 @@ extension ServiceEndpoint {
                             scoreBlocker: (any ScoreBlocking)? = nil,
                             appAttestKeys: (any AppAttestKeyStore)? = nil) throws -> ServiceEndpoint {
         let identity = config.identity
+        try config.appAttest.validate(for: config.environment)
         let appAttestKeys = appAttestKeys ?? InMemoryAppAttestKeyStore()
         let attestation = ConnectionAttestation(settings: config.appAttest, teamID: identity.teamID, bundleID: identity.bundleID,
                                                 keys: appAttestKeys)

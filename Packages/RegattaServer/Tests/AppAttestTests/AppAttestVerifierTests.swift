@@ -274,3 +274,105 @@ private func hash(_ bytes: [UInt8]) -> [UInt8] { Array(SHA256.hash(data: bytes))
         try await Self.verify(Self.capturedURL)
     }
 }
+
+/// The security review's chain and environment findings (#158, PR #589): x5c is exactly the credential certificate and
+/// one intermediate, the cheap checks run before any signature, and an assertion's key must be in an accepted
+/// environment.
+@Suite struct AppAttestChainShapeTests {
+    let ca: TestAttestCA
+    let device = TestDevice()
+    let clientDataHash = hash(Array("client data".utf8))
+
+    init() throws { ca = try TestAttestCA() }
+
+    /// `m` same-subject intermediates in each of `k` layers above the leaf: m^k candidate paths for a chain search.
+    static func layeredChain(m: Int, k: Int) throws -> [[UInt8]] {
+        let names = try (0...(k + 1)).map { i in try DistinguishedName { CommonName("N\(i)") } }
+        let keys = (0...(k + 1)).map { _ in P256.Signing.PrivateKey() }
+        var tail: [[UInt8]] = []
+        for layer in 1...k {
+            for j in 0..<m {
+                let certificate = try Certificate(
+                    version: .v3, serialNumber: Certificate.SerialNumber(), publicKey: Certificate.PublicKey(keys[layer].publicKey),
+                    notValidBefore: TestAttestCA.now - 3600, notValidAfter: TestAttestCA.now + 3600, issuer: names[layer + 1],
+                    subject: names[layer], signatureAlgorithm: .ecdsaWithSHA256,
+                    extensions: try Certificate.Extensions { SubjectAlternativeNames([.dnsName("\(j)")]) },
+                    issuerPrivateKey: Certificate.PrivateKey(keys[layer + 1]))
+                tail.append(TestAttestCA.der(certificate))
+            }
+        }
+        return tail
+    }
+
+    /// Finding 1: the reviewer's 14.5 KB Hello (7 layers of 7) cost 129 s of CPU; it is refused unparsed, at once.
+    @Test func layeredChainIsRefusedAsMalformedWithinATimeBound() async throws {
+        var knobs = TestDevice.Attestation()
+        knobs.chainTail = [TestAttestCA.der(ca.intermediate)] + (try Self.layeredChain(m: 7, k: 7))
+        let object = try device.attestation(ca, clientDataHash: clientDataHash, knobs)
+        #expect(object.count > 14_000)
+        let start = ContinuousClock.now
+        await #expect(throws: AppAttestError.malformed("x5c")) {
+            try await ca.verifier().verifyAttestation(object, keyID: device.keyID, clientDataHash: clientDataHash)
+        }
+        #expect(ContinuousClock.now - start < .milliseconds(500))
+    }
+
+    @Test func x5cMustBeExactlyTwoCertificates() async throws {
+        for tail in [[], [TestAttestCA.der(ca.intermediate), TestAttestCA.der(ca.root)],
+                     [TestAttestCA.der(ca.intermediate), TestAttestCA.der(ca.intermediate)]] {
+            var knobs = TestDevice.Attestation()
+            knobs.chainTail = tail
+            await #expect(throws: AppAttestError.malformed("x5c")) {
+                try await ca.verifier().verifyAttestation(try device.attestation(ca, clientDataHash: clientDataHash, knobs),
+                                                          keyID: device.keyID, clientDataHash: clientDataHash)
+            }
+        }
+        // Two is the shape that verifies.
+        _ = try await ca.verifier().verifyAttestation(try device.attestation(ca, clientDataHash: clientDataHash),
+                                                      keyID: device.keyID, clientDataHash: clientDataHash)
+    }
+
+    /// The key id, nonce, RP ID and AAGUID are read before the chain: an attestation under an untrusted root that is
+    /// also wrong in one of them is refused for that, not for its chain.
+    @Test func cheapChecksRunBeforeTheChain() async throws {
+        let untrusted = AppAttestVerifier(config: try TestAttestCA().config(environments: [.production]), now: { TestAttestCA.now })
+        func refusal(_ knobs: TestDevice.Attestation, keyID: [UInt8]? = nil) async -> AppAttestError? {
+            do {
+                _ = try await untrusted.verifyAttestation(try device.attestation(ca, clientDataHash: clientDataHash, knobs),
+                                                          keyID: keyID ?? device.keyID, clientDataHash: clientDataHash)
+                return nil
+            } catch let error as AppAttestError {
+                return error
+            } catch {
+                return nil
+            }
+        }
+        var nonce = TestDevice.Attestation()
+        nonce.nonce = hash([1])
+        nonce.environment = .production
+        #expect(await refusal(nonce) == .nonceMismatch)
+        var production = TestDevice.Attestation()
+        production.environment = .production
+        #expect(await refusal(production, keyID: hash([0])) == .keyIDMismatch)
+        var appID = production
+        appID.appID = "OTHERTEAM1.\(TestAttestCA.bundleID)"
+        #expect(await refusal(appID) == .wrongAppID)
+        #expect(await refusal(TestDevice.Attestation()) == .wrongEnvironment) // development, against production only
+        guard case .untrustedChain = await refusal(production) else {
+            Issue.record("a well-formed attestation under another root is refused for its chain")
+            return
+        }
+    }
+
+    /// Finding 4: an assertion under a stored key whose environment the server no longer accepts.
+    @Test func assertionUnderAKeyOfAnotherEnvironmentIsRefused() async throws {
+        let key = try await ca.verifier(environments: [.development])
+            .verifyAttestation(try device.attestation(ca, clientDataHash: clientDataHash), keyID: device.keyID, clientDataHash: clientDataHash)
+        #expect(key.environment == .development)
+        let assertion = try device.assertion(clientDataHash: clientDataHash, counter: 1)
+        #expect(throws: AppAttestError.wrongEnvironment) {
+            try ca.verifier(environments: [.production]).verifyAssertion(assertion, clientDataHash: clientDataHash, key: key)
+        }
+        #expect(try ca.verifier(environments: [.development]).verifyAssertion(assertion, clientDataHash: clientDataHash, key: key) == 1)
+    }
+}

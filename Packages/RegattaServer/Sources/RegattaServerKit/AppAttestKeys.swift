@@ -8,8 +8,8 @@ import Synchronization
 // `DeletionSettings.inactiveAfterDays` are purged by the retention job.
 
 public protocol AppAttestKeyStore: Sendable {
-    /// Stores a newly attested key. The same key again is a no-op (true, its counter kept); a different public key under
-    /// a known id is refused (false).
+    /// Stores a newly attested key, insert-only and atomic: true only when this call stored it. A known id is refused
+    /// (false, nothing changed) whatever its public key: the same attestation twice, even at once, registers once.
     func register(_ key: AppAttestKey, at time: Date) async throws -> Bool
     func key(_ keyID: [UInt8]) async throws -> AppAttestKey?
     /// The compare-and-set: moves the counter to `counter` only if it is above the stored one. False: a replay, an
@@ -32,7 +32,7 @@ public final class InMemoryAppAttestKeyStore: AppAttestKeyStore {
 
     public func register(_ key: AppAttestKey, at time: Date) async throws -> Bool {
         keys.withLock { keys in
-            if let known = keys[key.keyID] { return known.key.publicKey == key.publicKey }
+            guard keys[key.keyID] == nil else { return false }
             keys[key.keyID] = Entry(key: key, lastUsed: time)
             return true
         }

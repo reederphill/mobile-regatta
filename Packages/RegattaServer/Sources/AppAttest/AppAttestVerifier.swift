@@ -18,6 +18,10 @@ import X509
 //      (ECDSA-SHA256, so the nonce is hashed again) under the stored key
 //   2. the RP ID hash equals SHA256(TeamID.bundleID)
 //   3. the counter is above the stored one (the store's compare-and-set makes it stick)
+//   and the stored key's environment is still one the server accepts
+//
+// The attestation's steps 2-7 run before step 1: they are hashes and compares, and the chain (exactly the credential
+// certificate and one intermediate) is the only signature work a pre-sign-in Hello can ask for.
 //
 // The receipt is kept, not checked: the server needs no Apple service at run time. Pure: no sockets, an injected clock.
 
@@ -114,13 +118,18 @@ public struct AppAttestVerifier: Sendable {
         self.now = now
     }
 
-    /// Verifies a new key's attestation over `clientDataHash` and returns the key to store, at counter 0.
+    /// Verifies a new key's attestation over `clientDataHash` and returns the key to store, at counter 0. The cheap
+    /// checks (nonce, key id, RP ID, counter, AAGUID, credential id) run before the chain's signatures, and the chain is
+    /// the credential certificate and its one intermediate (`AttestationObject`): no candidate paths to search.
     public func verifyAttestation(_ object: [UInt8], keyID: [UInt8], clientDataHash: [UInt8]) async throws(AppAttestError) -> AppAttestKey {
         let attestation = try AttestationObject(cbor: object)
-        let certificates: [Certificate]
-        do { certificates = try attestation.x5c.map { try Certificate(derEncoded: $0) } } catch { throw .malformed("x5c certificate") }
-        let leaf = certificates[0]
-        try await validateChain(leaf, intermediates: Array(certificates.dropFirst()))
+        let leaf: Certificate, intermediate: Certificate
+        do {
+            leaf = try Certificate(derEncoded: attestation.x5c[0])
+            intermediate = try Certificate(derEncoded: attestation.x5c[1])
+        } catch {
+            throw .malformed("x5c certificate")
+        }
 
         let nonce = Array(SHA256.hash(data: attestation.authData + clientDataHash))
         guard try AttestationObject.nonce(in: leaf) == nonce else { throw .nonceMismatch }
@@ -137,6 +146,8 @@ public struct AppAttestVerifier: Sendable {
             throw .wrongEnvironment
         }
         guard credentialID == keyID else { throw .credentialIDMismatch }
+
+        try await validateChain(leaf, intermediate: intermediate)
         return AppAttestKey(keyID: keyID, publicKey: publicKey, counter: 0, environment: environment, receipt: attestation.receipt)
     }
 
@@ -144,6 +155,8 @@ public struct AppAttestVerifier: Sendable {
     /// counter, which must be above the stored one. The caller's store makes the new counter stick atomically.
     public func verifyAssertion(_ assertion: [UInt8], clientDataHash: [UInt8], key: AppAttestKey?) throws(AppAttestError) -> UInt32 {
         guard let key else { throw .unknownKey }
+        // A key attested while the server took another environment (a config change since) isn't one it accepts now.
+        guard config.environments.contains(key.environment) else { throw .wrongEnvironment }
         let object = try AssertionObject(cbor: assertion)
         let authData = try AuthenticatorData(object.authenticatorData, attested: false)
         let nonce = Array(SHA256.hash(data: object.authenticatorData + clientDataHash))
@@ -155,10 +168,10 @@ public struct AppAttestVerifier: Sendable {
         return authData.signCount
     }
 
-    private func validateChain(_ leaf: Certificate, intermediates: [Certificate]) async throws(AppAttestError) {
+    private func validateChain(_ leaf: Certificate, intermediate: Certificate) async throws(AppAttestError) {
         let time = now()
         var verifier = Verifier(rootCertificates: CertificateStore(config.trustedRoots)) { RFC5280Policy(validationTime: time) }
-        switch await verifier.validate(leaf: leaf, intermediates: CertificateStore(intermediates)) {
+        switch await verifier.validate(leaf: leaf, intermediates: CertificateStore([intermediate])) {
         case .validCertificate: return
         case .couldNotValidate(let failures):
             throw .untrustedChain(failures.map { "\($0.policyFailureReason)" }.joined(separator: "; "))

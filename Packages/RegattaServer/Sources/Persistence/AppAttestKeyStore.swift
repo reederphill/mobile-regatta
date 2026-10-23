@@ -23,8 +23,9 @@ public struct AppAttestKeyRecordStore: Sendable {
     let database: Database
     public init(_ database: Database) { self.database = database }
 
-    /// Stores a newly attested key. The same key again is a no-op (true, its counter kept); a different public key
-    /// under a known id is refused (false).
+    /// Stores a newly attested key, insert-only: true only when this statement inserted the row (`RETURNING`). A known
+    /// id is refused (false, the row untouched) whatever its public key, so concurrent copies of one attestation
+    /// register once.
     public func register(_ key: StoredAppAttestKey, at time: Date) async throws -> Bool {
         let id = Data(key.keyID), publicKey = Data(key.publicKey), receipt = Data(key.receipt), counter = Int64(key.counter)
         let inserted = try await database.client.query("""
@@ -32,9 +33,7 @@ public struct AppAttestKeyRecordStore: Sendable {
             VALUES (\(id), \(publicKey), \(counter), \(key.environment), \(receipt), \(time), \(time))
             ON CONFLICT (key_id) DO NOTHING RETURNING 1
             """, logger: database.logger)
-        if try await inserted.collect().count == 1 { return true }
-        guard let stored = try await self.key(key.keyID) else { return false }
-        return stored.publicKey == key.publicKey
+        return try await inserted.collect().count == 1
     }
 
     public func key(_ keyID: [UInt8]) async throws -> StoredAppAttestKey? {

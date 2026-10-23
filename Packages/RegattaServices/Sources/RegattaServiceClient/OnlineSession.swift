@@ -154,6 +154,8 @@ public actor OnlineSession {
     private var live: Live?
     /// Reads the open connection's queue stream into `queueStates`.
     private var queueReader: Task<Void, Never>?
+    /// The reconnect `readQueue` schedules while Apple's attestation service is down; ends with the reader.
+    private var attestationRetry: Task<Void, Never>?
     private var updateRequired = false
     /// Players the server refused for good (ADR 0010's first claimant keeps the `gamePlayerID`).
     private var conflicted: Set<String> = []
@@ -337,26 +339,41 @@ public actor OnlineSession {
 
     /// Feeds the queue's state on `connection` to `queueStates`, in place of whichever stream was read before.
     private func readQueue(on connection: ServiceConnection, link: HandshakenLink) {
-        queueReader?.cancel()
+        stopReadingQueue()
         let states = queueStates
-        let (attester, pause, interval) = (dependencies.attester, dependencies.sleep, settings.attestationRetryInterval)
+        let attester = dependencies.attester
         queueReader = Task {
             var retryScheduled = false
             for await state in RemoteQueueService(connection).stateUpdates() {
                 guard !Task.isCancelled else { return }
                 states.send(state)
                 // Apple's attestation service was down for the device (ADR 0014): the connection stays unattested, so
-                // one reconnect later tries `attestKey` again. The task ends with the link, so never in the background.
+                // one reconnect later tries `attestKey` again. It is cancelled with the reader, so never in the background.
                 if state == .unavailable(.attestationFailed), !retryScheduled, let attester, await attester.lastProofWasUnavailable {
                     retryScheduled = true
-                    Task {
-                        do { try await pause(interval) } catch { return }
-                        guard !Task.isCancelled else { return }
-                        link.close()
-                    }
+                    await self.scheduleAttestationRetry(closing: link)
                 }
             }
         }
+    }
+
+    /// The reconnect after `attestationRetryInterval`, unless the reader that asked for it has been stopped since.
+    private func scheduleAttestationRetry(closing link: HandshakenLink) {
+        guard queueReader?.isCancelled == false else { return }
+        let (pause, interval) = (dependencies.sleep, settings.attestationRetryInterval)
+        attestationRetry?.cancel()
+        attestationRetry = Task {
+            do { try await pause(interval) } catch { return }
+            guard !Task.isCancelled else { return }
+            link.close()
+        }
+    }
+
+    /// Ends the queue reader and the reconnect it may have scheduled.
+    private func stopReadingQueue() {
+        queueReader?.cancel()
+        attestationRetry?.cancel()
+        attestationRetry = nil
     }
 
     // MARK: - Running
@@ -469,7 +486,7 @@ public actor OnlineSession {
                 opens.send(opened)
                 readQueue(on: live.connection, link: live.link)
                 await untilDead(live.link)
-                queueReader?.cancel()
+                stopReadingQueue()
                 guard epoch == self.epoch, !Task.isCancelled else { return }
                 self.live = nil
                 live.link.close()

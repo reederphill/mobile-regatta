@@ -2,10 +2,11 @@ import AppAttest
 import Crypto
 import Foundation
 import RegattaProtocol
-import RegattaServerKit
+@testable import RegattaServerKit
 import RegattaServiceClient
 import RegattaServices
 import SwiftASN1
+import Synchronization
 import Testing
 import X509
 
@@ -126,12 +127,13 @@ struct AttestingDevice: Sendable {
         let keys = InMemoryAppAttestKeyStore()
         let endpoint: ServiceEndpoint
 
-        init(bypass: Bool = false) throws {
+        init(bypass: Bool = false, keys: (any AppAttestKeyStore)? = nil, checkDeadline: Duration? = nil) throws {
             device = try AttestingDevice()
             var config = ServerConfig.dev()
             config.appAttest.bypass = bypass
             config.appAttest.trustedRoots = [device.root]
-            endpoint = try ServiceEndpoint.make(config: config, store: store, wordList: .empty, appAttestKeys: keys)
+            if let checkDeadline { config.appAttest.checkDeadline = checkDeadline }
+            endpoint = try ServiceEndpoint.make(config: config, store: store, wordList: .empty, appAttestKeys: keys ?? self.keys)
         }
 
         /// A connection with `attestation` in its Hello, signed in as `name` (with `player`'s flags), terms accepted.
@@ -242,9 +244,8 @@ struct AttestingDevice: Sendable {
         let (link, connection) = try await rig.connect("dev", attestation: .none)
         #expect(link.ack?.attestation == .bypassed)
         try await RemoteQueueService(connection).join()
-        // ServiceEndpoint's own default is the same.
-        #expect(ServiceEndpoint(config: ServiceEndpointConfig(), sessions: SessionAuthority(store: InMemoryAccountStore(), verifier: StubVerifier()))
-            .attestation.bypass)
+        // The dev default the in-process endpoints name is the same.
+        #expect(ConnectionAttestation.devDefault().bypass)
     }
 
     /// Under the bypass a real proof is still verified: a bad one is unattested.
@@ -257,6 +258,150 @@ struct AttestingDevice: Sendable {
         let (good, _) = try await rig.connect("wren", attestation: try rig.device.attestation(for: wren))
         #expect(good.ack?.attestation == .verified)
     }
+}
+
+/// The security review's endpoint findings (#158, PR #589).
+@Suite(.timeLimit(.minutes(1))) struct AppAttestReviewTests {
+    /// Two copies of one attestation checked at once, `runs` times: how often both were verified, and how often
+    /// neither was.
+    static func race(_ runs: Int, keys: @escaping () -> any AppAttestKeyStore) async throws -> (both: Int, neither: Int) {
+        var both = 0, neither = 0
+        for _ in 0..<runs {
+            let device = try AttestingDevice()
+            var settings = AppAttestSettings()
+            settings.trustedRoots = [device.root]
+            let check = ConnectionAttestation(settings: settings, teamID: IdentitySettings().teamID, bundleID: IdentitySettings().bundleID,
+                                              keys: keys())
+            let payload = try device.attestation(for: ServiceFixtures.player("wren"))
+            async let a = check.check(payload, purpose: .service)
+            async let b = check.check(payload, purpose: .service)
+            let verified = [await a, await b].filter { $0.status == .verified }.count
+            if verified == 2 { both += 1 }
+            if verified == 0 { neither += 1 }
+        }
+        return (both, neither)
+    }
+
+    /// Finding 2: registration is the one, atomic check, so exactly one of two concurrent copies is verified, on the
+    /// in-memory store and on one with a database's round trips.
+    @Test func sameAttestationTwiceConcurrentlyIsVerifiedOnce() async throws {
+        let fast = try await Self.race(50) { InMemoryAppAttestKeyStore() }
+        #expect(fast.both == 0 && fast.neither == 0)
+        let slow = try await Self.race(20) { SlowAppAttestKeyStore() }
+        #expect(slow.both == 0 && slow.neither == 0)
+    }
+
+    /// Finding 3: a hand-built staging or production config with the bypass on refuses to start, and so does one
+    /// handed a bypassing endpoint, or production taking development keys.
+    @Test func bypassOutsideDevRefusesToStart() async throws {
+        let bypassOn = ServerConfigError.invalid(variable: "APP_ATTEST_BYPASS", value: "on", expected: "off or unset outside ENV=dev")
+        for environment in [ServerEnvironment.staging, .production] {
+            var config = ServerConfig.dev()
+            config.environment = environment
+            config.auth = .raceToken
+            #expect(config.appAttest.bypass)
+            await #expect(throws: bypassOn) { _ = try await RegattaHTTPServer.start(config: config) }
+            #expect(throws: bypassOn) { _ = try ServiceEndpoint.make(config: config, store: InMemoryAccountStore(), wordList: .empty) }
+            // The config's bypass off (and production's keys only), the endpoint's on.
+            config.appAttest.bypass = false
+            config.appAttest.environments = [.production]
+            let dev = try ServiceEndpoint.make(config: ServerConfig.dev(), store: InMemoryAccountStore(), wordList: .empty)
+            await #expect(throws: bypassOn) { _ = try await RegattaHTTPServer.start(config: config, services: dev) }
+        }
+        var production = ServerConfig.dev()
+        production.environment = .production
+        production.auth = .raceToken
+        production.appAttest.bypass = false
+        #expect(production.appAttest.environments == [.development, .production])
+        await #expect(throws: ServerConfigError.invalid(variable: "APP_ATTEST_ENVIRONMENT", value: "development,production",
+                                                        expected: "production in ENV=production")) {
+            _ = try await RegattaHTTPServer.start(config: production)
+        }
+        // Defaults: the settings' bypass is off; only a dev config turns it on.
+        #expect(!AppAttestSettings().bypass)
+        #expect(ServerConfig.dev().appAttest.bypass)
+    }
+
+    /// Finding 5: a session call whose player the proof doesn't bind drops the connection to unattested, and her place
+    /// in the queue goes with it.
+    @Test func droppingToUnattestedEndsTheQueuePlace() async throws {
+        let rig = try AppAttestEndpointTests.Rig()
+        let underage = ServiceFixtures.player("ivy", underage: true)
+        let (link, connection) = try await rig.connect("ivy", attestation: try rig.device.attestation(for: underage), as: underage)
+        #expect(link.ack?.attestation == .verified)
+        try await RemoteQueueService(connection).join()
+        let matchmaker = try #require(rig.endpoint.matchmaker)
+        #expect(await matchmaker.queuedCount == 1)
+        // The same player, other flags: not what the proof binds.
+        _ = try await RemoteSession(connection).signIn(ServiceFixtures.signature("ivy"), as: ServiceFixtures.player("ivy"))
+        #expect(await matchmaker.queuedCount == 0)
+        await #expect(throws: QueueError.refused(.attestationFailed)) { try await RemoteQueueService(connection).join() }
+        #expect(await matchmaker.queuedCount == 0)
+    }
+
+    /// Finding 7: a key store that doesn't answer leaves the Hello unattested at the deadline, not held.
+    @Test func attestationCheckHasADeadline() async throws {
+        let rig = try AppAttestEndpointTests.Rig(keys: HangingAppAttestKeyStore(), checkDeadline: .milliseconds(200))
+        let wren = ServiceFixtures.player("wren")
+        let start = ContinuousClock.now
+        let link = try await InProcessServiceLink.open(rig.endpoint, hello: Hello(clientBuild: "test", files: [],
+                                                                                  attestation: try rig.device.attestation(for: wren)))
+        defer { link.close() }
+        #expect(link.ack?.attestation == .failed)
+        #expect(ContinuousClock.now - start < .seconds(5))
+    }
+
+    /// The unattested log: one line per reason a minute, saying how many were held back.
+    @Test func unattestedLogIsLimitedPerReason() {
+        let clock = Mutex(ContinuousClock.now)
+        let log = UnattestedLog(interval: .seconds(60), now: { clock.withLock { $0 } })
+        #expect(log.admit("none") == 0)
+        #expect(log.admit("none") == nil)
+        #expect(log.admit("none") == nil)
+        #expect(log.admit("malformed") == 0)
+        clock.withLock { $0 += .seconds(61) }
+        #expect(log.admit("none") == 2)
+        #expect(UnattestedReason.failed(.untrustedChain("a; b")).logKey == UnattestedReason.failed(.untrustedChain("c")).logKey)
+    }
+}
+
+/// A key store with a database's round trip on every call.
+final class SlowAppAttestKeyStore: AppAttestKeyStore {
+    let inner = InMemoryAppAttestKeyStore()
+
+    private func pause() async throws { try await Task.sleep(for: .milliseconds(5)) }
+
+    func register(_ key: AppAttestKey, at time: Date) async throws -> Bool {
+        try await pause()
+        let stored = try await inner.register(key, at: time)
+        try await pause()
+        return stored
+    }
+
+    func key(_ keyID: [UInt8]) async throws -> AppAttestKey? {
+        try await pause()
+        return try await inner.key(keyID)
+    }
+
+    func advance(_ keyID: [UInt8], to counter: UInt32, at time: Date) async throws -> Bool {
+        try await pause()
+        return try await inner.advance(keyID, to: counter, at: time)
+    }
+
+    func purge(unusedSince cutoff: Date) async throws -> Int { try await inner.purge(unusedSince: cutoff) }
+}
+
+/// A key store stuck in a dead connection: no call returns within the test.
+final class HangingAppAttestKeyStore: AppAttestKeyStore {
+    private func hang() async throws -> Never {
+        try await Task.sleep(for: .seconds(3600))
+        throw CancellationError()
+    }
+
+    func register(_ key: AppAttestKey, at time: Date) async throws -> Bool { try await hang() }
+    func key(_ keyID: [UInt8]) async throws -> AppAttestKey? { try await hang() }
+    func advance(_ keyID: [UInt8], to counter: UInt32, at time: Date) async throws -> Bool { try await hang() }
+    func purge(unusedSince cutoff: Date) async throws -> Int { try await hang() }
 }
 
 /// A real attestation in a `Hello` fits the frame a client may send before signing in (16 KiB): the public vector

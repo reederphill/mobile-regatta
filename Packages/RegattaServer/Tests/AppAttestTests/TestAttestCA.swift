@@ -149,6 +149,8 @@ struct TestDevice: Sendable {
         var nonce: [UInt8]?
         var nonceCount = 1
         var validity: ClosedRange<Date>?
+        /// The certificates after the credential certificate in x5c; the CA's intermediate by default.
+        var chainTail: [[UInt8]]?
     }
 
     static func authData(appID: String, counter: UInt32, credential: (aaguid: [UInt8], id: [UInt8], key: P256.Signing.PublicKey)?) -> [UInt8] {
@@ -174,7 +176,8 @@ struct TestDevice: Sendable {
                                                 nonces: Array(repeating: nonce, count: knobs.nonceCount), validity: knobs.validity)
         return TestCBOR.encode(.map([
             ("fmt", .text(knobs.format)),
-            ("attStmt", .map([("x5c", .array([.bytes(leaf), .bytes(TestAttestCA.der(ca.intermediate))])), ("receipt", .bytes([0x30, 0x80, 1, 2, 3]))])),
+            ("attStmt", .map([("x5c", .array(([leaf] + (knobs.chainTail ?? [TestAttestCA.der(ca.intermediate)])).map { .bytes($0) })),
+                              ("receipt", .bytes([0x30, 0x80, 1, 2, 3]))])),
             ("authData", .bytes(authData)),
         ]))
     }

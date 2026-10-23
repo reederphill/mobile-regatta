@@ -77,18 +77,22 @@ public enum ServerConfigError: Error, Equatable, Sendable, CustomStringConvertib
 /// App Attest on service connections (#158, ADR 0014).
 public struct AppAttestSettings: Sendable {
     /// `APP_ATTEST_BYPASS`: a connection with no proof (or `unsupported`, the simulator) counts as attested. A real
-    /// proof is still verified. Dev only: on by default there; outside dev the server refuses to start with it on.
-    public var bypass = true
+    /// proof is still verified. Dev only: off by default, turned on by `load` in dev (and by `ServerConfig.dev()`);
+    /// outside dev the server refuses to start with it on, however it got there (`validate`).
+    public var bypass = false
     /// `APP_ATTEST_ENVIRONMENT`: the environments whose keys are accepted (the AAGUID follows the app's entitlement).
     public var environments: Set<AppAttestEnvironment> = [.development, .production]
     /// The anchors: Apple's App Attestation root (embedded); tests pass their own.
     public var trustedRoots: [Certificate] = [AppleAppAttestRoot.certificate]
+    /// How long a `Hello`'s proof may take to check (the key store's round trips with it): past it the connection is
+    /// unattested, `storeUnavailable`.
+    public var checkDeadline: Duration = .seconds(5)
 
     public init() {}
 
     /// The variables for `environment`: the bypass defaults on in dev and off elsewhere, where only `off` is
-    /// accepted; the environment defaults to both in dev, development in staging and production in production, where
-    /// nothing else is accepted.
+    /// accepted; the environment defaults to both in dev and staging (TestFlight builds attest as production) and
+    /// production in production, where nothing else is accepted.
     init(env: [String: String], environment: ServerEnvironment) throws(ServerConfigError) {
         switch env["APP_ATTEST_BYPASS"] {
         case nil: bypass = environment.isDev
@@ -100,7 +104,6 @@ public struct AppAttestSettings: Sendable {
         switch env["APP_ATTEST_ENVIRONMENT"] {
         case nil:
             environments = switch environment {
-            case .staging: [.development]
             case .production: [.production]
             default: [.development, .production]
             }
@@ -112,6 +115,23 @@ public struct AppAttestSettings: Sendable {
         }
         if environment == .production, environments != [.production] {
             throw .invalid(variable: "APP_ATTEST_ENVIRONMENT", value: env["APP_ATTEST_ENVIRONMENT"] ?? "(unset)", expected: "production in ENV=production")
+        }
+    }
+
+    /// Refuses settings `environment` must not run with: the bypass on outside dev, production taking any keys but
+    /// production's. `load`, `ServiceEndpoint.make` and `RegattaHTTPServer.start` all ask, so a hand-built config
+    /// can't slip past the variables' checks.
+    public func validate(for environment: ServerEnvironment) throws(ServerConfigError) {
+        try Self.validate(bypass: bypass, environments: environments, for: environment)
+    }
+
+    static func validate(bypass: Bool, environments: Set<AppAttestEnvironment>, for environment: ServerEnvironment) throws(ServerConfigError) {
+        if bypass, !environment.isDev {
+            throw .invalid(variable: "APP_ATTEST_BYPASS", value: "on", expected: "off or unset outside ENV=dev")
+        }
+        if environment == .production, environments != [.production] {
+            let value = environments.map(\.rawValue).sorted().joined(separator: ",")
+            throw .invalid(variable: "APP_ATTEST_ENVIRONMENT", value: value, expected: "production in ENV=production")
         }
     }
 }
@@ -133,7 +153,7 @@ public struct AppAttestSettings: Sendable {
 /// | `REGATTA_APPLE_ROOT_PEM` | none | a PEM file of the certificates Game Center's key must chain to; unset in dev = dev verifier |
 /// | `REGATTA_DATABASE_URL` | none | Postgres (ADR 0009); unset in dev = accounts in memory; required outside dev |
 /// | `APP_ATTEST_BYPASS` | `on` in dev | dev only: `on` lets a connection with no App Attest proof (or the simulator's `unsupported`) through; a real proof is still verified; `off` verifies every connection. Outside dev only `off` or unset: `on` refuses to start (#158) |
-/// | `APP_ATTEST_ENVIRONMENT` | `both` in dev, `development` in staging, `production` in production | the App Attest environments accepted: `production`, `development` or `both`; production refuses anything but `production` (#158) |
+/// | `APP_ATTEST_ENVIRONMENT` | `both` in dev and staging, `production` in production | the App Attest environments accepted: `production`, `development` or `both`; production refuses anything but `production` (#158) |
 /// | `QUEUE_LOCK_SECONDS` | `60` | seconds from the oldest queued player's join to fleet lock (#146); short for the contract runner |
 /// | `QUEUE_RACE_SECONDS` | none | dev only: a queue race is closed this many seconds after the gun (5…3600) with results as it stands (the rest placed by distance), for a local demo or an e2e run (#162); refused outside `ENV=dev` |
 /// | `ALL_GONE_GRACE_SECONDS` | `30` | dev only: how long a race every human has left waits for one to come back before it closes (G3; 1…3600), so one e2e player can drop and rejoin (#162); refused outside `ENV=dev` |
@@ -188,8 +208,10 @@ public struct ServerConfig: Sendable {
 
     /// A dev config: dev auth, the given port (0 for a free one), a random token key.
     public static func dev(host: String = "127.0.0.1", port: Int = 0) -> ServerConfig {
-        ServerConfig(environment: .dev, auth: .dev, host: host, port: port, tokenKey: SymmetricKey(size: .bits256),
-                     tokenLifetime: 600, serverBuild: "dev", maxRaces: 64)
+        var config = ServerConfig(environment: .dev, auth: .dev, host: host, port: port, tokenKey: SymmetricKey(size: .bits256),
+                                  tokenLifetime: 600, serverBuild: "dev", maxRaces: 64)
+        config.appAttest.bypass = true
+        return config
     }
 
     /// The config the environment describes, or why the server must not start.

@@ -57,7 +57,8 @@ nonisolated struct DeviceAppAttestor: AppAttestor {
 }
 
 /// The App Attest key id in the Keychain (#158): one generic password, the key id and whether the server acknowledged
-/// its attestation, readable only while unlocked, never synced or restored to another device. A fresh install's
+/// its attestation, readable from the first unlock after a boot (a connection made while the device is locked, from a
+/// background launch, still finds it), never synced or restored to another device. A fresh install's
 /// first launch deletes it with the session tokens (`KeychainSessionTokenStore.purgeOnFreshInstall`): the key lives in
 /// this install's Secure Enclave only.
 nonisolated struct KeychainAttestationKeyStore: AttestationKeyStore {
@@ -82,7 +83,7 @@ nonisolated struct KeychainAttestationKeyStore: AttestationKeyStore {
         guard let record, let data = try? JSONEncoder().encode(record) else { return }
         var item = query
         item[kSecValueData] = data
-        item[kSecAttrAccessible] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        item[kSecAttrAccessible] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         SecItemAdd(item as CFDictionary, nil)
     }
 

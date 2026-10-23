@@ -37,13 +37,15 @@ public struct AuthenticatorData: Equatable, Sendable {
     }
 }
 
-/// The attestation object: `{fmt: "apple-appattest", attStmt: {x5c: [credCert, intermediate…], receipt}, authData}`.
+/// The attestation object: `{fmt: "apple-appattest", attStmt: {x5c: [credCert, intermediate], receipt}, authData}`.
+/// App Attest's x5c is exactly those two: any other count is refused before a certificate is parsed, as a longer chain
+/// would hand the chain search layered intermediates to try (m^k signature checks from one pre-sign-in Hello).
 public struct AttestationObject: Sendable {
     public static let format = "apple-appattest"
     /// The credential certificate's extension holding the nonce: `SEQUENCE { [1] EXPLICIT OCTET STRING }`.
     public static let nonceExtensionOID: ASN1ObjectIdentifier = [1, 2, 840, 113635, 100, 8, 2]
 
-    /// DER certificates, the credential certificate first.
+    /// DER certificates: the credential certificate, then its intermediate. Exactly two.
     public var x5c: [[UInt8]]
     public var receipt: [UInt8]
     public var authData: [UInt8]
@@ -53,7 +55,7 @@ public struct AttestationObject: Sendable {
         do { root = try CBORDecoder.decode(bytes) } catch { throw .malformed("cbor: \(error)") }
         guard let format = root["fmt"]?.textString else { throw .malformed("fmt") }
         guard format == Self.format else { throw .wrongFormat }
-        guard let statement = root["attStmt"], let chain = statement["x5c"]?.arrayItems, chain.count >= 2 else {
+        guard let statement = root["attStmt"], let chain = statement["x5c"]?.arrayItems, chain.count == 2 else {
             throw .malformed("x5c")
         }
         var certificates: [[UInt8]] = []

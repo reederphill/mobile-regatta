@@ -68,7 +68,14 @@ public actor ConnectionAttester {
     private let attestor: any AppAttestor
     private let store: any AttestationKeyStore
     private let nonce: @Sendable () -> [UInt8]
+    /// The store's record, read on first use rather than at init (the app may make the attester before the device's
+    /// first unlock, when the Keychain can't be read).
     private var record: AttestationKeyRecord?
+    private var loaded = false
+    /// The key this session made, or that Apple was unavailable to attest: `attestKey` hasn't used it up. Any other
+    /// unattested key (one an earlier launch left unacknowledged) may have been attested already, and `attestKey` is
+    /// one-shot: it is replaced, not attested again.
+    private var attestable: [UInt8]?
     /// A new key's attestation, waiting to be sent and acknowledged. Memory only (ADR 0014).
     private var pending: (object: [UInt8], clientData: AttestationClientData)?
     private var unavailable = false
@@ -80,17 +87,20 @@ public actor ConnectionAttester {
         self.attestor = attestor
         self.store = store
         self.nonce = nonce
-        record = store.load()
     }
 
     /// Whether the last proof said Apple was unavailable: a queue refused for attestation then is worth a reconnect later.
     public var lastProofWasUnavailable: Bool { unavailable }
 
-    /// Before connecting: the first time (or after the server lost the key, or the key went bad) makes a key and its
-    /// attestation, which talks to Apple and may be slow. Apple unavailable keeps the key for the next try.
+    /// Before connecting: the first time (or after the server lost the key, the key went bad, or an earlier launch
+    /// left its attestation unacknowledged) makes a key and its attestation, which talks to Apple and may be slow.
+    /// Apple unavailable keeps the key for the next try; any other failure drops it.
     public func prepare(for player: GameCenterPlayer) async {
+        loadRecord()
         guard attestor.isSupported, pending == nil, record?.attested != true else { return }
         unavailable = false
+        // Unattested, nothing waiting, and not a key this session may still attest: a new key.
+        if let record, record.keyID != attestable { setRecord(nil) }
         for _ in 0..<2 {
             do {
                 let keyID: [UInt8]
@@ -99,9 +109,12 @@ public actor ConnectionAttester {
                 } else {
                     keyID = try await attestor.generateKey()
                     setRecord(AttestationKeyRecord(keyID: keyID, attested: false))
+                    attestable = keyID
                 }
                 let clientData = clientData(for: player)
-                pending = (try await attestor.attestKey(keyID, clientDataHash: clientData.hash), clientData)
+                let object = try await attestor.attestKey(keyID, clientDataHash: clientData.hash)
+                attestable = nil
+                pending = (object, clientData)
                 return
             } catch .serverUnavailable {
                 unavailable = true
@@ -109,6 +122,8 @@ public actor ConnectionAttester {
             } catch .invalidKey {
                 setRecord(nil) // a new key on the next pass
             } catch {
+                // Whether `attestKey` used the key up is unknown: a new key next time.
+                setRecord(nil)
                 unavailable = true
                 return
             }
@@ -117,6 +132,7 @@ public actor ConnectionAttester {
 
     /// After the socket opens, just before `Hello`: what `Hello.attestation` carries.
     public func proof(for player: GameCenterPlayer) async -> VersionedPayload {
+        loadRecord()
         sent = .other
         guard attestor.isSupported else { return Self.payload(.unsupported) }
         if let pending, let record {
@@ -137,6 +153,7 @@ public actor ConnectionAttester {
 
     /// The server's answer to the proof `proof` made.
     public func noteAck(_ status: AttestationStatus) -> AckAction {
+        loadRecord()
         defer { sent = .other }
         switch (status, sent) {
         case (.verified, .attestation):
@@ -169,8 +186,16 @@ public actor ConnectionAttester {
         setRecord(nil)
     }
 
+    private func loadRecord() {
+        guard !loaded else { return }
+        loaded = true
+        record = store.load()
+    }
+
     private func setRecord(_ record: AttestationKeyRecord?) {
+        loaded = true
         self.record = record
+        if record == nil { attestable = nil }
         store.save(record)
     }
 

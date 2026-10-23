@@ -11,12 +11,13 @@ import Testing
         AppAttestKey(keyID: Array(repeating: byte, count: 32), publicKey: publicKey, counter: 0, environment: .production, receipt: [1])
     }
 
-    @Test func registerIsIdempotentAndRefusesAnotherPublicKey() async throws {
+    /// Insert-only (the review's finding 2): only the call that stored the key gets true.
+    @Test func registerIsInsertOnlyAndRefusesAnotherPublicKey() async throws {
         let store = InMemoryAppAttestKeyStore()
         #expect(try await store.register(Self.sample(1), at: Self.time))
         #expect(try await store.advance(Self.sample(1).keyID, to: 4, at: Self.time))
-        // The same key again keeps its counter.
-        #expect(try await store.register(Self.sample(1), at: Self.time))
+        // The same key again is refused and keeps its counter.
+        #expect(try await store.register(Self.sample(1), at: Self.time) == false)
         #expect(try await store.key(Self.sample(1).keyID)?.counter == 4)
         #expect(try await store.register(Self.sample(1, publicKey: [4, 9, 9]), at: Self.time) == false)
         #expect(try await store.key(Self.sample(1).keyID)?.publicKey == [4, 1, 2])
@@ -34,6 +35,17 @@ import Testing
         #expect(try await store.advance(id, to: 5, at: Self.time))
         #expect(try await store.advance(id, to: 3, at: Self.time) == false)
         #expect(try await store.key(id)?.counter == 5)
+    }
+
+    @Test func eightConcurrentRegistersOfOneKeyWinOnce() async throws {
+        let store = InMemoryAppAttestKeyStore()
+        for byte: UInt8 in 1...20 {
+            let wins = try await withThrowingTaskGroup(of: Bool.self) { group in
+                for _ in 0..<8 { group.addTask { try await store.register(Self.sample(byte), at: Self.time) } }
+                return try await group.reduce(0) { $0 + ($1 ? 1 : 0) }
+            }
+            #expect(wins == 1)
+        }
     }
 
     @Test func eightConcurrentAdvancesWinOncePerCounter() async throws {

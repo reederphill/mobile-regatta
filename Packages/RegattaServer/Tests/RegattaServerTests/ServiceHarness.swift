@@ -124,7 +124,7 @@ enum ServiceFixtures {
         ServiceEndpoint(
             config: ServiceEndpointConfig(termsVersion: termsVersion, streamIdleTimeout: idle, frameCap: frameCap),
             sessions: SessionAuthority(store: store, verifier: StubVerifier()),
-            backends: ServiceBackends(queue: { _ in queue }))
+            backends: ServiceBackends(queue: { _ in queue }), attestation: .devDefault())
     }
 
     static func player(_ name: String, multiplayerRestricted: Bool = false, underage: Bool = false) -> GameCenterPlayer {

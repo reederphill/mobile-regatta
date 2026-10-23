@@ -14,6 +14,8 @@ final class FakeAppAttestor: AppAttestor {
         var attestFailures: [AppAttestorError] = []
         var assertFailures: [AppAttestorError] = []
         var keys: [[UInt8]] = []
+        /// The key ids `attestKey` was called with, in order.
+        var attestedKeys: [[UInt8]] = []
     }
 
     let isSupported: Bool
@@ -37,6 +39,7 @@ final class FakeAppAttestor: AppAttestor {
     func attestKey(_ keyID: [UInt8], clientDataHash: [UInt8]) async throws(AppAttestorError) -> [UInt8] {
         let failure: AppAttestorError? = state.withLock { state in
             state.attested += 1
+            state.attestedKeys.append(keyID)
             return state.attestFailures.isEmpty ? nil : state.attestFailures.removeFirst()
         }
         if let failure { throw failure }
@@ -132,16 +135,71 @@ enum Nonces {
     @Test func invalidKeyMakesANewKey() async throws {
         let device = FakeAppAttestor()
         device.state.withLock { $0.attestFailures = [.invalidKey] }
-        let store = InMemoryAttestationKeyStore(AttestationKeyRecord(keyID: Array(repeating: 9, count: 32), attested: false))
-        let attester = ConnectionAttester(attestor: device, store: store, nonce: Nonces.next)
+        let attester = ConnectionAttester(attestor: device, store: InMemoryAttestationKeyStore(), nonce: Nonces.next)
         let proof = try await Self.connect(attester).proof
-        #expect(Self.kind(proof) == 1 && device.generated == 1 && device.attested == 2)
-        #expect(Self.keyID(proof) != Array(repeating: 9, count: 32))
+        #expect(Self.kind(proof) == 1 && device.generated == 2 && device.attested == 2)
+        let keys = device.state.withLock { $0.keys }
+        #expect(Self.keyID(proof) == keys.last && Self.keyID(proof) != keys.first)
         // An attested key the Secure Enclave no longer knows: a new key on the next connection.
         device.state.withLock { $0.assertFailures = [.invalidKey] }
         #expect(Self.kind(try await Self.connect(attester, answer: .failed).proof) == 4)
         #expect(Self.kind(try await Self.connect(attester).proof) == 1)
-        #expect(device.generated == 2)
+        #expect(device.generated == 3)
+    }
+
+    /// The review's finding 6: `attestKey` failing for any reason but Apple being unavailable drops the key (whether
+    /// it was used up is unknown); the next connection attests a new one.
+    @Test func otherAttestFailureDropsTheKey() async throws {
+        let device = FakeAppAttestor()
+        device.state.withLock { $0.attestFailures = [.other] }
+        let store = InMemoryAttestationKeyStore()
+        let attester = ConnectionAttester(attestor: device, store: store, nonce: Nonces.next)
+        #expect(Self.kind(try await Self.connect(attester, answer: .failed).proof) == 4)
+        #expect(store.load() == nil)
+        let next = try await Self.connect(attester).proof
+        #expect(Self.kind(next) == 1 && device.generated == 2 && device.attested == 2)
+        let attested = device.state.withLock { $0.attestedKeys }
+        #expect(attested[0] != attested[1] && Self.keyID(next) == attested[1])
+    }
+
+    /// The review's finding 6 (ADR 0014: `attestKey` is one-shot): a key an earlier launch made but whose attestation
+    /// the server never acknowledged is replaced, never attested again.
+    @Test func notAcknowledgedWithinTheSessionMakesANewKey() async throws {
+        let old = Array(repeating: UInt8(9), count: 32)
+        let device = FakeAppAttestor()
+        let store = InMemoryAttestationKeyStore(AttestationKeyRecord(keyID: old, attested: false))
+        let attester = ConnectionAttester(attestor: device, store: store, nonce: Nonces.next)
+        let proof = try await Self.connect(attester).proof
+        #expect(Self.kind(proof) == 1 && device.generated == 1 && device.attested == 1)
+        #expect(Self.keyID(proof) != old && !device.state.withLock { $0.attestedKeys }.contains(old))
+        #expect(store.load() == AttestationKeyRecord(keyID: try #require(Self.keyID(proof)), attested: true))
+
+        // Within the session an unanswered attestation is carried again, not re-attested: the connection that carried
+        // it ended before its answer.
+        let fresh = ConnectionAttester(attestor: FakeAppAttestor(), store: InMemoryAttestationKeyStore(), nonce: Nonces.next)
+        await fresh.prepare(for: Self.player)
+        let carried = try AttestationProof(payload: await fresh.proof(for: Self.player))
+        let again = try await Self.connect(fresh).proof
+        #expect(Self.kind(carried) == 1 && Self.kind(again) == 1 && Self.keyID(carried) == Self.keyID(again))
+
+        // A later launch with the record still unacknowledged: a new key again.
+        let unacked = InMemoryAttestationKeyStore()
+        let first = ConnectionAttester(attestor: device, store: unacked, nonce: Nonces.next)
+        await first.prepare(for: Self.player)
+        let kept = try #require(unacked.load())
+        #expect(!kept.attested)
+        let relaunched = ConnectionAttester(attestor: device, store: unacked, nonce: Nonces.next)
+        let next = try await Self.connect(relaunched).proof
+        #expect(Self.kind(next) == 1 && Self.keyID(next) != kept.keyID)
+    }
+
+    /// The record is read on first use, not when the attester is made (before the device's first unlock).
+    @Test func storeIsReadLazily() async throws {
+        let device = FakeAppAttestor(), store = InMemoryAttestationKeyStore()
+        let attester = ConnectionAttester(attestor: device, store: store, nonce: Nonces.next)
+        store.save(AttestationKeyRecord(keyID: Array(repeating: 7, count: 32), attested: true))
+        let proof = try await Self.connect(attester).proof
+        #expect(Self.kind(proof) == 2 && Self.keyID(proof) == Array(repeating: 7, count: 32) && device.generated == 0)
     }
 
     @Test func keyUnknownMakesANewKeyAndAttestsNext() async throws {

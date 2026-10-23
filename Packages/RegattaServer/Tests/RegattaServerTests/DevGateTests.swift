@@ -48,15 +48,16 @@ struct DevGateTests {
         let required = try Self.required()
         let staging = try ServerConfig.load(from: required.merging(["ENV": "staging"]) { $1 })
         #expect(staging.environment == .staging && staging.auth == .raceToken)
-        #expect(!staging.appAttest.bypass && staging.appAttest.environments == [.development])
+        // Staging takes both: TestFlight builds attest as production.
+        #expect(!staging.appAttest.bypass && staging.appAttest.environments == [.development, .production])
         #expect(staging.identity.database != nil)
         let production = try ServerConfig.load(from: required.merging(["ENV": "production"]) { $1 })
         #expect(production.environment == .production && production.auth == .raceToken)
         #expect(!production.appAttest.bypass && production.appAttest.environments == [.production])
-        // `off` is accepted outside dev, and staging may take production keys too.
+        // `off` is accepted outside dev, and staging may be narrowed to development keys.
         #expect(try !ServerConfig.load(from: required.merging(["ENV": "production", "APP_ATTEST_BYPASS": "off"]) { $1 }).appAttest.bypass)
-        #expect(try ServerConfig.load(from: required.merging(["ENV": "staging", "APP_ATTEST_ENVIRONMENT": "both"]) { $1 })
-            .appAttest.environments == [.development, .production])
+        #expect(try ServerConfig.load(from: required.merging(["ENV": "staging", "APP_ATTEST_ENVIRONMENT": "development"]) { $1 })
+            .appAttest.environments == [.development])
         // Dev: the bypass on and both environments, unless told otherwise.
         let dev = try ServerConfig.load(from: ["ENV": "dev"])
         #expect(dev.appAttest.bypass && dev.appAttest.environments == [.development, .production] && dev.auth == .dev)

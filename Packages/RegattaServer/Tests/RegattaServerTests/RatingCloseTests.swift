@@ -290,7 +290,7 @@ extension RaceSims {
                 sessions: SessionAuthority(store: InMemoryAccountStore(), verifier: StubVerifier()),
                 backends: ServiceBackends(queue: { ServerQueueService(matchmaker: matchmaker, player: $0, lifecycle: lifecycle) },
                                           raceSession: { ServerRaceSessionService(matchmaker: matchmaker, player: $0, lifecycle: lifecycle) }),
-                matchmaker: matchmaker, lifecycle: lifecycle)
+                matchmaker: matchmaker, lifecycle: lifecycle, attestation: .devDefault())
             var connections: [ServiceConnection] = []
             for name in ["0", "1"] {
                 let (_, connection, _) = try await ServiceFixtures.signedIn(endpoint, name)

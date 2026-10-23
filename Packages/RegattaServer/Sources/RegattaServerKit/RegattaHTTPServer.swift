@@ -34,12 +34,16 @@ public final class RegattaHTTPServer: Sendable {
     /// Deletes expired sessions every `sessionSweepInterval` (#146, R11).
     private let sweeper: Task<Void, Never>
 
-    /// Binds and starts serving. Refuses to start unless `ENV` is dev, staging or production (`SeatAuthPolicy.for`). `services` is the
-    /// service endpoint; by default the config's, with its accounts in memory (a dev server without a database).
+    /// Binds and starts serving. Refuses to start unless `ENV` is dev, staging or production (`SeatAuthPolicy.for`), and
+    /// outside dev with the App Attest bypass on or (in production) keys other than production's, in the config or in
+    /// the service endpoint it is handed (#158). `services` is the service endpoint; by default the config's, with its
+    /// accounts in memory (a dev server without a database).
     public static func start(config: ServerConfig, services: ServiceEndpoint? = nil,
                              group: any EventLoopGroup = MultiThreadedEventLoopGroup.singleton) async throws -> RegattaHTTPServer {
         _ = try SeatAuthPolicy.for(config.environment)
+        try config.appAttest.validate(for: config.environment)
         let services = try services ?? ServiceEndpoint.make(config: config, store: InMemoryAccountStore())
+        try services.attestation.validate(for: config.environment)
         let frameCap = services.config.frameCap, preSignInFrameCap = services.config.preSignInFrameCap
         let clientAddress = config.clientAddress
         // The queue locks its races onto the registry the race connections find them in.

@@ -138,7 +138,8 @@ public struct ServiceEndpoint: Sendable {
     public let fairPlay: FairPlayJob?
     /// The measures (#157): what the queue and the race connections record, and the queries over it.
     public let measures: ServerMeasures?
-    /// App Attest on each connection (#158). By default a dev server's: the bypass on, keys in memory.
+    /// App Attest on each connection (#158). No default: a dev server passes `.devDefault()` (the bypass on, keys in
+    /// memory) by name, and `RegattaHTTPServer.start` refuses a bypass outside dev.
     public let attestation: ConnectionAttestation
 
     public init(config: ServiceEndpointConfig, sessions: SessionAuthority, backends: ServiceBackends = .none,
@@ -146,7 +147,7 @@ public struct ServiceEndpoint: Sendable {
                 analytics: AnalyticsIngest? = nil, analyticsRetention: AnalyticsRetention? = nil, ratings: (any RatingBook)? = nil,
                 moderation: Moderation? = nil, deletion: OnlineDataDeletion? = nil, retention: RetentionJobs? = nil,
                 archive: (any RaceArchive)? = nil, fairPlay: FairPlayJob? = nil, measures: ServerMeasures? = nil,
-                attestation: ConnectionAttestation = .devDefault()) {
+                attestation: ConnectionAttestation) {
         self.attestation = attestation
         self.config = config
         self.sessions = sessions
@@ -273,8 +274,18 @@ public actor ServiceConnectionHandler {
         guard version == wireProtocolVersion else { return updateRequired(.protocolVersion) }
         guard let frame = try? Frame(decoding: bytes), case .hello(let hello) = frame.message else { return close("undecodable Hello") }
         guard SeatConnection.canSail(clientSimulationVersion: hello.simulationVersion) else { return updateRequired(.simulationVersion) }
-        attestation = await endpoint.attestation.check(hello.attestation, purpose: .service)
+        // The proof's check has a deadline, as the store reads behind the gate do: a key store that doesn't answer leaves
+        // the connection unattested rather than holding its Hello.
+        let checker = endpoint.attestation, proof = hello.attestation
+        let state: AttestationState
+        do {
+            state = try await withDeadline(checker.checkDeadline) { await checker.check(proof, purpose: .service) }
+        } catch {
+            state = .unattested(.storeUnavailable)
+            checker.logUnattested(.storeUnavailable)
+        }
         guard phase == .awaitingHello else { return }
+        attestation = state
         phase = .open
         send(.helloAck(HelloAck(serverBuild: endpoint.config.serverBuild, attestation: attestation.status)))
         armSignInDeadline()
@@ -436,7 +447,7 @@ public actor ServiceConnectionHandler {
 
     private func session(_ call: SessionCall) async -> SessionResult {
         switch call {
-        case .signIn(_, let player), .resume(_, let player): bindAttestation(to: player)
+        case .signIn(_, let player), .resume(_, let player): await bindAttestation(to: player)
         case .signOut: break
         }
         let outcome: SessionAuthority.Outcome
@@ -508,11 +519,14 @@ public actor ServiceConnectionHandler {
     }
 
     /// A verified proof binds one player: a session call naming any other (other flags, another alias) makes the
-    /// connection unattested for good.
-    private func bindAttestation(to player: WirePlayer) {
+    /// connection unattested for good. What the gate let it hold ends here, as for a player newly restricted from
+    /// communication (`setSession`): her place in the queue and her lobby feeds.
+    private func bindAttestation(to player: WirePlayer) async {
         guard case .verified(let binding) = attestation, binding != player.attestationBinding else { return }
         attestation = .unattested(.bindingMismatch)
-        ConnectionAttestation.log("unattested connection: \(UnattestedReason.bindingMismatch)")
+        endpoint.attestation.logUnattested(.bindingMismatch)
+        await (backends?.queue as? any ConnectionScoped)?.connectionEnded()
+        await (backends?.lobby as? any ConnectionScoped)?.connectionEnded()
     }
 
     // MARK: The gate (#34, #145)
