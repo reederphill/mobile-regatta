@@ -509,8 +509,8 @@ extension Oracle {
 
         /// The helm after `action` at a node whose world is `world`; nil where the action is the same as another
         /// (pinching at the no-go's edge, a gate's other mark off a gate, a hold that is its groove).
-        func after(_ action: Action, world: WorldSnapshot, oracle: Oracle) -> Helm? {
-            let boat = world.seats[0].boat
+        func after(_ action: Action, world: WorldSnapshot, oracle: Oracle, seat: Int = 0) -> Helm? {
+            let boat = world.seats[seat].boat
             let steady = oracle.course.steady(tws: boat.polarWindSpeed(in: oracle.course.boatClass))
             let up = steady.up.twa
             let down = steady.down.twa
@@ -566,9 +566,9 @@ extension Oracle {
             return angle <= up ? up : down
         }
 
-        /// The held input for now.
-        func input(race: Race, oracle: Oracle) -> BoatInput {
-            let boat = race.boats[0]
+        /// The held input for now: seat `seat`'s, her seat in a time trial's race.
+        func input(race: Race, oracle: Oracle, seat: Int = 0) -> BoatInput {
+            let boat = race.boats[seat]
             var desired = heading(boat: boat, oracle: oracle)
             if boat.speed < Self.ironsSpeed {
                 // Stopped: let go in the no-go so the class falls her off (#458); outside it, bear away to build way.

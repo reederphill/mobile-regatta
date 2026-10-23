@@ -35,6 +35,11 @@ public struct TimeTrialOptions: Hashable, Sendable {
     /// `--start` (#584): the start trial, from her place in the opening at T−60 to T+60 (`StartTrial`), on the start
     /// suite's seeds (`StartTrialSeed.pool`; `--holdout`, its hold-outs).
     public var start = false
+    /// `--hold-one-out <seat|all>` (#584 stage 2): with `--start`, hold out this seat of each seed's fleet (every seat
+    /// for `all`, an empty list) and plan its start again against the others' logged inputs (`HoldOneOut`).
+    public var holdOut: [Int]?
+    /// `--fleet <mix>`: the hold-one-out's fleet (`TierMix`); the start suite's all-National by default.
+    public var fleet = TierMix.national
     public var jobs: Int?
     /// Where to write the JSON report; `-` for stdout (the text report then goes to stderr).
     public var jsonPath: String?
@@ -74,6 +79,10 @@ public struct TimeTrialOptions: Hashable, Sendable {
                                  start suite's 200 seeds (--holdout: its 40 hold-outs; --seeds and --only as above,
                                  S3 or SH3); the oracle's start against each sailor's, by its worth at T+60.
                                  Not with --laps, --tune, --tunables or --oracle-from
+          --hold-one-out <s>     with --start (#584 stage 2): sail each seed's ten-boat fleet to T+60, then plan seat s's
+                                 start again (all: every seat) against the other nine sailing their logged inputs, the
+                                 rules on; the gap-finding gap by tier and by situation at T-60
+          --fleet <mix>          the hold-one-out's fleet: national (default), mixed, club, regional
         One boat, no fleet: from a fixed start at the gun, the oracle searches for the fastest lap of each seed's
         course and each bot sails it alone; the table is where each loses her time behind the oracle.
         Exits 2 on a usage or setup error.
@@ -133,6 +142,20 @@ public struct TimeTrialOptions: Hashable, Sendable {
             case "--tune-skip": tuneSkip.append(try value(flag))
             case "--jobs": jobs = try number(flag)
             case "--start": start = true
+            case "--hold-one-out":
+                let text = try value(flag)
+                if text == "all" {
+                    holdOut = []
+                } else {
+                    guard let seat = Int(text), (0..<StartTrialSeed.fleetSize).contains(seat) else {
+                        throw BotSuiteError.usage("--hold-one-out: a seat 0-\(StartTrialSeed.fleetSize - 1) or all, not \(text)")
+                    }
+                    holdOut = (holdOut ?? []) + [seat]
+                }
+            case "--fleet":
+                let text = try value(flag)
+                guard let mix = TierMix(rawValue: text) else { throw BotSuiteError.usage("--fleet: no tier mix \(text)") }
+                fleet = mix
             case "-h", "--help": help = true
             default: throw BotSuiteError.usage("unknown argument: \(flag)")
             }
@@ -144,6 +167,7 @@ public struct TimeTrialOptions: Hashable, Sendable {
             }
             if pools.contains(.validation) { throw BotSuiteError.usage("--start: the pools are reference and holdout") }
         }
+        if holdOut != nil && !start { throw BotSuiteError.usage("--hold-one-out needs --start") }
         if oracle.checkpointSeconds < Oracle.minimumSegmentSeconds {
             throw BotSuiteError.usage("--checkpoint: at least \(Oracle.minimumSegmentSeconds) s")
         }
@@ -281,7 +305,7 @@ public struct TimeTrialReport: Codable, Hashable, Sendable {
     public init(oracle: Oracle.Options, segments: [String], seeds: [TimeTrialSeedResult]) {
         self.oracle = OracleSettings(oracle)
         self.segments = segments
-        causes = LapLedger.Cause.allCases.map(\.rawValue)
+        causes = LapLedger.Cause.lap.map(\.rawValue)
         self.seeds = seeds
     }
 
@@ -385,7 +409,7 @@ public enum TimeTrial {
         func seconds(_ ledger: LapLedger) -> (segments: [Double], causes: [Double]) {
             let bySegment = ledger.bySegment
             let byCause = ledger.byCause
-            return (segments.map { bySegment[$0] ?? 0 }, LapLedger.Cause.allCases.map { byCause[$0] ?? 0 })
+            return (segments.map { bySegment[$0] ?? 0 }, LapLedger.Cause.lap.map { byCause[$0] ?? 0 })
         }
         var result: TimeTrialSeedResult
         if let known {
@@ -472,6 +496,12 @@ public enum TimeTrial {
             let options = try TimeTrialOptions(arguments: arguments)
             if options.help {
                 print(TimeTrialOptions.usage)
+                return 0
+            }
+            if options.start, let seats = options.holdOut {
+                let report = try HoldOneOut.run(options.startSeeds(), seats: seats.isEmpty ? nil : seats, tierMix: options.fleet,
+                                                oracle: options.oracle, jobs: options.jobs ?? BotSuite.defaultJobs)
+                try emit(report.lines, json: report.jsonData, to: options.jsonPath)
                 return 0
             }
             if options.start {

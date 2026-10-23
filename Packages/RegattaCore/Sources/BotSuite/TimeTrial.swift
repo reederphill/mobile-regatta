@@ -109,12 +109,12 @@ public enum TimeTrialSailor: Hashable, Sendable, CustomStringConvertible {
     public static let standard: [TimeTrialSailor] = [.tier(.club), .tier(.regional), .tier(.national),
                                                      .profile(.executor), .profile(.tactician)]
 
-    /// Her driver for the time trial's one seat.
-    func driver(raceSeed: RaceSeed) -> BotDriver? {
+    /// Her driver for the time trial's one seat, `seat` of its race.
+    func driver(raceSeed: RaceSeed, seat: Int = 0) -> BotDriver? {
         switch self {
         case .oracle: nil
-        case .tier(let tier): BotDriver(seat: 0, raceSeed: raceSeed, tier: tier)
-        case .profile(let profile): BotDriver(seat: 0, raceSeed: raceSeed, skill: 1, profile: profile)
+        case .tier(let tier): BotDriver(seat: seat, raceSeed: raceSeed, tier: tier)
+        case .profile(let profile): BotDriver(seat: seat, raceSeed: raceSeed, skill: 1, profile: profile)
         }
     }
 }
@@ -139,6 +139,11 @@ public final class TimeTrialCourse {
     public var gun: WorldSnapshot { origin }
     /// A start trial's fleet and her seat in it (#584); nil for a lap trial.
     public let start: (fleetSize: Int, seat: Int)?
+    /// A hold-one-out's fleet (#584 stage 2, `init(holdOut:seat:seed:)`): every other seat's inputs as logged, by the
+    /// tick they apply at; nil for a time trial alone.
+    public let fleet: [Int: [InputRecord]]?
+    /// Her seat in the race: the held-out seat, else 0 (a trial alone is seat 0, its other seats ghosts).
+    public let her: Int
     /// The race's course, as every race on the setup derives it.
     public let course: CourseLayout
     public let boatClass: BoatClass
@@ -155,6 +160,8 @@ public final class TimeTrialCourse {
     public init(_ seed: TimeTrialSeed, start: (fleetSize: Int, seat: Int)?) throws {
         self.seed = seed
         self.start = start
+        fleet = nil
+        her = 0
         let classFile = try BotRaceHarness.bundledClass(seed.boatClass)
         let venue = try dataFileKey(seed.venue)
         let conditions = try dataFileKey(seed.conditions)
@@ -217,6 +224,36 @@ public final class TimeTrialCourse {
         snapshot.touchingEdges = []
         try race.importSnapshot(snapshot)
         origin = race.exportSnapshot()
+    }
+
+    /// A hold-one-out's course (#584 stage 2): `log`'s race from the start of the sequence, its whole fleet on the water,
+    /// she in `seat` and every other seat sailing its logged inputs again (ADR 0002: a replay runs no brain), so they
+    /// sail as they did and don't answer her. `seed` names it.
+    public init(holdOut log: RaceLog, seat: Int, seed: TimeTrialSeed) throws {
+        self.seed = seed
+        setup = log.header.setup
+        start = (fleetSize: setup.fleetSize, seat: seat)
+        her = seat
+        fleet = Dictionary(grouping: log.inputs.filter { $0.seat != seat }, by: \.tick)
+        files = try RaceFiles(resolving: setup)
+        windSeed = log.header.windSeed
+        let race = try Race(setup: setup, files: files, mode: .authoritative(windSeed: windSeed))
+        course = race.course
+        boatClass = race.boatClass
+        baseWindStrength = race.windSetup.baseStrength
+        origin = race.exportSnapshot()
+    }
+
+    /// Applies the fleet's logged inputs for the tick `race` steps to next, in the log's order (a hold-one-out's; nothing
+    /// for a trial alone). Call it before each step, as `Replayer.replay` applies a log's.
+    func applyFleet(_ race: Race) {
+        guard let records = fleet?[race.tick + 1] else { return }
+        for record in records {
+            switch record.kind {
+            case .held(let input): race.apply(input, seat: record.seat, atTick: record.tick)
+            case .tap(let tap): race.tap(tap, seat: record.seat, atTick: record.tick)
+            }
+        }
     }
 
     /// A start trial's origin (#584): `race` at the start of the sequence with her, seat 0, in `seat`'s place and trim,
@@ -420,6 +457,15 @@ public struct LapLedger {
         /// The seconds the polar's best progress in her own wind needed: what her wind cost or gave against another's
         /// (lulls, puffs and shifts she sailed into or missed).
         case wind
+        /// Metres only (#584 stage 2, `metresByCause`): the polar's best progress another boat's shadow and backwind took
+        /// off hers, ...
+        case air
+        /// ... and what she lost in a tack or gybe or off the polar with another boat within `forcedLengths`: the moves
+        /// the fleet made her make (a duck, a tack to clear).
+        case forced
+
+        /// The causes a lap's seconds are put down to: all but the fleet's, which a time trial, alone, never has.
+        public static let lap: [Cause] = [.start, .rounding, .manoeuvre, .overstood, .offPolar, .wind]
     }
 
     /// Where on the course a tick is.
@@ -440,10 +486,14 @@ public struct LapLedger {
         var ideal: Double
         /// Heading change this tick, radians a second.
         var turnRate: Double
-        /// With `measuresMetres`: metres up the course axis the polar's best progress in her wind made this tick, and
-        /// what she fell short of it (negative where she made more); their difference is her progress.
+        /// With `measuresMetres`: metres up the course axis the polar's best progress in clean air made this tick, what
+        /// another boat's shadow took off it, and what she fell short of the rest (negative where she made more); the
+        /// first less the others is her progress.
         var idealMetres = 0.0
+        var airMetres = 0.0
         var lostMetres = 0.0
+        /// Another boat (racing, or not yet started) within `forcedLengths` of her this tick.
+        var crowded = false
     }
 
     private let course: TimeTrialCourse
@@ -451,6 +501,8 @@ public struct LapLedger {
     /// Whether it also measures each tick in metres up the course axis (#584, the start trial's first minute): the
     /// first beat's ladder, what `StartGeometry.made` counts.
     private let measuresMetres: Bool
+    /// Her seat in the race.
+    private let seat: Int
     /// The leg whose rounding window she is in.
     private var roundingLeg: Int?
     /// After a boom crossing, the manoeuvre lasts until she is back to speed or this tick.
@@ -465,29 +517,46 @@ public struct LapLedger {
     /// Back to speed: this share of her target at the angle she sails, turning slower than `turningRate`.
     static let recoveredShare = 0.95
 
-    init(course: TimeTrialCourse, measuresMetres: Bool = false) {
+    /// Hull lengths, centre to centre, inside which another boat makes a tack, a gybe or a loss off the polar a forced
+    /// move (`Cause.forced`): the suite's crossing distance (`RaceTally.crossingLengths`).
+    static let forcedLengths = RaceTally.crossingLengths
+
+    init(course: TimeTrialCourse, measuresMetres: Bool = false, seat: Int = 0) {
         self.course = course
         self.measuresMetres = measuresMetres
+        self.seat = seat
     }
 
-    /// `tick` with its metres (`measuresMetres`): the polar's best progress up the axis in her wind and current this
-    /// tick, and her own.
+    /// `tick` with its metres (`measuresMetres`): the polar's best progress up the axis this tick in the wind and current
+    /// she had, clean of other boats' shadow, the shadow's share of it, and her own progress.
     private func metred(_ tick: Tick, race: Race, before: Boat) -> Tick {
         guard measuresMetres else { return tick }
-        let boat = race.boats[0]
+        let boat = race.boats[seat]
         let dt = 1 / Double(Race.tickRate)
         let upwind = course.course.upwind
-        let rate = course.bestProgressRate(along: upwind, windDirection: boat.sailingWind.direction,
-                                           windSpeed: boat.polarWindSpeed(in: course.boatClass), current: boat.current)
+        let flow = boat.current.dot(upwind)
+        let clean = course.bestProgressRate(along: upwind, windDirection: boat.sailingWind.direction,
+                                            windSpeed: boat.sailingWind.speed, current: boat.current)
+        // In her shadow: the wind's speed for a class whose shadow slows the wind, her own for one whose shadow slows her.
+        let shaded = course.boatClass.windShadow.isSpeedLoss
+            ? (clean - flow) * boat.shadow + flow
+            : course.bestProgressRate(along: upwind, windDirection: boat.sailingWind.direction,
+                                      windSpeed: boat.polarWindSpeed(in: course.boatClass), current: boat.current)
         var tick = tick
-        tick.idealMetres = max(0, rate) * dt
-        tick.lostMetres = tick.idealMetres - (boat.position - before.position).dot(upwind)
+        tick.idealMetres = max(0, clean) * dt
+        tick.airMetres = tick.idealMetres - max(0, shaded) * dt
+        tick.lostMetres = max(0, shaded) * dt - (boat.position - before.position).dot(upwind)
+        let near = Self.forcedLengths * course.boatClass.hull.length
+        tick.crowded = race.boats.indices.contains { other in
+            other != seat && [.racing, .prestart, .ocs].contains(race.boats[other].status)
+                && (race.boats[other].position - boat.position).length < near
+        }
         return tick
     }
 
     /// Records the tick the race just stepped: `before` is her boat before it.
     mutating func record(_ race: Race, before: Boat) {
-        let boat = race.boats[0]
+        let boat = race.boats[seat]
         let dt = 1 / Double(Race.tickRate)
         guard before.status != .finished else { return }
         let turnRate = wrapAngle(boat.heading - before.heading) / dt
@@ -563,11 +632,14 @@ public struct LapLedger {
     }
 
     /// With `measuresMetres`: metres short of the polar's best progress up the axis by cause, `.wind` the best progress
-    /// itself. The best less the rest is her progress up the axis, to rounding.
+    /// in clean air itself, `.air` what other boats' shadow took off it; a loss in a tack or gybe or off the polar with
+    /// another boat close is `.forced`. The best less the rest is her progress up the axis, to rounding.
     public var metresByCause: [Cause: Double] {
         var sums = Dictionary(uniqueKeysWithValues: Cause.allCases.map { ($0, 0.0) })
         for tick in ticks {
-            sums[tick.cause, default: 0] += tick.lostMetres
+            let cause: Cause = tick.crowded && (tick.cause == .manoeuvre || tick.cause == .offPolar) ? .forced : tick.cause
+            sums[cause, default: 0] += tick.lostMetres
+            sums[.air, default: 0] += tick.airMetres
             sums[.wind, default: 0] += tick.idealMetres
         }
         return sums

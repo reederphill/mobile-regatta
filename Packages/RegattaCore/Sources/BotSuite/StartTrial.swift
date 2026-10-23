@@ -169,8 +169,8 @@ public struct StartFix: Codable, Hashable, Sendable {
 }
 
 /// One sailor's start on one seed (#584), as she sailed it. Her worth is the line's metres she was short of at the gun
-/// and her first minute by the ledger (`LapLedger`, in metres up the axis): `worth = −timing + wind − late − manoeuvre −
-/// overstood − offPolar − speed`, to rounding.
+/// and her first minute by the ledger (`LapLedger`, in metres up the axis): `worth = −timing + wind − air − late −
+/// manoeuvre − overstood − offPolar − forced − speed`, to rounding.
 public struct StartEntry: Codable, Hashable, Sendable {
     public var sailor: String
     /// What it was worth at T+60, metres (`StartGeometry.worth`).
@@ -185,8 +185,11 @@ public struct StartEntry: Codable, Hashable, Sendable {
     public var atGun: StartFix
     /// Metres below the line's centre up the course axis at the gun (negative over it): "metres from the line at the gun".
     public var timing: Double
-    /// From the gun to T+60, metres up the axis: the polar's best progress in the wind and current she had (`.wind`) ...
+    /// From the gun to T+60, metres up the axis: the polar's best progress in the wind and current she had, clean of
+    /// other boats (`.wind`), ...
     public var wind: Double
+    /// ... what other boats' shadow and backwind took off it (stage 2's; none alone), ...
+    public var air: Double
     /// ... and what she fell short of it by cause: before she started (and, unstarted at T+60, what she made that the score
     /// doesn't count), ...
     public var late: Double
@@ -195,6 +198,8 @@ public struct StartEntry: Codable, Hashable, Sendable {
     public var manoeuvre: Double
     public var overstood: Double
     public var offPolar: Double
+    /// ... the tacks, gybes and losses off the polar another boat close made her (stage 2's; none alone) ...
+    public var forced: Double
     /// ... and her speed at T+60 below the polar's at her angle, as the score counts it (`StartGeometry.deficitMetres`).
     public var speed: Double
     /// Not in the sum, for reading it: metres her end gave up to the favoured end at the gun, up the wind at the line's
@@ -202,9 +207,11 @@ public struct StartEntry: Codable, Hashable, Sendable {
     /// score is metres up the axis, so a favoured end or a slow gun counts through the first minute's columns.
     public var bias: Double
     public var gunSpeed: Double
+    /// Penalties called on her to T+60.
+    public var penalties: Int
 
     /// The columns, summed: her worth, to rounding.
-    public var sum: Double { -timing + wind - late - manoeuvre - overstood - offPolar - speed }
+    public var sum: Double { -timing + wind - air - late - manoeuvre - overstood - offPolar - forced - speed }
 }
 
 /// A sailor's start against the oracle's on one seed (#584): metres behind it at T+60, and why. Every column is hers
@@ -221,7 +228,7 @@ public struct StartLoss: Codable, Hashable, Sendable {
     public var overstood: Double
     public var offPolar: Double
     public var speed: Double
-    /// Seconds in another boat's air, and forced moves, in the first minute: zero with nobody else on the water, by
+    /// Metres in another boat's air, and in forced moves, in the first minute: zero with nobody else on the water, by
     /// construction (stage 2's columns).
     public var air: Double
     public var forced: Double
@@ -250,7 +257,8 @@ public struct StartLoss: Codable, Hashable, Sendable {
         self.init(sailor: entry.sailor,
                   values: [oracle.worth - entry.worth, entry.timing - oracle.timing, oracle.wind - entry.wind,
                            entry.late - oracle.late, entry.manoeuvre - oracle.manoeuvre, entry.overstood - oracle.overstood,
-                           entry.offPolar - oracle.offPolar, entry.speed - oracle.speed, 0, 0])
+                           entry.offPolar - oracle.offPolar, entry.speed - oracle.speed, entry.air - oracle.air,
+                           entry.forced - oracle.forced])
     }
 
     /// The columns but the gap, summed: the gap, to rounding.
@@ -392,6 +400,8 @@ public struct StartTrialReport: Codable, Hashable, Sendable {
 /// she is worth at T+60.
 struct StartWatch {
     let geometry: StartGeometry
+    /// Her seat in the race.
+    var her: Int { geometry.course.her }
     private(set) var atT30: StartFix?
     private(set) var atT10: StartFix?
     private(set) var atGun: StartFix?
@@ -400,6 +410,7 @@ struct StartWatch {
     private(set) var gunWindward: Vec2?
     private(set) var startTick: Int?
     private(set) var ocs = false
+    private(set) var penalties = 0
     /// The first minute, tick by tick, in metres up the axis.
     private var ledger: LapLedger
 
@@ -408,7 +419,7 @@ struct StartWatch {
 
     init(_ geometry: StartGeometry) {
         self.geometry = geometry
-        ledger = LapLedger(course: geometry.course, measuresMetres: true)
+        ledger = LapLedger(course: geometry.course, measuresMetres: true, seat: geometry.course.her)
     }
 
     func fix(_ boat: Boat) -> StartFix {
@@ -419,8 +430,9 @@ struct StartWatch {
 
     /// Records the tick the race just stepped to: `before` is her boat before it.
     mutating func record(_ race: Race, before: Boat) {
-        let boat = race.boats[0]
+        let boat = race.boats[her]
         if race.tick > 0 { ledger.record(race, before: before) }
+        if boat.penaltyTurnsOwed > before.penaltyTurnsOwed { penalties += 1 }
         switch race.tick {
         case Self.t30Tick: atT30 = fix(boat)
         case Self.t10Tick: atT10 = fix(boat)
@@ -445,7 +457,7 @@ struct StartWatch {
         guard let atT30, let atT10, let atGun, let gunBoat, let gunWindward else {
             preconditionFailure("a start trial sails to T+60")
         }
-        let boat = race.boats[0]
+        let boat = race.boats[her]
         let worth = geometry.worth(boat)
         let speed = geometry.deficitMetres(boat)
         // What she made that the score doesn't count: a boat unstarted at T+60 has at best the line.
@@ -453,11 +465,11 @@ struct StartWatch {
         let metres = ledger.metresByCause
         return StartEntry(sailor: sailor, worth: worth, startSeconds: startTick.map { Double($0) / Double(Race.tickRate) },
                           ocs: ocs, atT30: atT30, atT10: atT10, atGun: atGun, timing: -geometry.made(gunBoat.position),
-                          wind: metres[.wind] ?? 0, late: (metres[.start] ?? 0) + uncounted,
+                          wind: metres[.wind] ?? 0, air: metres[.air] ?? 0, late: (metres[.start] ?? 0) + uncounted,
                           manoeuvre: metres[.manoeuvre] ?? 0, overstood: metres[.overstood] ?? 0,
-                          offPolar: (metres[.offPolar] ?? 0) + (metres[.rounding] ?? 0), speed: speed,
-                          bias: geometry.biasLoss(spot: atGun.spot, into: gunWindward),
-                          gunSpeed: geometry.deficitMetres(gunBoat))
+                          offPolar: (metres[.offPolar] ?? 0) + (metres[.rounding] ?? 0), forced: metres[.forced] ?? 0,
+                          speed: speed, bias: geometry.biasLoss(spot: atGun.spot, into: gunWindward),
+                          gunSpeed: geometry.deficitMetres(gunBoat), penalties: penalties)
     }
 }
 
@@ -469,14 +481,16 @@ public enum StartTrial {
 
     /// Sails `sailor`, a bot, from the start of the sequence to T+60, alone: her driver as a race's from its first tick.
     static func sail(_ sailor: TimeTrialSailor, course: TimeTrialCourse) throws -> StartEntry {
-        guard var driver = sailor.driver(raceSeed: course.setup.raceSeed) else {
+        guard var driver = sailor.driver(raceSeed: course.setup.raceSeed, seat: course.her) else {
             preconditionFailure("the oracle sails through `StartOracle`, not a driver")
         }
         let race = try course.race()
+        let her = course.her
         var watch = StartWatch(StartGeometry(course))
         while race.tick < StartGeometry.horizonTick && !race.isOver {
             driver.drive(race)
-            let before = race.boats[0]
+            let before = race.boats[her]
+            course.applyFleet(race)
             race.step()
             _ = race.drainEvents()
             watch.record(race, before: before)
@@ -488,15 +502,17 @@ public enum StartTrial {
     public static func replay(_ inputs: [Oracle.Input], course: TimeTrialCourse) throws
         -> (entry: StartEntry, lineBias: Double, digest: UInt64) {
         let race = try course.race()
+        let her = course.her
         var watch = StartWatch(StartGeometry(course))
         var next = 0
         while race.tick < StartGeometry.horizonTick && !race.isOver {
             while next < inputs.count && inputs[next].tick <= race.tick + 1 {
-                if let held = inputs[next].held { race.apply(held, seat: 0, atTick: inputs[next].tick) }
-                if let tap = inputs[next].tap { race.tap(tap, seat: 0, atTick: inputs[next].tick) }
+                if let held = inputs[next].held { race.apply(held, seat: her, atTick: inputs[next].tick) }
+                if let tap = inputs[next].tap { race.tap(tap, seat: her, atTick: inputs[next].tick) }
                 next += 1
             }
-            let before = race.boats[0]
+            let before = race.boats[her]
+            course.applyFleet(race)
             race.step()
             _ = race.drainEvents()
             watch.record(race, before: before)
@@ -541,6 +557,8 @@ public struct StartOracle {
     public let options: Oracle.Options
     let lap: Oracle
     let geometry: StartGeometry
+    /// Her seat in the race: 0 alone, the held-out seat in a hold-one-out.
+    var her: Int { course.her }
 
     public init(course: TimeTrialCourse, options: Oracle.Options = Oracle.Options()) {
         precondition(course.start != nil, "the start oracle sails a start trial's course")
@@ -579,6 +597,8 @@ public struct StartOracle {
         var bot: (driver: BotDriver, profile: BotProfile)?
         var pure: BotProfile?
         var trail: Oracle.Trail?
+        /// A penalty was called on her on the way here (a bot's own start serves it): no start for the oracle to have.
+        var fouled = false
         /// Her worth at T+60 as estimated (`estimate`), or her worth once there: higher is better.
         var score: Double
         var done: Bool { world.tick >= StartGeometry.horizonTick }
@@ -593,7 +613,7 @@ public struct StartOracle {
     }
 
     private func takeOver(_ profile: BotProfile) -> BotDriver {
-        guard let driver = TimeTrialSailor.profile(profile).driver(raceSeed: course.setup.raceSeed) else {
+        guard let driver = TimeTrialSailor.profile(profile).driver(raceSeed: course.setup.raceSeed, seat: her) else {
             preconditionFailure("a profile always has a driver")
         }
         return driver
@@ -604,9 +624,9 @@ public struct StartOracle {
         var race = try course.race()
         var nodes = 0
         var ticks = 0
-        let boat = course.origin.seats[0].boat
+        let boat = course.origin.seats[her].boat
         let root = Node(world: course.origin, helm: Oracle.Helm(course: .angle(boomSide: boat.boomSide, twa: boat.twa)),
-                        ease: course.origin.seats[0].heldInput.ease, bot: nil, pure: nil, trail: nil, score: 0)
+                        ease: course.origin.seats[her].heldInput.ease, bot: nil, pure: nil, trail: nil, score: 0)
         var beam = [root]
         var best: Node?
         var levels = 0
@@ -626,7 +646,7 @@ public struct StartOracle {
                         child = try sail(from: node, pilot: .bot(driver, profile), race: race, ticks: &ticks)
                         child.pure = node.pure == profile || node.world.tick == course.origin.tick ? profile : nil
                     case .lap(let lapAction):
-                        guard let helm = node.helm.after(lapAction, world: node.world, oracle: lap) else { continue }
+                        guard let helm = node.helm.after(lapAction, world: node.world, oracle: lap, seat: her) else { continue }
                         child = try sail(from: node, pilot: .helm(helm, ease: node.ease), race: race, ticks: &ticks)
                     case .reach, .ease, .spot:
                         guard prestart, let pilot = startPilot(action, node: node) else { continue }
@@ -636,7 +656,7 @@ public struct StartOracle {
                     // Over the line at the gun, or fouled: no start to have. A bot's own start that goes over is done too.
                     guard child.score.isFinite else { continue }
                     if child.done {
-                        if best.map({ child.score > $0.score }) ?? true { best = child }
+                        if !child.fouled, best.map({ child.score > $0.score }) ?? true { best = child }
                         continue
                     }
                     if options.horizonSeconds > 0 {
@@ -654,7 +674,7 @@ public struct StartOracle {
 
     /// The helm after a start action at `node`; nil where it is the same as another, or she is through a turn.
     private func startPilot(_ action: Action, node: Node) -> Pilot? {
-        let boat = node.world.seats[0].boat
+        let boat = node.world.seats[her].boat
         guard abs(wrapAngle(node.helm.heading(boat: boat, oracle: lap) - boat.heading)) < Oracle.Helm.settled else { return nil }
         switch action {
         case .reach:
@@ -678,7 +698,7 @@ public struct StartOracle {
             children[a].score != children[b].score ? children[a].score > children[b].score : a < b
         }
         func bucket(_ node: Node) -> [Int] {
-            let boat = node.world.seats[0].boat
+            let boat = node.world.seats[her].boat
             let third = Int((geometry.spot(boat.position).clamped(to: 0...0.999)) * 3)
             return [boat.status == .racing ? 1 : 0, boat.boomSide == .port ? 0 : 1, third]
         }
@@ -690,9 +710,9 @@ public struct StartOracle {
         }
         let near = Oracle.spacing * course.boatClass.hull.length
         for index in order where kept.count < options.beamWidth && !kept.contains(index) {
-            let boat = children[index].world.seats[0].boat
+            let boat = children[index].world.seats[her].boat
             let crowded = kept.contains { other in
-                let o = children[other].world.seats[0].boat
+                let o = children[other].world.seats[her].boat
                 return bucket(children[other]) == bucket(children[index]) && (o.position - boat.position).length < near
             }
             if !crowded { kept.append(index) }
@@ -718,28 +738,34 @@ public struct StartOracle {
         let minimumTick = startTick + Int(Oracle.minimumSegmentSeconds * Double(Race.tickRate))
         var pilot = pilot
         var sent: [Oracle.Input] = []
-        var last = node.world.seats[0].heldInput
-        let started = race.boats[0].status == .racing
-        let fetched = fetches(race.boats[0])
+        var last = node.world.seats[her].heldInput
+        let started = race.boats[her].status == .racing
+        let fetched = fetches(race.boats[her])
+        // A penalty called on her in the segment: a bot's own start serves it, and isn't the oracle's.
+        var called = false
         while race.tick < endTick && !race.isOver {
             steer(&pilot, race: race, last: &last, sent: &sent)
+            let owed = race.boats[her].penaltyTurnsOwed
+            course.applyFleet(race)
             race.step()
             ticks += 1
             _ = race.drainEvents()
-            let boat = race.boats[0]
+            let boat = race.boats[her]
+            if boat.penaltyTurnsOwed > owed { called = true }
             if boat.status == .ocs || boat.status == .dsq { break }
             if boat.penaltyTurnsOwed > 0, case .helm = pilot { break }
             guard options.eventCheckpoints, race.tick >= minimumTick else { continue }
             if (boat.status == .racing) != started { break }
             if race.tick < 0 && fetches(boat) != fetched { break }
         }
-        let boat = race.boats[0]
+        let boat = race.boats[her]
         let trail = sent.isEmpty ? node.trail : Oracle.Trail(parent: node.trail, inputs: sent)
         var fouled = boat.penaltyTurnsOwed > 0
         if case .bot = pilot { fouled = false }
         let lost = fouled || boat.status == .ocs || boat.status == .dsq || (race.isOver && race.tick < StartGeometry.horizonTick)
         var child = Node(world: race.exportSnapshot(), helm: node.helm, ease: node.ease, bot: nil, pure: nil, trail: trail,
                          score: lost ? -.infinity : estimate(race))
+        child.fouled = node.fouled || called || boat.penaltyTurnsOwed > 0
         switch pilot {
         case .helm(let helm, let ease):
             child.helm = helm
@@ -747,7 +773,7 @@ public struct StartOracle {
         case .bot(let driver, let profile):
             child.bot = (driver, profile)
             child.helm = Oracle.Helm(course: .angle(boomSide: boat.boomSide, twa: boat.twa))
-            child.ease = race.exportSnapshot().seats[0].heldInput.ease
+            child.ease = race.exportSnapshot().seats[her].heldInput.ease
         }
         return child
     }
@@ -759,9 +785,9 @@ public struct StartOracle {
         switch pilot {
         case .helm(let helm, let ease):
             guard race.tick.isMultiple(of: BotDriver.decisionInterval) else { return }
-            let input = BoatInput(rudder: helm.input(race: race, oracle: lap).rudder, ease: ease)
+            let input = BoatInput(rudder: helm.input(race: race, oracle: lap, seat: her).rudder, ease: ease)
             if input != last {
-                race.apply(input, seat: 0, atTick: next)
+                race.apply(input, seat: her, atTick: next)
                 sent.append(Oracle.Input(tick: next, held: input))
                 last = input
             }
@@ -786,10 +812,11 @@ public struct StartOracle {
         let endTick = min(race.tick + Int(options.horizonSeconds * Double(Race.tickRate)), StartGeometry.horizonTick)
         while race.tick < endTick && !race.isOver {
             driver.drive(race)
+            course.applyFleet(race)
             race.step()
             ticks += 1
             _ = race.drainEvents()
-            let boat = race.boats[0]
+            let boat = race.boats[her]
             if boat.status == .ocs { return -.infinity }
             if boat.penaltyTurnsOwed > 0 || boat.status == .dsq {
                 return estimate(race) - Oracle.horizonFoulSeconds * geometry.upwindVMG(boat)
@@ -803,7 +830,7 @@ public struct StartOracle {
     /// spot and the polar's best from the time she can be there, no earlier than the gun: there at its best (with a turn's
     /// worth of the class's speeding up if she is sailing away), and her deficit made up on the way.
     func estimate(_ race: Race) -> Double {
-        let boat = race.boats[0]
+        let boat = race.boats[her]
         let horizon = StartGeometry.horizonSeconds
         if race.tick >= StartGeometry.horizonTick { return geometry.worth(boat) }
         let vmg = max(geometry.upwindVMG(boat), Oracle.slowest)
