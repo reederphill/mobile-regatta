@@ -1,6 +1,7 @@
 import RegattaCore
 import RegattaServices
 import SwiftUI
+import UIKit
 
 /// The one home screen (#25): Race online leading Practice, the lobby area below, and the toolbar's pages
 /// pushed on top. No tab bar.
@@ -44,9 +45,14 @@ struct HomeView: View {
         LobbyPanelState(isOnline: isOnline, status: lobbyStatus, retryLine: onlineStatus?.lobbyRetryLine, lobby: lobby?.phase ?? .open)
     }
 
-    /// Typing in the lobby on a phone (G1): the keyboard leaves no room for Race online and Practice, so the lobby
-    /// takes the window until the keyboard goes. An iPad keeps them.
-    private var lobbyTakesTheWindow: Bool { lobby?.isFieldFocused == true && (screenSize?.height ?? 0) < 900 }
+    /// Typing in the lobby on a phone (G1): the on-screen keyboard leaves no room for Race online and Practice, so the
+    /// lobby takes the window until the keyboard goes. An iPad keeps them, and so does a phone typing on a hardware
+    /// keyboard: with no keyboard on screen the room is all there, and the lobby taking it would only stretch the feed.
+    private var lobbyTakesTheWindow: Bool {
+        lobby?.isFieldFocused == true && keyboardIsUp && (screenSize?.height ?? 0) < 900
+    }
+    /// Whether an on-screen keyboard is up: taller than a hardware keyboard's shortcut bar.
+    @State private var keyboardIsUp = false
 
     var body: some View {
         NavigationStack(path: $model.path) {
@@ -80,6 +86,12 @@ struct HomeView: View {
             .padding(.bottom, 12)
             .readableColumn()
             .animation(.default, value: lobbyTakesTheWindow)
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+                keyboardIsUp = Self.keyboardIsUp(note)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+                keyboardIsUp = false
+            }
             // UI tests check the home screen is up.
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("home")
@@ -116,6 +128,15 @@ struct HomeView: View {
                 MenuSheetView(sheet: sheet)
             }
         }
+    }
+
+    /// Whether a keyboard frame change leaves an on-screen keyboard up: more than a hardware keyboard's shortcut bar
+    /// showing above the screen's bottom.
+    static func keyboardIsUp(_ note: Notification) -> Bool {
+        guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+              let screen = (note.object as? UIScreen) ?? UIApplication.shared.connectedScenes
+                .compactMap({ ($0 as? UIWindowScene)?.screen }).first else { return false }
+        return screen.bounds.intersection(frame).height > 150
     }
 
     /// Rejoin race, with the race clock counted on each second (#141): straight back to the water.

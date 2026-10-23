@@ -136,8 +136,10 @@ struct LobbyView: View {
                 }
                 .padding(16)
             }
-            // Newest at the bottom, and it follows new lines while she is there (G1).
-            .defaultScrollAnchor(.bottom)
+            // Opens on the newest, and follows new lines while she is at the bottom (G1). Lines that don't fill the
+            // feed start at its top, under the panel's edge, never below an empty band.
+            .defaultScrollAnchor(.top, for: .alignment)
+            .defaultScrollAnchor(.bottom, for: .initialOffset)
             .defaultScrollAnchor(.bottom, for: .sizeChanges)
             .scrollDismissesKeyboard(.interactively)
             .accessibilityIdentifier("lobby-feed")
@@ -297,6 +299,10 @@ struct LobbyComposerView: View {
         content(now: max(model.refreshedAt, Date()))
         .onChange(of: model.isFieldFocused) { _, focused in if isFocused != focused { isFocused = focused } }
         .onChange(of: isFocused) { _, focused in if model.isFieldFocused != focused { model.isFieldFocused = focused } }
+        // A rebuilt composer starts unfocused, and a gone one has no field: the model follows, or Home would keep the
+        // window for a keyboard that isn't there.
+        .onAppear { if model.isFieldFocused != isFocused { model.isFieldFocused = isFocused } }
+        .onDisappear { model.isFieldFocused = false }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("lobby-composer")
     }
