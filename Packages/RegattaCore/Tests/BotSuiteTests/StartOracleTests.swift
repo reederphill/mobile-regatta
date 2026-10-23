@@ -9,9 +9,10 @@ import Testing
 /// pool, one of each conditions file and each in another seat's place, with a narrower, shorter search than the tool's
 /// (`options`) so the suite stays quick; the tool's own settings only search harder.
 @Suite struct StartOracleTests {
-    /// The search the tests run: a beam of 4 (two places of it the bots' own starts), children sailed on 10 s before
-    /// they are scored.
-    static let options = Oracle.Options(checkpointSeconds: 2, horizonSeconds: 10, beamWidth: 4)
+    /// The search the tests run, the lap oracle's tests' (`OracleTimeTrialTests.options`): a beam of 3 (two places of it
+    /// the bots' own starts), children sailed on 6 s before they are scored; any wider costs the package's tests their CI
+    /// time limit.
+    static let options = Oracle.Options(checkpointSeconds: 2, horizonSeconds: 6, beamWidth: 3)
 
     /// S1, S6, S11 and S16: gusty-offshore, light-and-patchy, sea-breeze and classic-oscillating, seats 0 to 3.
     static let seeds = ["S1", "S6", "S11", "S16"].map { name in StartTrialSeed.pool.first { $0.name == name }! }
