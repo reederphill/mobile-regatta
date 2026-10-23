@@ -8,8 +8,8 @@ public struct TimeTrialOptions: Hashable, Sendable {
     public var seedCount: Int?
     /// `--only <name>`: only these seeds of the pool, by name (R3, H3); all when empty.
     public var only: [String] = []
-    /// Sail the hold-out seeds (`TimeTrialSeed.holdOut`) instead of the reference regatta's.
-    public var holdOut = false
+    /// The pools sailed, in order (`--pool`, `--holdout`); the reference regatta's when empty.
+    public var pools: [TimeTrialSeed.Pool] = []
     /// `--boat-class id@version`: every seed on that bundled class instead of its own.
     public var boatClass: String?
     public var laps: Int?
@@ -20,7 +20,7 @@ public struct TimeTrialOptions: Hashable, Sendable {
     public var profiles: [BotProfile] = []
     public var oracle = Oracle.Options()
     /// `--oracle-from <report.json>`: the oracle's laps from an earlier report of the same seeds, not searched again.
-    public var oracleFrom: String?
+    public var oracleFrom: [String] = []
     /// `--tunables <file>`: the bots read this tunables file (`BotTunables`) in place of the bundled one.
     public var tunablesPath: String?
     /// `--tune <out.json>` (#583 stage 2): search the tunables for the least mean time behind the oracle of the sailors,
@@ -44,7 +44,9 @@ public struct TimeTrialOptions: Hashable, Sendable {
           --seeds <n>            the first n seeds of the pool (default: all 16)
           --only <seed>          only this seed of the pool, by name: R3, or H3 with --holdout (repeatable)
           --holdout              the hold-out seeds (the reference races' files on new seeds) instead of the
-                                 reference regatta's races
+                                 reference regatta's races: --pool holdout
+          --pool <name>          sail this pool of seeds: reference (R1-R16), holdout (H1-H16) or validation
+                                 (V1-V16); repeatable, in the order given (default: reference)
           --boat-class <id@v>    every seed on that bundled class instead of its own
           --laps <n>             laps instead of each seed's own
           --tier-mix <tier>      sail this tier against the oracle: club, regional or national (repeatable)
@@ -56,6 +58,7 @@ public struct TimeTrialOptions: Hashable, Sendable {
           --checkpoint <s>       seconds between the oracle's checkpoints (default 2)
           --no-event-checkpoints checkpoint on the clock only, not on marks, laylines, shifts and puffs
           --oracle-from <json>   take the oracle's laps from an earlier --json report of the same seeds
+                                 (repeatable: one report a pool)
           --tunables <file>      the bots read this tunables file (bot-tunables@n.json's form) in place of the bundled
           --tune <out.json>      search the bots' tunables for the least mean time behind the oracle of the sailors
                                  (coordinate descent; needs --oracle-from) and write the best set there
@@ -90,7 +93,13 @@ public struct TimeTrialOptions: Hashable, Sendable {
         while let flag = rest.popFirst() {
             switch flag {
             case "--seeds": seedCount = try number(flag)
-            case "--holdout": holdOut = true
+            case "--holdout": pools.append(.holdout)
+            case "--pool":
+                let text = try value(flag)
+                guard let pool = TimeTrialSeed.Pool(rawValue: text) else {
+                    throw BotSuiteError.usage("--pool: reference, holdout or validation, not \(text)")
+                }
+                pools.append(pool)
             case "--only": only.append(try value(flag))
             case "--boat-class": boatClass = try value(flag)
             case "--laps": laps = try number(flag)
@@ -109,7 +118,7 @@ public struct TimeTrialOptions: Hashable, Sendable {
             case "--checkpoint": oracle.checkpointSeconds = try seconds(flag)
             case "--no-event-checkpoints": oracle.eventCheckpoints = false
             case "--json": jsonPath = try value(flag)
-            case "--oracle-from": oracleFrom = try value(flag)
+            case "--oracle-from": oracleFrom.append(try value(flag))
             case "--tunables": tunablesPath = try value(flag)
             case "--tune": tuneOut = try value(flag)
             case "--tune-rounds": tuneRounds = try number(flag)
@@ -120,7 +129,7 @@ public struct TimeTrialOptions: Hashable, Sendable {
             default: throw BotSuiteError.usage("unknown argument: \(flag)")
             }
         }
-        if tuneOut != nil && oracleFrom == nil { throw BotSuiteError.usage("--tune needs --oracle-from") }
+        if tuneOut != nil && oracleFrom.isEmpty { throw BotSuiteError.usage("--tune needs --oracle-from") }
         if oracle.checkpointSeconds < Oracle.minimumSegmentSeconds {
             throw BotSuiteError.usage("--checkpoint: at least \(Oracle.minimumSegmentSeconds) s")
         }
@@ -143,13 +152,15 @@ public struct TimeTrialOptions: Hashable, Sendable {
 
     /// The oracle's laps `--oracle-from` names: every seed of the run must be in it.
     public func knownOracle() throws -> [TimeTrialSeedResult] {
-        guard let oracleFrom else { return [] }
-        let report = try JSONDecoder().decode(TimeTrialReport.self, from: Data(contentsOf: URL(fileURLWithPath: oracleFrom)))
+        guard !oracleFrom.isEmpty else { return [] }
+        let known = try oracleFrom.flatMap { path in
+            try JSONDecoder().decode(TimeTrialReport.self, from: Data(contentsOf: URL(fileURLWithPath: path))).seeds
+        }
         let seeds = try seeds()
-        if let missing = seeds.first(where: { seed in !report.seeds.contains { $0.seed == seed } }) {
+        if let missing = seeds.first(where: { seed in !known.contains { $0.seed == seed } }) {
             throw BotSuiteError.usage("--oracle-from: no lap of \(missing.name) (\(missing.laps) laps) in \(oracleFrom)")
         }
-        return report.seeds
+        return known
     }
 
     /// The sailors, oracle aside.
@@ -160,7 +171,7 @@ public struct TimeTrialOptions: Hashable, Sendable {
 
     /// The seeds to sail.
     public func seeds() throws -> [TimeTrialSeed] {
-        let pool = holdOut ? TimeTrialSeed.holdOut : TimeTrialSeed.reference
+        let pool = (pools.isEmpty ? [.reference] : pools).flatMap(\.seeds)
         if let seedCount, seedCount > pool.count {
             throw BotSuiteError.usage("--seeds: the pool has \(pool.count) seeds")
         }

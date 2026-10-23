@@ -44,13 +44,32 @@ public struct TimeTrialSeed: Codable, Hashable, Sendable {
 
     /// Hold-out seeds (#583): reference race n's files and laps on new race and wind seeds, for checking that what is
     /// tuned on the reference regatta holds elsewhere. Seeds are literals of a fixed rule, never drawn at run time.
-    public static var holdOut: [TimeTrialSeed] {
+    public static var holdOut: [TimeTrialSeed] { renamed("H", base: 0x0583_0000_0000_0000) }
+
+    /// Validation seeds (#583 stage 3): as the hold-out seeds, on other seeds again, for checking a set tuned on the
+    /// reference and hold-out seeds together.
+    public static var validation: [TimeTrialSeed] { renamed("V", base: 0x0583_1000_0000_0000) }
+
+    private static func renamed(_ prefix: String, base: UInt64) -> [TimeTrialSeed] {
         reference.enumerated().map { index, seed in
             var held = seed
-            held.name = "H\(index + 1)"
-            held.raceSeed = 0x0583_0000_0000_0000 &+ UInt64(index + 1) &* 0x9E37_79B9
+            held.name = "\(prefix)\(index + 1)"
+            held.raceSeed = base &+ UInt64(index + 1) &* 0x9E37_79B9
             held.windSeed = BotRaceHarness.windSeed(for: held.raceSeed).value
             return held
+        }
+    }
+
+    /// The pools of seeds the time trial sails.
+    public enum Pool: String, CaseIterable, Sendable {
+        case reference, holdout, validation
+
+        public var seeds: [TimeTrialSeed] {
+            switch self {
+            case .reference: TimeTrialSeed.reference
+            case .holdout: TimeTrialSeed.holdOut
+            case .validation: TimeTrialSeed.validation
+            }
         }
     }
 }

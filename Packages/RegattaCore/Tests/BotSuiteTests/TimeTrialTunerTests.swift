@@ -42,7 +42,7 @@ import Testing
     @Test func optionsParseTheTuningFlags() throws {
         let options = try TimeTrialOptions(arguments: ["--oracle-from", "r.json", "--tune", "out.json", "--tune-rounds", "2",
                                                        "--tunables", "t.json"])
-        #expect(options.oracleFrom == "r.json" && options.tuneOut == "out.json" && options.tuneRounds == 2)
+        #expect(options.oracleFrom == ["r.json"] && options.tuneOut == "out.json" && options.tuneRounds == 2)
         #expect(options.tunablesPath == "t.json")
         #expect(throws: BotSuiteError.self) { try TimeTrialOptions(arguments: ["--tune", "out.json"]) }
     }
