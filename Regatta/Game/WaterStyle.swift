@@ -48,6 +48,14 @@ nonisolated struct WaterStyle: Codable, Equatable, Sendable {
     /// Seconds from a whitecap breaking to the next one in its tile.
     var whitecapSeconds = 3.5
 
+    // MARK: Glint (#596, #597)
+
+    /// The light's glint band's sparkles at their brightest: an additive alpha. A faint haze an eighth of it lies
+    /// along the band. tuning: 0.2.
+    var glintAlpha = 0.2
+    /// Where the glint band lies, a fraction of the screen's height down from its top. tuning: 0.3.
+    var glintBand = 0.3
+
     // MARK: Cheap tier (#127)
 
     /// The share of the whitecaps the cheap tier keeps.
@@ -79,12 +87,15 @@ nonisolated extension WaterStyle {
                   whitecapMaxShare: try value(.whitecapMaxShare, standard.whitecapMaxShare),
                   whitecapAlpha: try value(.whitecapAlpha, standard.whitecapAlpha),
                   whitecapSeconds: try value(.whitecapSeconds, standard.whitecapSeconds),
+                  glintAlpha: try value(.glintAlpha, standard.glintAlpha),
+                  glintBand: try value(.glintBand, standard.glintBand),
                   cheapWhitecapShare: try value(.cheapWhitecapShare, standard.cheapWhitecapShare))
     }
 }
 
 /// How much the water spends per frame (#127 picks it from thermal state; the ladder is #27's). The cheap tier
-/// freezes the ripple (no drift, every tile on the course wind, no per-tile sampling) and thins the whitecaps. Puff
+/// freezes the ripple (no drift, every tile on the course wind, no per-tile sampling, no wave shader, #597), thins
+/// the whitecaps and holds the glint's sparkles still. Puff
 /// shading and the pressure tone are race cues, drawn the same in every tier.
 nonisolated enum WaterQuality: Sendable {
     case full, cheap

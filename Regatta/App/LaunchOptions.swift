@@ -89,7 +89,7 @@ import RegattaServices
 ///   `RenderQualityPolicy`), whatever its own: for #172's device runs and the UI tests (Debug builds). A render
 ///   fixture or a UI test run draws at `-thermal`'s state, nominal without it, and never at the device's own state or
 ///   Low Power Mode, so references stay put.
-/// - `-cuesOnly` (with `-uitesting`) hides what the thermal tiers change, the ripple and whitecaps, the wakes and the
+/// - `-cuesOnly` (with `-uitesting`) hides what the thermal tiers change, the ripple, whitecaps and glint, the wakes and the
 ///   sails, so a UI test can compare the race cues alone across tiers (#127).
 struct LaunchOptions: Equatable {
     enum SteeringScheme: String, CaseIterable {

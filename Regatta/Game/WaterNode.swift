@@ -73,9 +73,18 @@ final class WaterNode: SKNode {
     }
 
     var style: WaterStyle {
-        didSet { if style.catspaw != oldValue.catspaw { puffTexture = Self.puffTexture(for: style) } }
+        didSet {
+            if style.catspaw != oldValue.catspaw { puffTexture = Self.puffTexture(for: style) }
+            applyDepth()
+        }
     }
-    var quality = WaterQuality.full
+    var quality = WaterQuality.full {
+        didSet { applyDepth() }
+    }
+    /// The light's glint band (#596, #597): hashed twinkles in a band across the screen, not sine stripes (they
+    /// moiré). The scene puts it on its camera, over the water and under everything else, sized to the view. The
+    /// cheap tier holds its sparkles still.
+    let glint = SKSpriteNode(color: .white, size: CGSize(width: 1, height: 1))
 
     /// How far the ripple has drifted downwind, world points.
     private(set) var drift = CGPoint.zero
@@ -88,11 +97,14 @@ final class WaterNode: SKNode {
     /// The tuning panel's pressure overlay (#289, Debug builds): the tone drawn `PressureOverlay.boost` times as
     /// strong, the pressure lanes' centrelines dotted and the pressure side labelled.
     var showsPressureOverlay = false
-    /// Hides the ripple and whitecaps, what the thermal tiers change, for `-cuesOnly`'s UI test (#127). The pressure
-    /// and puffs still draw.
+    /// Hides the ripple, whitecaps and glint, what the thermal tiers change, for `-cuesOnly`'s UI test (#127, #597).
+    /// The pressure and puffs still draw.
     var hidesRipple: Bool {
         get { rippleLayer.isHidden }
-        set { rippleLayer.isHidden = newValue }
+        set {
+            rippleLayer.isHidden = newValue
+            glint.isHidden = newValue
+        }
     }
 
     /// The pressure tone's sprite's name: the one sprite whose texture is made each frame.
@@ -119,6 +131,10 @@ final class WaterNode: SKNode {
         self.style = style
         puffTexture = Self.puffTexture(for: style)
         super.init()
+        glint.blendMode = .add
+        glint.name = "glint"
+        glint.shader = Self.glintShader()
+        applyDepth()
         // The pressure under the puffs; the tuning overlay's marks over everything the water draws.
         pressureSprite.zPosition = -1
         pressureSprite.name = Self.pressureName
@@ -318,9 +334,58 @@ final class WaterNode: SKNode {
         let cap: SKSpriteNode
     }
 
-    /// #596 prototype: a shader on every ripple streak (one shared shader, so the tiles still batch).
-    var rippleShader: SKShader? {
-        didSet { tileNodes.forEach { $0.streak.shader = rippleShader } }
+    /// The ripple's wave (#596, #597): one shared shader on every streak, so the tiles still batch, swaying each
+    /// streak's texture a little; nil at the cheap tier, where the ripple stands still.
+    private(set) var rippleShader: SKShader? {
+        didSet { if rippleShader !== oldValue { tileNodes.forEach { $0.streak.shader = rippleShader } } }
+    }
+    /// Whether the glint's sparkles twinkle (1) or hold still (0, the cheap tier), for tests.
+    var glintTwinkles: Bool { glint.shader?.uniformNamed("u_twinkle")?.floatValue == 1 }
+    /// The glint's alpha and band as its shader reads them, for tests.
+    var glintLook: (alpha: Float, band: Float) {
+        (glint.shader?.uniformNamed("u_alpha")?.floatValue ?? 0, glint.shader?.uniformNamed("u_band")?.floatValue ?? 0)
+    }
+
+    /// The wave and glint for `quality` and `style` (#597).
+    private func applyDepth() {
+        rippleShader = quality == .full ? Self.waveShader : nil
+        guard let shader = glint.shader else { return }
+        shader.uniformNamed("u_twinkle")?.floatValue = quality == .full ? 1 : 0
+        shader.uniformNamed("u_alpha")?.floatValue = Float(style.glintAlpha)
+        // The shader's v runs up the sprite: the band's centre from the bottom.
+        shader.uniformNamed("u_band")?.floatValue = Float(1 - style.glintBand)
+    }
+
+    /// Shared by every water node: the ripple tiles batch on one shader.
+    private static let waveShader = SKShader(source: """
+    void main() {
+        vec2 uv = v_tex_coord;
+        uv.y += 0.01 * sin(u_time * 2.0 + uv.x * 12.0);
+        vec4 t = texture2D(u_texture, uv);
+        gl_FragColor = vec4(v_color_mix.rgb * t.a, t.a) * v_color_mix.a;
+    }
+    """)
+
+    /// The glint's own shader (its uniforms are this node's): a gaussian band at `u_band`, a haze along it and
+    /// sparkles hashed per cell, each twinkling on its own rate while `u_twinkle` is 1, held at its phase at 0.
+    private static func glintShader() -> SKShader {
+        let shader = SKShader(source: """
+        void main() {
+            vec2 uv = v_tex_coord;
+            float d = (uv.y - u_band) / 0.15;
+            float band = exp(-d * d * 1.6);
+            vec2 cell = floor(uv * vec2(260.0, 560.0));
+            float r = fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5453);
+            float t = u_time * u_twinkle;
+            float twinkle = 0.5 + 0.5 * sin(t * (1.5 + 3.0 * r) + r * 40.0);
+            float sparkle = step(0.965, r) * pow(twinkle, 6.0);
+            float a = band * u_alpha * (0.125 + sparkle);
+            gl_FragColor = vec4(a, a, a, a);
+        }
+        """)
+        shader.uniforms = [SKUniform(name: "u_band", float: 0.7), SKUniform(name: "u_alpha", float: 0.2),
+                           SKUniform(name: "u_twinkle", float: 1)]
+        return shader
     }
 
     private func makeTile() -> Tile {

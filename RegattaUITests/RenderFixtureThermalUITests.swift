@@ -2,8 +2,9 @@ import UIKit
 import XCTest
 
 /// The race cues draw the same at every thermal tier (#127, #27): cue fixtures rendered with `-cuesOnly`, which hides
-/// what the tiers change (the ripple and whitecaps, the wakes and the sails), at `-thermal nominal`, `serious` and
-/// `critical`, agree pixel for pixel. No references: each tier is diffed against the nominal render of the same run.
+/// what the tiers change (the ripple, whitecaps and glint, the wakes and the sails), at `-thermal nominal`, `serious`
+/// and `critical`, agree pixel for pixel. Drawn at the default tilt, 45° (#597): the standing fleet's hulls, masts and
+/// booms, the buoys and the committee boat are in every render and must not move with the tier. No references: each tier is diffed against the nominal render of the same run.
 /// `water-pressure` covers the puff shading and the pressure tone, which stand in for the ticket's upwind edge tint
 /// (#224's tint is gone: ADR 0008 moved that cue to the minimap, which the ladder never touches).
 /// One test per fixture: each renders three times (~70 s on CI), well inside the 5 min per-test allowance that the

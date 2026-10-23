@@ -121,8 +121,6 @@ final class GameScene: SKScene {
     var standingFleet: Fleet3D? { fleet3D }
     /// The land's extruded rim (#596), a child of `tiltNode`.
     private let landRim = SKShapeNode()
-    /// The light's glint band on the water (#596), on the camera.
-    private var glint: SKSpriteNode?
     private let cam = SKCameraNode()
     private let water = WaterNode(pointsPerMeter: Double(GameScene.pointsPerMeter))
     private let effectsLayer = SKNode()
@@ -252,34 +250,10 @@ final class GameScene: SKScene {
         landRim.name = "landRim"
         tiltNode.addChild(landRim)
 
-        let band = SKSpriteNode(color: .white, size: size)
-        band.blendMode = .add
-        band.zPosition = -9.5
-        band.name = "glint"
-        band.shader = SKShader(source: """
-        void main() {
-            vec2 uv = v_tex_coord;
-            float centre = 1.0 - 0.3;
-            float d = (uv.y - centre) / 0.15;
-            float band = exp(-d * d * 1.6);
-            vec2 cell = floor(uv * vec2(260.0, 560.0));
-            float r = fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5453);
-            float twinkle = 0.5 + 0.5 * sin(u_time * (1.5 + 3.0 * r) + r * 40.0);
-            float sparkle = step(0.965, r) * pow(twinkle, 6.0);
-            float a = band * (0.025 + 0.2 * sparkle);
-            gl_FragColor = vec4(a, a, a, a);
-        }
-        """)
-        cam.addChild(band)
-        glint = band
-        water.rippleShader = SKShader(source: """
-        void main() {
-            vec2 uv = v_tex_coord;
-            uv.y += 0.01 * sin(u_time * 2.0 + uv.x * 12.0);
-            vec4 t = texture2D(u_texture, uv);
-            gl_FragColor = vec4(v_color_mix.rgb * t.a, t.a) * v_color_mix.a;
-        }
-        """)
+        // The water's glint, on the camera: over the water (−10), under everything else.
+        water.glint.zPosition = -9.5
+        water.glint.size = size
+        cam.addChild(water.glint)
     }
 
     /// The land's rim (#596): each coast edge's quad hanging `h` down the screen from it, in `rotor` space (before the
@@ -460,7 +434,7 @@ final class GameScene: SKScene {
                            cameraScale: rig.cameraScale, tiltDegrees: tiltDegrees, sceneSize: size,
                            sailDetail: sailDetail, hidesSails: drawsCuesOnly, time: world.time, dt: dt, settled: settled)
             updateLandRim()
-            glint?.size = size
+            water.glint.size = size
         }
 
         updateCues(world, dt: dt, settled: settled)
