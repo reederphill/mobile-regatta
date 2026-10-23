@@ -1,6 +1,7 @@
 import RegattaCore
 import RegattaProtocol
 import RegattaServiceClient
+import RegattaServiceContracts
 import RegattaServices
 import Testing
 
@@ -161,6 +162,80 @@ import Testing
         #expect(await results.next() == .report(Fixtures.reports[0]))
         #expect(await results.next() == .cancelled(.serverShutdown))
         #expect(await results.next() == nil)
+    }
+
+    /// #166 (T1): a batch goes on the open connection only, and only for a player through the terms: the server closes the
+    /// connection on a batch from one who isn't, and the session would open it again. Each case is 0 or 1 frames.
+    @Test func analyticsGoOnlyOnAnOpenConnectionThroughTheTerms() async throws {
+        let rig = SessionRig(isOnline: false)
+        await rig.session.start()
+        let analytics = rig.session.analytics
+        let batch = AnalyticsBatch(installID: InstallID("install"), events: [AnalyticsEvent(sequence: 1, name: .drop, time: 1)])
+        func sent() -> Int { calls(rig).filter { $0.hasPrefix("analytics") }.count }
+
+        // No connection: the buffer keeps it, with no wait for one.
+        await #expect(throws: AnalyticsError.unavailable) { try await analytics.send(batch) }
+        #expect(sent() == 0)
+        #expect(!rig.sleeper.requested.contains(SessionRig.openWait))
+
+        // Open, the terms not accepted: nothing sent, and the connection stays.
+        await rig.session.setOnline(true)
+        await rig.opens(1)
+        await #expect(throws: AnalyticsError.unavailable) { try await analytics.send(batch) }
+        #expect(sent() == 0)
+        #expect(rig.server.connects == 1 && !rig.server.events.items.contains(.closed(link: 1)))
+
+        // Accepted: one frame, its receipt passed through.
+        _ = try await rig.session.terms.accept(TermsVersion(2))
+        #expect(try await analytics.send(batch) == AnalyticsReceipt(accepted: 1, duplicates: 0))
+        #expect(sent() == 1)
+        // The server's budget spent: kept for next time.
+        rig.server.script { $0.analytics = .unavailable }
+        await #expect(throws: AnalyticsError.unavailable) { try await analytics.send(batch) }
+        #expect(sent() == 2)
+        #expect(rig.server.connects == 1)
+    }
+
+    /// #166: the plan and the delete on the open connection, the server's answers as the service's errors; a delete holds
+    /// her (the session idle, her token gone), and a held player is answered with no connection (T9).
+    @Test func deletionPlansAndDeletesOnTheOpenConnection() async throws {
+        let rig = SessionRig()
+        await rig.opened()
+        let deletion = rig.session.deletion
+        let plan = try await deletion.plan()
+        #expect(plan.deletes == Set(OnlineData.allCases) && plan.anonymisesRaceLogs)
+        await #expect(throws: DataDeletionError.invalidConfirmation) {
+            try await deletion.delete(confirmedBy: DeletionConfirmation(token: "forged"))
+        }
+        try await deletion.delete(confirmedBy: plan.confirmation)
+        #expect(calls(rig) == ["plan", "delete", "delete"])
+        #expect(await rig.session.isHeld)
+        #expect(await rig.session.phase == .idle)
+        #expect(rig.tokens.all == [:])
+        await #expect(throws: DataDeletionError.nothingToDelete) { _ = try await deletion.plan() }
+        #expect(calls(rig).count == 3 && rig.server.connects == 1)
+
+        // Nothing held on the server: said so, and nobody is held.
+        let empty = SessionRig()
+        empty.server.script { $0.holdsOnlineData = false }
+        await empty.opened()
+        await #expect(throws: DataDeletionError.nothingToDelete) { _ = try await empty.session.deletion.plan() }
+        #expect(await !empty.session.isHeld)
+
+        // No Game Center player: no connection to wait for.
+        let signedOut = SessionRig(player: nil)
+        await #expect(throws: DataDeletionError.notSignedIn) { _ = try await signedOut.session.deletion.plan() }
+        #expect(signedOut.server.connects == 0)
+    }
+
+    /// The #109 contract, on the session over the scripted server.
+    @Test func theSessionsDeletionKeepsTheContract() async throws {
+        try await DataDeletionServiceContract().run { situation in
+            let rig = SessionRig(player: situation == .signedOut ? nil : SessionRig.wren)
+            rig.server.script { $0.holdsOnlineData = situation == .hasOnlineData }
+            if situation != .signedOut { await rig.opened() }
+            return rig.session.deletion
+        }
     }
 
     @Test func profileLiveryGoesThroughTheOpenConnection() async throws {

@@ -160,6 +160,11 @@ final class FakeService: Sendable {
         var profile: ProfileResult? = .notSignedIn
         /// The answer to `saveLivery`; nil stores what was sent.
         var saveLivery: ProfileResult?
+        /// The answer to an analytics batch (#166); nil: every event accepted.
+        var analytics: AnalyticsResult?
+        /// Whether the server holds online data for the player (#166): a plan, then a delete with its confirmation,
+        /// deletes it. A newer plan voids the one before.
+        var holdsOnlineData = true
     }
 
     /// Each `Hello`'s attestation, and each session call's player (#158).
@@ -171,6 +176,7 @@ final class FakeService: Sendable {
         var links: [FakeLink] = []
         var issued = 0
         var held: [(link: FakeLink, id: UInt32)] = []
+        var deletionPlans = 0
     }
 
     let events = Recorder<Event>()
@@ -321,6 +327,30 @@ final class FakeService: Sendable {
                 events.add(.call("saveLivery \(livery.sailNumber)", link: link.number))
                 link.deliver(.profileReply(ServiceReply(id: request.id, result: script.saveLivery ?? .livery(livery))))
             }
+        case .analyticsRequest(let request):
+            events.add(.call("analytics \(request.call.events.count)", link: link.number))
+            let result = state.withLock { $0.script.analytics } ?? .receipt(accepted: request.call.events.count, duplicates: 0)
+            link.deliver(.analyticsReply(ServiceReply(id: request.id, result: result)))
+        case .deletionRequest(let request):
+            let result: DeletionResult = state.withLock { state in
+                guard link.player.withLock({ $0 }) != nil else { return .notSignedIn }
+                guard state.script.holdsOnlineData else { return .nothingToDelete }
+                switch request.call {
+                case .plan:
+                    state.deletionPlans += 1
+                    return .plan(WireDeletionPlan(deletes: WireOnlineData.allCases, anonymisesRaceLogs: true,
+                                                  confirmation: "plan-\(state.deletionPlans)"))
+                case .delete(let confirmation):
+                    guard confirmation == "plan-\(state.deletionPlans)" else { return .invalidConfirmation }
+                    state.script.holdsOnlineData = false
+                    return .deleted
+                }
+            }
+            switch request.call {
+            case .plan: events.add(.call("plan", link: link.number))
+            case .delete: events.add(.call("delete", link: link.number))
+            }
+            link.deliver(.deletionReply(ServiceReply(id: request.id, result: result)))
         case .streamNext(let next):
             link.asked(next.id, stream: next.stream)
         case .streamClose(let close):
@@ -439,9 +469,11 @@ struct SessionRig: Sendable {
     static let callTimeout = Duration.seconds(11)
     static let leaveTimeout = Duration.milliseconds(2_500)
 
-    let server = FakeService()
+    let server: FakeService
     let sleeper = VirtualSleeper()
     let tokens: InMemorySessionTokenStore
+    /// The players held after a deletion (#166): a rig over another rig's store is a relaunch.
+    let held: InMemoryHeldPlayerStore
     let device: ScriptedDeviceIdentity
     let logs = Recorder<SessionLogEvent>()
     let phases = Recorder<SessionPhase>()
@@ -450,9 +482,13 @@ struct SessionRig: Sendable {
     let keptAtLog = Recorder<[String: [UInt8]]>()
 
     init(player: DevicePlayer? = SessionRig.wren, afterSignIn: DevicePlayer? = nil, tokens: [String: [UInt8]] = [:],
-         isOnline: Bool = true, isActive: Bool = true, signatureNeverComes: Bool = false, attester: ConnectionAttester? = nil) {
-        let (server, sleeper, logs, kept) = (server, sleeper, logs, keptAtLog)
-        let store = InMemorySessionTokenStore(tokens)
+         isOnline: Bool = true, isActive: Bool = true, signatureNeverComes: Bool = false, attester: ConnectionAttester? = nil,
+         held: InMemoryHeldPlayerStore = InMemoryHeldPlayerStore(), tokenStore: InMemorySessionTokenStore? = nil,
+         server: FakeService = FakeService()) {
+        self.server = server
+        self.held = held
+        let (sleeper, logs, kept) = (sleeper, logs, keptAtLog)
+        let store = tokenStore ?? InMemorySessionTokenStore(tokens)
         self.tokens = store
         device = ScriptedDeviceIdentity(player: player, afterSignIn: afterSignIn) { player in
             server.events.add(.signature)
@@ -471,7 +507,7 @@ struct SessionRig: Sendable {
         session = OnlineSession(
             OnlineSession.Dependencies(
                 connect: { try server.connect() }, device: device, tokens: store, sleep: { try await sleeper.sleep($0) },
-                jitter: { 0 }, clientBuild: "test", attester: attester,
+                jitter: { 0 }, clientBuild: "test", attester: attester, held: held,
                 log: { event in
                     kept.add(store.all)
                     logs.add(event)

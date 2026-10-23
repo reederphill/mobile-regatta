@@ -38,6 +38,8 @@ public enum SessionLogEvent: Equatable, Sendable {
     case linkLost
     case gaveUp
     case signedOut
+    /// Her online data was deleted (#166): the link closed with no sign-out, and she is held until she signs in.
+    case deleted
 }
 
 /// Why a try at a session failed.
@@ -96,13 +98,17 @@ public actor OnlineSession {
         public var clientBuild: String
         /// App Attest (#158): the proof each connection's `Hello` carries. Nil: none (`.none`), for the fakes.
         public var attester: ConnectionAttester?
+        /// The players whose online data was deleted here (#166): no session opens for one until she signs in again.
+        public var held: any HeldPlayerStore
         public var log: @Sendable (SessionLogEvent) -> Void
 
         public init(connect: @escaping @Sendable () async throws -> any SessionLink, device: any DeviceIdentitySource,
                     tokens: any SessionTokenStore, sleep: @escaping @Sendable (Duration) async throws -> Void,
                     jitter: @escaping @Sendable () -> Double, clientBuild: String, attester: ConnectionAttester? = nil,
+                    held: any HeldPlayerStore = InMemoryHeldPlayerStore(),
                     log: @escaping @Sendable (SessionLogEvent) -> Void = { _ in }) {
             self.attester = attester
+            self.held = held
             self.connect = connect
             self.device = device
             self.tokens = tokens
@@ -239,9 +245,31 @@ public actor OnlineSession {
     public nonisolated func phaseUpdates() -> AsyncStream<SessionPhase> { phases.subscribe() }
 
     /// The open session's connection, for the services that need one (#162–#166). Nil while none is open. The
-    /// server closes the connection on a gated call (race session, profile, analytics, deletion) from a player
-    /// who isn't through the gate: check the terms first.
+    /// server closes the connection on a gated call (race session, profile, analytics) from a player who isn't
+    /// through the gate: check the terms first. Deletion's gate is the sign-in alone.
     public func connection() -> ServiceConnection? { live?.connection }
+
+    /// The device's player had her online data deleted here (#166, O1): no session opens for her, across relaunches,
+    /// until she signs in again (Race online, the lobby's Sign in or Try again: `identity.signIn()`).
+    public var isHeld: Bool { device.map { dependencies.held.isHeld($0.teamPlayerID) } ?? false }
+
+    /// Her online data is deleted on the server (#166, T3), whose session for her is gone: she is held first (kept,
+    /// so a relaunch doesn't sign her straight back in), then the link closes with no sign-out, her token goes and
+    /// the session is idle.
+    public func deleted() {
+        guard let player = live?.player ?? serving ?? device else { return }
+        dependencies.held.hold(player.teamPlayerID)
+        let link = live?.link
+        live = nil
+        link?.close()
+        stop()
+        try? dependencies.tokens.removeToken(for: player.teamPlayerID)
+        dependencies.log(.deleted)
+        // As after a sign-out: the queue's last state was hers.
+        queueStates.send(.unavailable(.notSignedIn))
+        show(.idle)
+        settle()
+    }
 
     /// The app's identity service: signed in only while this session is open.
     public nonisolated var identity: any IdentityService { SessionIdentityService(session: self) }
@@ -250,6 +278,12 @@ public actor OnlineSession {
     /// The queue (#162): its state stream through reconnects, `join` and `leave` on whichever connection is open.
     /// The server answers a player who isn't through the gate in the stream and in `join`'s refusal.
     public nonisolated var queue: any QueueService { SessionQueueService(session: self, states: queueStates) }
+    /// Usage analytics (#166): only on the open connection, and only for a player through the terms, whose batch the
+    /// server would otherwise answer by closing the connection. With neither, `AnalyticsError.unavailable`: the
+    /// buffer keeps the batch for the next flush.
+    public nonisolated var analytics: any AnalyticsTransport { SessionAnalyticsTransport(session: self) }
+    /// Delete my online data (#166) on the open connection; a successful delete holds her (`deleted()`).
+    public nonisolated var deletion: any DataDeletionService { SessionDataDeletionService(session: self) }
     /// The player's race around the race transport (#162). The server closes the connection on these from a player who
     /// isn't through the gate: ask only for one who has accepted the terms and may race online.
     public nonisolated var raceSession: any RaceSessionService { SessionRaceSessionService(session: self) }
@@ -267,6 +301,11 @@ public actor OnlineSession {
     ) async throws -> Answer {
         let connection = try await openConnection()
         return try await withDeadline(limit ?? settings.callTimeout, sleep: dependencies.sleep) { try await body(connection) }
+    }
+
+    /// `body` within `callTimeout` (`timedOut`), on a connection the caller already has.
+    fileprivate nonisolated func within<Answer: Sendable>(_ body: @escaping @Sendable () async throws -> Answer) async throws -> Answer {
+        try await withDeadline(settings.callTimeout, sleep: dependencies.sleep, body)
     }
 
     /// As `call`, but with no wait for a connection: with none open the server has let her place go already, and she is
@@ -340,6 +379,8 @@ public actor OnlineSession {
 
     fileprivate func signIn() async -> GameCenterState {
         if device == nil, let player = await dependencies.device.signIn() { deviceChanged(player) }
+        // Her own tap: a hold after a deletion ends here, and the server asks for the terms afresh.
+        if let device, dependencies.held.isHeld(device.teamPlayerID) { dependencies.held.release(device.teamPlayerID) }
         await open()
         return await identityState()
     }
@@ -400,7 +441,7 @@ public actor OnlineSession {
     // MARK: - Running
 
     private var target: DevicePlayer? {
-        guard isActive, isOnline, let device, device.canUseOnline else { return nil }
+        guard isActive, isOnline, let device, device.canUseOnline, !dependencies.held.isHeld(device.teamPlayerID) else { return nil }
         return device
     }
 
@@ -410,15 +451,16 @@ public actor OnlineSession {
         // Already so: running or halted for her, or idle with nobody to connect for.
         let settled = target == nil ? (phase == .idle || updateRequired) : (runner != nil || halted)
         if serving == target, settled {
-            // Nobody signed in on the device from the start: the queue's stream says so, as after a sign-out.
-            if device == nil { queueStates.send(.unavailable(.notSignedIn)) }
+            // Nobody signed in on the device from the start, or a held player: the queue's stream says so, as after a
+            // sign-out.
+            if device == nil || isHeld { queueStates.send(.unavailable(.notSignedIn)) }
             return
         }
         stop()
         guard let target else {
             if !updateRequired { show(.idle) }
-            // Signed out: the queue's last state was another player's.
-            if device == nil { queueStates.send(.unavailable(.notSignedIn)) }
+            // Signed out (or held): the queue's last state was another player's.
+            if device == nil || isHeld { queueStates.send(.unavailable(.notSignedIn)) }
             settle()
             return
         }
@@ -740,6 +782,50 @@ struct SessionRaceSessionService: RaceSessionService {
     }
 
     func ratingChanges() -> AsyncStream<RatingChange> { session.ratingChanges() }
+}
+
+/// Usage analytics on the session (#166, T1): the terms are asked on the open connection before each batch, an ungated
+/// round trip, because the server closes the connection on a batch from a player who isn't through them.
+struct SessionAnalyticsTransport: AnalyticsTransport {
+    let session: OnlineSession
+
+    func send(_ batch: AnalyticsBatch) async throws -> AnalyticsReceipt {
+        // No wait for a connection: the next flush takes it.
+        guard let connection = await session.connection() else { throw AnalyticsError.unavailable }
+        do {
+            return try await session.within { () async throws -> AnalyticsReceipt in
+                guard try await RemoteTermsService(connection).status().isAccepted else { throw AnalyticsError.unavailable }
+                return try await RemoteAnalyticsTransport(connection).send(batch)
+            }
+        } catch let error as AnalyticsError {
+            throw error
+        } catch {
+            // No answer, or the link went: sent again next time (the server dedupes).
+            throw AnalyticsError.unavailable
+        }
+    }
+}
+
+/// Delete my online data on the session (#166): its gate is the sign-in alone. A held player has nothing left on the
+/// server, so she is answered here with no connection (T9).
+struct SessionDataDeletionService: DataDeletionService {
+    let session: OnlineSession
+
+    private func guardPlayer() async throws {
+        guard await session.hasPlayer else { throw DataDeletionError.notSignedIn }
+        if await session.isHeld { throw DataDeletionError.nothingToDelete }
+    }
+
+    func plan() async throws -> DeletionPlan {
+        try await guardPlayer()
+        return try await session.call { try await RemoteDataDeletionService($0).plan() }
+    }
+
+    func delete(confirmedBy confirmation: DeletionConfirmation) async throws {
+        try await guardPlayer()
+        try await session.call { try await RemoteDataDeletionService($0).delete(confirmedBy: confirmation) }
+        await session.deleted()
+    }
 }
 
 /// The profile on the session (#162): what the livery sync needs of it.
