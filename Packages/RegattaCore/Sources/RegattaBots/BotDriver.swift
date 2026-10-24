@@ -145,6 +145,25 @@ public struct BotDriver: Sendable {
         helm = BotHelm(hand: HandSteering(brain.weaknesses, seed: seed))
     }
 
+    /// This bot, not yet driven, reading `tunables` in place of the bundled file's (#583 stage 2, `BotTunables`): her
+    /// style, weaknesses, handling and draws as they were, her tactics rebuilt from them. For the time trial's search;
+    /// the bots players race read the bundled file.
+    public func tuned(_ tunables: BotTunables) -> BotDriver {
+        var driver = self
+        driver.brain = BotBrain(style: brain.style, profile: profile, seed: seed, weaknesses: brain.weaknesses,
+                                caution: brain.caution, tunables: tunables)
+        return driver
+    }
+
+    /// How far ahead she plans her tacks and gybes (#583 stage 3), in seconds; nil, she doesn't plan.
+    public var planningHorizon: Double? { brain.planning?.horizon }
+    /// Plans she has made so far (#583), and the last one's inputs: what the budget test times again.
+    var plans: Int { brain.plans }
+    var lastPlanRequest: BotPlanner.Request? { brain.lastPlanRequest }
+
+    /// The forward-sail steps her plans have cost so far (#583: `BotPlanner.steps` a plan).
+    public var planningSteps: Int { brain.planning.map { brain.plans * BotPlanner.steps($0) } ?? 0 }
+
     /// Whether she is the cautious bot that sails a dropped player's boat (#104, `cautious(seat:raceSeed:)`).
     public var isCautious: Bool { brain.caution != nil }
 

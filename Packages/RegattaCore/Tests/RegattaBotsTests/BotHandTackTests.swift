@@ -33,12 +33,13 @@ import Testing
     /// digest too; and both on #455 PR 3, whose scorer no longer reads a bear-away past dead downwind as a luff, and
     /// whose right-of-way bot turns off a mark or along an overtaking lane towards a boat keeping clear of her no faster
     /// than she stands on, her keeping clear reshaped by a mark or the edge never capped: every class's; and both on #276
-    /// PR 2, whose live bots read the favoured end late, from T−15: every class's live bots part before the gun).
+    /// PR 2, whose live bots read the favoured end late, from T−15: every class's live bots part before the gun; and both
+    /// on #583 stage 3, whose National bots plan their tacks and gybes, `BotPlanner` on the bundled `bot-tunables@2`).
     @Test(.onFiveRules) func skiffSevenBotsAreBitIdentical() throws {
         let seven = try Self.digest(seed: 459, boatClass: BoatClassFile.bundled(id: "skiff", version: 7))
         let six = try Self.digest(seed: 459, boatClass: BoatClassFile.bundled(id: "skiff", version: 6))
-        #expect(hex64(seven) == "0xf1eb7c2121298273")
-        #expect(hex64(six) == "0xab730e78e5995161")
+        #expect(hex64(seven) == "0x51923d2b3763b1fe")
+        #expect(hex64(six) == "0x91cc940fa4b8a7b7")
     }
 
     /// And skiff@8, the default class until #462's switch, sails exactly as before #462's bots layer (every change there
@@ -93,11 +94,12 @@ import Testing
     ///   draw, not her place in National's skill band): the long, where a bot whose hand and skill sit on different
     ///   sides of the switch now reads the lulls otherwise on the run; the short kept its digest.
     /// - #276 PR 2 (live bots read the favoured end late, from T−15, within reach): both; the tracks part before the gun.
+    /// - #583 stage 3 (National bots plan their tacks and gybes, `BotPlanner` on the bundled `bot-tunables@2`): both.
     @Test(.onSixRules) func skiffEightBotsAreBitIdentical() throws {
         let short = try Self.digest(seed: 459, boatClass: Self.skiffEight)
         let long = try Self.digest(seed: 462, boatClass: Self.skiffEight, seconds: 700)
-        #expect(hex64(short) == "0xdfb17c4897a9b2be")
-        #expect(hex64(long) == "0xda473b331d3bbb21")
+        #expect(hex64(short) == "0x294de5e4b43e5a1f")
+        #expect(hex64(long) == "0xceb9cb1188e90982")
     }
 
     // MARK: - skiff@8: tacks and gybes by hand

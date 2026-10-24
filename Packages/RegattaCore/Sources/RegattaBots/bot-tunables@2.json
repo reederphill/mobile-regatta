@@ -1,0 +1,33 @@
+{
+  "id": "bot-tunables",
+  "notes": "Version 2 (#583 stages 2 and 3): version 1's tactics, and the National helm's planner on (BotPlanner): every live bot from the bottom of the National band plans her tacks and gybes 4.438 s ahead at its bottom to 11.25 s at its top (plannerStart 1), turning on a gain over 1.25 s and vetoing her heuristics' turns that lose more than 0.1875 s, her shift fading back to the course's axis over 45 s. The planner's settings by regatta-timetrial --tune on the reference and hold-out seeds (R1-R16, H1-H16) for Regional, National and the tactician; checked on the validation seeds (V1-V16). Stage 2's retune of the tactics is left out: on the validation seeds it slowed Regional and the tactician. Mean seconds behind the oracle, reference / hold-out / validation: National 35.1 -> 30.1 / 44.9 -> 30.8 / 37.7 -> 31.6; Club, Regional, the executor and the tactician as version 1.",
+  "values": {
+    "dirtyAirWeightDegrees": 2,
+    "downwindShadowWeightDegrees": 4,
+    "laneEdgePressure": 0.1,
+    "laylineLeadMetres": 15,
+    "liveHeaderThresholdDegrees": 3,
+    "liveTackIntervalSeconds": 15,
+    "luffStepDegrees": 6,
+    "lullHeatUpDegrees": 12,
+    "pinchAngleDegrees": 38,
+    "pinchRangeMetres": 60,
+    "plannerHorizonSeconds": 11.25,
+    "plannerMarginSeconds": 1.25,
+    "plannerShiftReversionSeconds": 45,
+    "plannerStart": 1.0,
+    "plannerStartHorizonSeconds": 4.4375,
+    "plannerVetoMarginSeconds": 0.1875,
+    "pressureWeightDegrees": 14,
+    "puffWeightDegrees": 14,
+    "replaneStepDegrees": 9,
+    "spotPressureWeightDegrees": 30,
+    "tackingSpeed": 0.75,
+    "tacticianAnticipationSeconds": 6,
+    "tacticianCorridor": 0.5,
+    "tacticianDownwindShiftDegrees": 5,
+    "tacticianHeaderThresholdDegrees": 4,
+    "tacticianTackIntervalSeconds": 15
+  },
+  "version": 2
+}
