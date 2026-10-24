@@ -1443,6 +1443,7 @@ extension WaterNode {
     static let litGustSize = SKUniform(name: "u_gust_size", vectorFloat2: SIMD2(1, 1))
 
     /// J and K: the gust map over the view (`LitWater.Frame`), and K's sprite and uniforms.
+    nonisolated(unsafe) private static var toonScalePrinted = -1
     private func updateLit(_ world: WaterWorld, view: WaterView) {
         guard WaterLook.current.isLit else { return }
         guard let course = world.courseWind else {
@@ -1475,6 +1476,10 @@ extension WaterNode {
             wind: Float(((knots - 4) / 18).clamped(to: 0.05...1)), foam: Float(((knots - 10) / 10).clamped(to: 0...1)),
             clock: clock, scale: Float(view.scale))
         guard WaterLook.current.usesLitSprite else { return }
+        if WaterLook.current.isToon, Int(world.time) / 10 != Self.toonScalePrinted {
+            Self.toonScalePrinted = Int(world.time) / 10
+            NSLog("#604 toon scale %.3f at %d s", Double(view.scale), Int(world.time))
+        }
         litSprite.isHidden = false
         litSprite.size = rect.size
         litSprite.position = CGPoint(x: rect.midX, y: rect.midY)

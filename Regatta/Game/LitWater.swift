@@ -718,22 +718,22 @@ extension LitWater {
         var deep = SIMD3<Double>(0x2C, 0x48, 0x6E) / 255
         var mid = SIMD3<Double>(0x3A, 0x68, 0x88) / 255
         var pale = SIMD3<Double>(0x7C, 0xB4, 0xBE) / 255
-        var size = 0.4
-        var tA = 0.69
-        var tB = 0.69
-        var tC = 0.665
-        var rim = 0.022
-        var shadow = 0.05
-        var off = 0.26
+        var size = 0.34
+        var tA = 0.75
+        var tB = 0.745
+        var tC = 0.71
+        var rim = 0.03
+        var shadow = 0.04
+        var off = 0.22
         var soft = 2.0
-        var sparks = 0.9
-        var cell = 44.0
+        var sparks = 0.6
+        var cell = 30.0
         var stretch = 2.0
         var puff = 1.0
         var calm = 0.03
         var warp = 4.0
         var drift = 0.25
-        var ref = 1.0
+        var ref = 2.4
 
         static let current: Toon = {
             var t = Toon()
@@ -783,7 +783,7 @@ extension LitWater {
             float isl(vec2 p, float C, vec2 r, vec2 sd, float t, vec2 dn) {
                 vec2 a = vec2(dot(p, dn), dot(p, vec2(-dn.y, dn.x)) / \(f(stretch)));
                 vec2 q = vec2(a.x * r.x - a.y * r.y, a.x * r.y + a.y * r.x) / C + sd + vec2(0.6, 0.35) * t * 0.012;
-                return 0.62 * vnoise(q) + 0.26 * vnoise(q * 2.3 + sd.yx) + 0.12 * vnoise(q * 5.1 + sd);
+                return 0.70 * vnoise(q) + 0.24 * vnoise(q * 2.3 + sd.yx) + 0.06 * vnoise(q * 5.1 + sd);
             }
             // The warp: two octaves drifting their own ways, so no two neighbours share a size or spacing.
             vec2 warpAt(vec2 m, float t, vec2 dn) {
@@ -802,18 +802,20 @@ extension LitWater {
                 vec2 guv = clamp((w - u_gust_origin) / u_gust_size, 0.0, 1.0);
                 float gu = texture2D(u_gust, guv).r * 2.0 - 1.0;
                 float puff = smoothstep(0.0, 0.8, gu) * \(f(puff)), lull = smoothstep(0.0, 0.8, -gu) * \(f(puff));
-                float z = max(log2(max(u_scale, 1e-3) / \(f(ref))), 0.0);
+                float zs = log2(max(u_scale, 1e-3) / \(f(ref)));
+                float z = max(zs, 0.0);
+                float zin = clamp(-zs, 0.0, 1.5);
                 // The water drifts downwind, all layers together, so the islands persist.
                 vec2 pd = m - dn * t * \(f(drift));
                 vec2 p = pd + warpAt(pd, t, dn);
                 // A slow field sets the layers' cuts apart: here more large islands, there more flecks.
                 float lo = vnoise(pd / \(f(55 * size)) + vec2(5.2, 1.3)) - 0.5;
-                float zc = \(f(calm)) * z;
-                float tA = \(f(tA)) + zc - 0.10 * lo + 0.05 * puff - 0.012 * lull;
-                float tB = \(f(tB)) + zc + 0.04 * lo + 0.05 * puff - 0.008 * lull + 0.5 * smoothstep(1.3, 2.3, z);
-                float tC = \(f(tC)) + zc + 0.03 * lo + 0.04 * puff + 0.05 * lull + 0.5 * smoothstep(0.5, 1.2, z);
-                float rim = \(f(rim)) * (1.0 + 0.6 * puff - 0.6 * lull);
-                float shd = \(f(shadow)) * (1.0 + 0.7 * puff - 0.9 * lull);
+                float zc = \(f(calm)) * z + 0.03 * zin;
+                float tA = \(f(tA)) + zc + 0.03 * zin - 0.10 * lo + 0.14 * puff - 0.04 * lull;
+                float tB = \(f(tB)) + zc + 0.04 * lo + 0.14 * puff - 0.02 * lull + 0.5 * smoothstep(1.3, 2.3, z);
+                float tC = \(f(tC)) + zc + 0.03 * lo + 0.10 * puff + 0.05 * lull + 0.5 * smoothstep(0.5, 1.2, z);
+                float rim = \(f(rim)) * (1.0 + 1.2 * puff - 0.8 * lull);
+                float shd = \(f(shadow)) * (1.0 + 1.5 * puff - 0.9 * lull);
                 // The far side, in world metres (screen-up under the camera's turn).
                 vec2 up = vec2(-u_cam.y, u_cam.x);
                 vec2 rA = vec2(0.94, 0.34), rB = vec2(0.5, -0.87), rC = vec2(-0.77, 0.64);
@@ -843,17 +845,18 @@ extension LitWater {
                 vec3 midC = \(v3(mid));
                 vec3 paleC = \(v3(pale));
                 vec3 tealC = vec3(0.16, 0.44, 0.46);
-                midC = mix(midC, deepC, 0.5 * puff);
-                deepC = mix(deepC, deepC * 0.85, puff);
-                midC = mix(midC, paleC, 0.16 * lull);
+                // Puffs: the mid goes darker than the calm deep, the fringes darker still. Lulls: a glassy, paler mid.
+                midC = mix(midC, deepC * 0.84, puff);
+                deepC = mix(deepC, deepC * 0.68, puff);
+                midC = mix(midC, paleC, 0.30 * lull);
                 midC = mix(midC, tealC, 0.35 * dep.r);
                 deepC = mix(deepC, tealC, 0.25 * dep.r);
                 vec3 col = mix(midC, deepC, dA);
                 col = mix(col, paleC, pA);
                 // Foam flecks: flat, few, in the puffs above ~12 kn.
-                vec2 fm = pd / 1.6;
+                vec2 fm = pd / 2.2;
                 float fl = vnoise(fm) * vnoise(fm * 0.37 + vec2(4.1, 8.3));
-                float ft = 0.80 - 0.06 * smoothstep(0.2, 0.8, u_wind.y);
+                float ft = 0.74 - 0.06 * smoothstep(0.2, 0.8, u_wind.y);
                 float foamA = CUT(fl, ft) * smoothstep(0.15, 0.35, u_wind.y) * smoothstep(0.25, 0.6, puff);
                 col = mix(col, vec3(0.90, 0.95, 0.97), foamA);
                 // Stars: a candidate a cell (world-fixed, stepping by octaves with the zoom), its own cycle, only well
@@ -874,7 +877,8 @@ extension LitWater {
                     vec2 sp = sm + warpAt(sm, t, dn);
                     float inA = isl(sp, \(f(cA)), rA, sA, t, dn) - tA;
                     float inB = isl(sp, \(f(cB)), rB, sB, t, dn) - tB;
-                    on *= smoothstep(0.01, 0.05, max(inA, inB));
+                    float inC = isl(sp, \(f(cC)), rC, sC, t, dn) - tC;
+                    on *= smoothstep(0.0, 0.03, max(max(inA, inB), inC));
                 }
                 vec2 dw = (sw0 - m) * 8.0 / u_scale;
                 vec2 ds = vec2(dw.x * u_cam.x + dw.y * u_cam.y, -dw.x * u_cam.y + dw.y * u_cam.x);
