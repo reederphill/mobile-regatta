@@ -231,8 +231,16 @@ final class Boat3D {
         var boomHeight: CGFloat
         var boomLength: CGFloat
         var spar: CGFloat
+        /// The spinnaker (#311), on a class with one: the kite in its own frame and a pole one point long, and where
+        /// the pole's foot sits (the drawn bow). Nil, and zero, on a class without.
+        var kite: SCNGeometry?
+        var pole: SCNGeometry?
+        var poleFootZ: CGFloat = 0
+        var poleY: CGFloat = 0
+        var pointsPerMeter: CGFloat
 
         init(boatClass: BoatClass, ppm: CGFloat) {
+            pointsPerMeter = ppm
             let l = CGFloat(boatClass.hull.length) * ppm, b = CGFloat(boatClass.hull.beam) * ppm
             // Fun before realism: the topsides drawn deeper than a dinghy's so they read at phone scale.
             freeboard = 0.3 * b
@@ -249,6 +257,57 @@ final class Boat3D {
             cockpit = Geometry.cap(cockpitRect, at: freeboard + 0.15)
             sail = Geometry.sail(length: boomLength, luff: (mastHeight - boomHeight) * 0.95,
                                  belly: 0.12 * l, columns: 8)
+            if boatClass.spinnaker != nil {
+                // The pole's foot a spar's width inside the drawn bow, so it meets the hull; on the deck.
+                let bow = outline.map(\.y).max() ?? l / 2
+                poleFootZ = -bow + spar * 2
+                poleY = freeboard + spar
+                // The tack sits at the pole's tip; the head stays forward of the mast however the kite is trimmed
+                // (#311 gate round 2: no kite pose crosses the main), the clew above the boom.
+                kite = Geometry.kite(foot: 0.7 * l, headHeight: 0.72 * mastHeight, headAft: 0.22 * l,
+                                     clewHeight: boomHeight + 0.2 * l, belly: 0.3 * l)
+                let box = SCNBox(width: spar * 1.6, height: spar * 1.6, length: 1, chamferRadius: 0)
+                pole = box
+            }
+        }
+
+        /// The asymmetric spinnaker (#311) in its own frame, drawn at its deepest: the tack at the origin, the foot
+        /// running aft along +z to the clew `foot` away and `clewHeight` up, the luff bowed forward up to the head
+        /// `headHeight` up and `headAft` aft, the leech back down to the clew. Each point of the cloth bowed to +x by
+        /// `belly`, deepest a third of the way up and a little forward of the middle, so it reads as a balloon. The
+        /// node's x scale flips it to her side and sets its depth; its angle swings the whole kite about the tack.
+        static func kite(foot: CGFloat, headHeight: CGFloat, headAft: CGFloat, clewHeight: CGFloat, belly: CGFloat,
+                         columns: Int = 8, rows: Int = 6) -> SCNGeometry {
+            func point(_ u: CGFloat, _ v: CGFloat) -> SIMD3<Float> {
+                // The luff (u 0) and the leech (u 1) from the foot (v 0) to the head (v 1).
+                let luffY = headHeight * v, luffZ = headAft * v - 0.16 * foot * sin(.pi * v)
+                let leechY = clewHeight + (headHeight - clewHeight) * v
+                let leechZ = foot + (headAft - foot) * v + 0.06 * foot * sin(.pi * v)
+                let y = luffY + (leechY - luffY) * u, z = luffZ + (leechZ - luffZ) * u
+                let across = sin(.pi * pow(u, 0.8)), up = sin(.pi * (0.22 + 0.78 * v))
+                return SIMD3(Float(belly * across * up), Float(y), Float(z))
+            }
+            var vertices: [SCNVector3] = [], normals: [SCNVector3] = [], indices: [Int32] = []
+            let e: CGFloat = 1e-3
+            for j in 0...rows {
+                for i in 0...columns {
+                    let u = CGFloat(i) / CGFloat(columns), v = CGFloat(j) / CGFloat(rows)
+                    let p = point(u, v)
+                    let du = point(min(u + e, 1), v) - point(max(u - e, 0), v)
+                    let dv = point(u, min(v + e, 1)) - point(u, max(v - e, 0))
+                    var normal = simd_cross(du, dv)
+                    normal = simd_length(normal) > 1e-9 ? simd_normalize(normal) : SIMD3(1, 0, 0)
+                    // Outward, to the belly's side.
+                    if normal.x < 0 { normal = -normal }
+                    vertices.append(SCNVector3(p.x, p.y, p.z))
+                    normals.append(SCNVector3(normal.x, normal.y, normal.z))
+                    if i < columns, j < rows {
+                        let a = Int32(j * (columns + 1) + i), b = a + Int32(columns + 1)
+                        indices += [a, a + 1, b, b, a + 1, b + 1]
+                    }
+                }
+            }
+            return make(vertices, normals, indices)
         }
 
         /// The topsides: the outline at deck height down to a narrower keel line at the waterline, flat-shaded quads.
@@ -325,12 +384,32 @@ final class Boat3D {
     /// The SceneKit nodes one boat adds to the fleet's scene: `root`, `heelNode`, the hull, deck, cockpit and mast, the
     /// boom pivot, the boom and the sail.
     static let nodeCount = 9
+    /// And on a class with a spinnaker (#311): the pole and the kite.
+    static let kiteNodeCount = 2
+    /// The nodes this boat adds: `nodeCount`, plus `kiteNodeCount` on a class with a spinnaker.
+    var drawnNodeCount: Int { Self.nodeCount + (kiteNode == nil ? 0 : Self.kiteNodeCount) }
     let root = SCNNode()
     private let heelNode = SCNNode()
     private let boomPivot = SCNNode()
     private let sailNode: SCNNode
     private let hullNode: SCNNode
     private let mastNode: SCNNode
+    /// Her spinnaker (#311), on a class with one: flown from the tip of `poleNode`, a spar on her centreline at the
+    /// bow that runs out with the hoist and in with the drop and never swings. Both hidden while it is down. Nil for
+    /// a class without.
+    private let kiteNode: SCNNode?
+    private let poleNode: SCNNode?
+    private let poleFootZ: Float
+    private let poleY: Float
+    private let pointsPerMeter: Float
+    /// The main's target last frame, and, while the boom swings across (a gybe or a tack), how far out it stood when
+    /// the swing began: the clock the kite crosses on (#311 gate round 3).
+    private var sailTarget: Float = 0
+    private var sailSwingFrom: Float?
+    /// The kite's drawn angle out from her centreline, unsigned, and its drawn depth: each eased (#311).
+    private var kiteTrim: Float = 0
+    private var kiteFill: Float = 0
+    private var kiteEased = false
     /// Every material she draws with: a ghost fades them all (`BoatStyle.ghostAlpha`).
     private var materials: [SCNMaterial] = []
     /// Her seat: each boat's flutter swings on its own phase (`BoatStyle.flutterPhaseStep`), so a flapping fleet
@@ -364,6 +443,32 @@ final class Boat3D {
         let sparMaterial = Fleet3D.lambert(UIColor(white: 0.25, alpha: 1))
 
         materials = [hullMaterial, deckMaterial, cockpitMaterial, sailMaterial, sparMaterial]
+        pointsPerMeter = Float(g.pointsPerMeter)
+        poleFootZ = Float(g.poleFootZ)
+        poleY = Float(g.poleY)
+        if let kiteGeometry = g.kite?.copy() as? SCNGeometry, let poleGeometry = g.pole?.copy() as? SCNGeometry {
+            // White like the main, its own material: the one seam a livery tint takes (#372).
+            let kiteMaterial = Fleet3D.lambert(UIColor(white: 0.97, alpha: 1))
+            kiteMaterial.isDoubleSided = true
+            materials.append(kiteMaterial)
+            kiteGeometry.materials = [kiteMaterial]
+            let kite = SCNNode(geometry: kiteGeometry)
+            // A touch see-through, as the flat kite was (0.88): her hull and main still read under it at 45°.
+            kite.opacity = 0.88
+            kite.isHidden = true
+            kiteNode = kite
+            poleGeometry.materials = [sparMaterial]
+            let pole = SCNNode(geometry: poleGeometry)
+            // The box is one point long about its middle: pivoted so it runs from its foot forward (−z), and its z
+            // scale is its length.
+            pole.pivot = SCNMatrix4MakeTranslation(0, 0, 0.5)
+            pole.position = SCNVector3(0, poleY, poleFootZ)
+            pole.isHidden = true
+            poleNode = pole
+        } else {
+            kiteNode = nil
+            poleNode = nil
+        }
         let hull = SCNNode(geometry: g.hull.copy() as? SCNGeometry)
         hull.geometry?.materials = [hullMaterial]
         let deck = SCNNode(geometry: g.deck.copy() as? SCNGeometry)
@@ -393,6 +498,7 @@ final class Boat3D {
         boomPivot.addChildNode(sailNode)
 
         [hull, deck, cockpit, mast, boomPivot].forEach(heelNode.addChildNode)
+        if let poleNode, let kiteNode { [poleNode, kiteNode].forEach(heelNode.addChildNode) }
         root.addChildNode(heelNode)
     }
 
@@ -422,7 +528,18 @@ final class Boat3D {
 
         let side: Float = pose.sailSide == .port ? -1 : 1
         let target = Float(pose.sailTrim) * side
+        // A swing across begins when the target crosses to the side opposite the drawn main (#311: the kite's clock).
+        if settled || target == 0 {
+            sailSwingFrom = nil
+        } else if sailSwingFrom == nil, sailAngle != 0, (sailAngle > 0) != (target > 0) {
+            sailSwingFrom = abs(sailAngle)
+        }
         sailAngle += (target - sailAngle) * (settled ? 1 : min(1, Float(dt) * 8))
+        sailTarget = target
+        if sailSwingFrom != nil, (sailAngle > 0) == (target > 0), abs(sailAngle) > abs(target) * 0.995 {
+            // Landed on the new side: the swing is over.
+            sailSwingFrom = nil
+        }
         let phase = Double(seat) * style.flutterPhaseStep
         // Hidden (`-cuesOnly`), the boom swings with no tier: at its trim.
         let swingDetail = hidesSail ? 0 : detail
@@ -438,8 +555,91 @@ final class Boat3D {
         sailNode.scale = SCNVector3(side * Float(max(belly, 0.05)), 1, 1)
         sailNode.isHidden = hidesSail
         boomPivot.isHidden = hidesSail
+        updateKite(pose.spinnaker, style: style, detail: detail, hidesSail: hidesSail, time: time, dt: dt,
+                   settled: settled)
         let transparency = pose.isGhost ? CGFloat(style.ghostAlpha) : 1
         for material in materials where material.transparency != transparency { material.transparency = transparency }
+    }
+
+    /// Where the drawn main stands between its sides, −1 (port) to 1 (starboard): ±1 settled on a side; through a
+    /// swing across, its eased angle over how far out it stood when the swing began (on the old side) or over its
+    /// target (on the new), so 0 exactly as the boom crosses her centreline. Nil head to wind (no side to read).
+    private var boomShare: Float? {
+        guard sailTarget != 0 else { return nil }
+        let toSide: Float = sailTarget > 0 ? 1 : -1
+        guard let from = sailSwingFrom else { return toSide }
+        let onNewSide = (sailAngle > 0) == (sailTarget > 0)
+        return min(1, max(-1, sailAngle / max(onNewSide ? abs(sailTarget) : from, 1e-6)))
+    }
+
+    /// The kite (#311), its tack at the pole's tip. Its size is fixed while it is up (it grows from the tack as it is
+    /// hoisted and shrinks back as it drops, with the pole). Only two things change on it: its depth (deeper the
+    /// further downwind, shallower soft and collapsed, never under `kiteDepthFloor` of its size) and its angle, never
+    /// inside the main's. Through a gybe it swings across with the boom as one set animation: its side share is the
+    /// drawn main's (`boomShare`), so it starts, crosses her centreline and lands with the boom, its belly flipping
+    /// sides there. `detail` scales its flog and pump only (#127's far tier): a collapse, a hoist and its side always
+    /// draw.
+    private func updateKite(_ pose: SpinnakerPose, style: BoatStyle, detail: Double, hidesSail: Bool, time: Double,
+                            dt: Double, settled: Bool) {
+        guard let kiteNode, let poleNode else { return }
+        let shown = pose.phase != .hidden && pose.hoisted > 0.001
+        if settled || !kiteEased || !shown {
+            // Nothing to ease from: a frozen frame, her first, or a kite coming out of the bag.
+            kiteTrim = Float(pose.trim)
+            kiteFill = Float(pose.fill)
+            kiteEased = shown
+        } else {
+            // Its trim (collapsing forward, refilling) on the main's own rate; its depth on the soft kite's.
+            kiteTrim += (Float(pose.trim) - kiteTrim) * min(1, Float(dt) * 8)
+            let k = style.cornerWakeEaseRate > 0 ? 1 - exp(-max(dt, 0) * style.cornerWakeEaseRate) : 1
+            kiteFill += (Float(pose.fill) - kiteFill) * Float(k)
+        }
+        let hidden = hidesSail || !shown
+        if kiteNode.isHidden != hidden {
+            kiteNode.isHidden = hidden
+            poleNode.isHidden = hidden
+        }
+        guard !hidden else { return }
+
+        // The pole runs out with the hoist and back in with the drop (the pose's progress, no easing); the kite's
+        // tack rides its tip.
+        let hoisted = Float(pose.hoisted)
+        let poleLength = Float(max(style.kitePoleMetres, 0)) * pointsPerMeter * hoisted
+        let overlap = abs(poleFootZ) > 0 ? Float(2) : 0
+        poleNode.scale = SCNVector3(1, 1, max(overlap + poleLength, 0.01))
+        kiteNode.position = SCNVector3(0, poleY, poleFootZ - overlap - poleLength)
+
+        let share = boomShare ?? (pose.side == .port ? -1 : 1)
+        let drawnSide: Float = share < 0 ? -1 : 1
+        let phase = Double(seat) * style.flutterPhaseStep
+        let flog = pose.flutter * detail
+        let swing = Float(sin(time * style.flutterSwingRate + phase) * style.kiteFlutterDegrees * .pi / 180 * flog)
+        // Never sheeted harder than the main, every frame (#311 gate round 4): its angle off the centreline on its
+        // side is at least the drawn main's on that side, flog and the gybe's swing included.
+        let free = (kiteTrim * share + swing * drawnSide) * drawnSide
+        let angle = drawnSide * max(free, boomPivot.eulerAngles.y * drawnSide)
+        kiteNode.eulerAngles = SCNVector3(0, angle, 0)
+        let pump = Float(1 - style.flapBellyLoss * flog * (0.5 + 0.5 * sin(time * style.flapBellyRate + phase)))
+        // The belly faces the side it is drawn on and keeps its depth through a gybe: at the centreline it flips
+        // sides without passing through flat, and no state draws it shallower than the floor.
+        let floor = Float(min(max(style.kiteDepthFloor, 0), 1))
+        let depth = max(kiteFill * pump, floor)
+        kiteNode.scale = SCNVector3(drawnSide * depth * hoisted, hoisted, hoisted)
+    }
+
+    /// Her kite as drawn (#311), nil while hidden, for tests: its angle off the bow aft (signed, + to starboard, as
+    /// the boom's), its depth (signed by side, the x scale over its size), and its size (1 up: how far hoisted).
+    var kiteLook: (angle: Float, depth: Float, size: Float)? {
+        guard let kiteNode, !kiteNode.isHidden else { return nil }
+        let size = kiteNode.scale.y
+        return (kiteNode.eulerAngles.y, size > 0 ? kiteNode.scale.x / size : 0, size)
+    }
+    /// Her pole as drawn (#311), nil while hidden, for tests: where its tip stands (z, forward is −z, in her frame),
+    /// its turn (always 0: it never swings) and its foot's x, and where the kite's tack is.
+    var poleLook: (tipZ: Float, turn: Float, x: Float, kiteTack: SIMD3<Float>)? {
+        guard let poleNode, let kiteNode, !poleNode.isHidden else { return nil }
+        return (poleNode.position.z - poleNode.scale.z, poleNode.eulerAngles.y, poleNode.position.x,
+                SIMD3<Float>(kiteNode.position))
     }
 
     /// What the tiers may change (#127): the boom's turn and the sail's belly, and whether the sail and the boom show.

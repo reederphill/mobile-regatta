@@ -1,0 +1,8 @@
+{
+  "log" : "spinnaker-lee.racelog.json",
+  "freezeTick" : 6460,
+  "camera" : "boat",
+  "vision" : "greyscale",
+  "view" : "courseUp",
+  "hud" : { "instruments" : true }
+}

@@ -78,5 +78,23 @@
     {
         "fixtures": [],
         "log": "prestart.racelog.json"
+    },
+    {
+        "fixtures": ["spinnaker-hoist", "spinnaker-hoist-deuteranopia", "spinnaker-hoist-greyscale", "spinnaker-hoist-protanopia", "spinnaker-hoist-tritanopia",
+                     "spinnaker-hoist-washout"],
+        "log": "planing.racelog.json", "camera": "race", "clear": [210, 110, 20],
+        "racing": true, "yourSpinnaker": "hoisting", "yourSpinnakerProgress": [0.4, 0.6]
+    },
+    {
+        "fixtures": ["spinnaker-drop", "spinnaker-drop-deuteranopia", "spinnaker-drop-greyscale", "spinnaker-drop-protanopia", "spinnaker-drop-tritanopia",
+                     "spinnaker-drop-washout"],
+        "log": "spinnaker-lee.racelog.json", "camera": "race", "clear": [210, 110, 20],
+        "racing": true, "yourSpinnaker": "dropping", "yourSpinnakerProgress": [0.4, 0.6]
+    },
+    {
+        "fixtures": ["spinnaker-lee", "spinnaker-lee-deuteranopia", "spinnaker-lee-greyscale", "spinnaker-lee-protanopia", "spinnaker-lee-tritanopia",
+                     "spinnaker-lee-washout"],
+        "log": "spinnaker-lee.racelog.json", "camera": "race", "clear": [210, 110, 20],
+        "racing": true, "yourSpinnaker": "collapsed", "spinnakersInView": 2
     }
 ]

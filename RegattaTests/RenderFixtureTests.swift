@@ -459,6 +459,58 @@ import UIKit
         #expect(edge.reach < full.reach * 0.6 && edge.reach > full.reach * 0.2, "\(edge.reach) against \(full.reach)")
     }
 
+    /// The spinnaker fixtures (#311), each a state of your kite on the default class: hoisting mid-way, its pole part
+    /// out (`spinnaker-hoist`); dropping mid-way (`spinnaker-drop`); collapsed by the lee with another boat's kite up
+    /// beside it (`spinnaker-lee`). And `planing-edge` is the soft kite: up, its depth short of full. Each drawn by your
+    /// boat's node, and each with its five filter twins.
+    @Test func spinnakerFixturesShowEachState() throws {
+        let style = BoatStyle.standard
+        for (name, phase, progress) in [("spinnaker-hoist", SpinnakerPose.Phase.hoisting, 0.3...0.7),
+                                         ("spinnaker-drop", .dropping, 0.3...0.7), ("spinnaker-lee", .collapsed, 1...1),
+                                         ("planing-edge", .up, 1...1)] {
+            let (fixture, log) = try RenderFixture.load(named: name, in: Self.fixtures)
+            let session = try GameSession(fixture: fixture, log: log)
+            let world = session.driver.renderWorld
+            #expect(world.boatClass == Race.defaultBoatClass, "\(name): on the default class")
+            let pose = SpinnakerPose(world.me, isGhost: false, boatClass: world.boatClass, style: style)
+            #expect(pose.phase == phase && progress.contains(pose.hoisted), "\(name): \(pose.phase) \(pose.hoisted)")
+
+            // Drawn by the standing fleet (#597), in seat order.
+            let (scene, _) = try GameSceneTests.scene(fixture: name)
+            let fleet = try #require(scene.standingFleet).fleet
+            let mine = try #require(fleet.indices.contains(world.myBoatIndex) ? fleet[world.myBoatIndex] : nil)
+            let kite = try #require(mine.kiteLook, "\(name): your kite drawn")
+            #expect(abs(kite.size - Float(pose.hoisted)) < 1e-6, "\(name)")
+            #expect(mine.poleLook != nil, "\(name): its pole out")
+            switch name {
+            case "spinnaker-lee":
+                let others = world.boats.indices.filter { seat in
+                    seat != world.myBoatIndex && !world.isGhost(ofSeat: seat)
+                        && SpinnakerPose(world.boats[seat], isGhost: false, boatClass: world.boatClass, style: style).phase == .up
+                }
+                #expect(!others.isEmpty, "\(name): another boat's kite up")
+                #expect(others.allSatisfy { fleet[$0].kiteLook != nil }, "\(name)")
+            case "planing-edge":
+                // Against the same kite with no soft kite: its depth at her wind angle, at a full margin.
+                var unsoftened = style
+                unsoftened.kiteSoftFill = 1
+                let full = SpinnakerPose(world.me, isGhost: false, boatClass: world.boatClass, style: unsoftened).fill
+                #expect(pose.fill < full * 0.85 && pose.fill >= style.kiteDepthFloor, "\(name): soft, \(pose.fill) of \(full)")
+            default: break
+            }
+
+            if name.hasPrefix("spinnaker-") {
+                #expect(fixture.cameraMode == .courseUp && fixture.hud?.instruments == true, "\(name)")
+                for vision in VisionFilter.allCases where vision != .none {
+                    let (twin, _) = try RenderFixture.load(named: "\(name)-\(vision.rawValue)", in: Self.fixtures)
+                    var expected = fixture
+                    expected.vision = vision
+                    #expect(twin == expected, "\(name) \(vision)")
+                }
+            }
+        }
+    }
+
     /// The stern-corner wakes (#492) `scene` draws: every boat's that isn't hidden.
     static func cornerWakes(_ scene: GameScene) -> [SKShapeNode] {
         guard let effects = scene.childNode(withName: "//effects") else { return [] }

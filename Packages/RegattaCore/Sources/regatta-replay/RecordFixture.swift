@@ -41,6 +41,8 @@ struct FixtureScene: Decodable {
     /// (`YourScript.headUp`). "runDeeper": on the first run, once you have planed for `scriptSeconds` on end, you bear
     /// away a degree and a half a second, the rudder barely over, until you fall off the plane, and your bot takes you
     /// back: the planing cue's countdown (#492), her margin running from full to nothing (`YourScript.runDeeper`).
+    /// "byTheLee": once your spinnaker is up, you sail `YourScript.byTheLeeDegrees` by the lee for `scriptSeconds`, past
+    /// the class's collapse and short of the boom crossing, and your bot takes you back: the collapsed kite (#311).
     var yourScript: String?
     var scriptSeconds: Double?
     /// With "penaltyTurnAtOnce": the way you turn, in place of towards the nearest other boat. "luff": towards the
@@ -195,7 +197,7 @@ enum RecordFixture {
 
     /// Your seat's script (`FixtureScene.yourScript`): seat 0, the setup's human seat.
     struct YourScript {
-        enum Kind { case penaltyTurnAtOnce, headUpAfterFirstFinish, runDeeper }
+        enum Kind { case penaltyTurnAtOnce, headUpAfterFirstFinish, runDeeper, byTheLee }
         /// Which way a scripted penalty turn goes (`FixtureScene.turnWay`).
         enum Way { case towardsNearest, luff, bearAway }
         let kind: Kind
@@ -210,12 +212,16 @@ enum RecordFixture {
         var planingSince: Int?
         var deeper: (from: Int, twa: Double)?
         var hasRunDeeper = false
+        /// While sailing by the lee: the tick a bot takes you back; done once she has.
+        var byTheLeeUntil: Int?
+        var hasSailedByTheLee = false
 
         init?(_ scene: FixtureScene) {
             switch scene.yourScript {
             case "penaltyTurnAtOnce": kind = .penaltyTurnAtOnce
             case "headUpAfterFirstFinish": kind = .headUpAfterFirstFinish
             case "runDeeper": kind = .runDeeper
+            case "byTheLee": kind = .byTheLee
             default: return nil
             }
             switch scene.turnWay {
@@ -231,6 +237,35 @@ enum RecordFixture {
             case .penaltyTurnAtOnce: turnAtOnce(race, &controllers, calls: calls, you: you)
             case .headUpAfterFirstFinish: headUp(race, &controllers)
             case .runDeeper: runDeeper(race, &controllers, you: you)
+            case .byTheLee: sailByTheLee(race, &controllers, you: you)
+            }
+        }
+
+        /// How far by the lee you hold, degrees: past skiff@9's 10° collapse, short of its 20° boom crossing.
+        static let byTheLeeDegrees = 14.0
+
+        /// Once, as soon as your spinnaker is up: you steer to `byTheLeeDegrees` by the lee for `ticks`, a proportional
+        /// rudder on how far by the lee you are, then your bot takes you back (#311, T5).
+        mutating func sailByTheLee(_ race: Race, _ controllers: inout SeatControllers, you: BotDriver) {
+            let me = 0
+            let boat = race.boats[me]
+            guard !hasSailedByTheLee else { return }
+            if let until = byTheLeeUntil {
+                guard race.tick < until, !boat.isGhost, boat.spinnaker.isUp else {
+                    byTheLeeUntil = nil
+                    hasSailedByTheLee = true
+                    controllers[me] = .bot(you.takingOver())
+                    return
+                }
+                // Past dead downwind on the boom's side, degrees, negative short of it: the sailing angle from aft.
+                let lee = rad2deg(wrapAngle(boat.sailingAngle + .pi))
+                // A positive rudder turns clockwise, which takes the sailing angle down with the boom to port.
+                let windSign: Double = boat.boomSide == .port ? 1 : -1
+                let rudder = (-windSign * (Self.byTheLeeDegrees - lee) * 0.05).clamped(to: -0.4...0.4)
+                _ = race.apply(BoatInput(rudder: rudder), seat: me, atTick: race.tick + 1)
+            } else if boat.status == .racing, boat.spinnaker.isUp {
+                byTheLeeUntil = race.tick + ticks
+                controllers[me] = .human
             }
         }
 
