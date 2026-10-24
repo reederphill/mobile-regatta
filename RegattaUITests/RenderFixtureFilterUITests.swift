@@ -71,6 +71,13 @@ final class RenderFixtureFilterUITests: RenderFixtureTestCase {
         try assertAllMatchReferences(Self.filtered("planing-edge"))
     }
 
+    /// The spinnaker's states (#311) through every filter: hoisting, dropping and collapsed by the lee tell apart by
+    /// shape (its length along the luff, its pole, its angle and depth), never by hue.
+    @MainActor func testSpinnakerStatesUnderFiltersMatchReferences() throws {
+        try assertAllMatchReferences(Self.filtered("spinnaker-hoist") + Self.filtered("spinnaker-drop")
+                                     + Self.filtered("spinnaker-lee"))
+    }
+
     /// The rule calls' cues (#123) through every filter: the orange dashed lines, badges and red glows.
     @MainActor func testRuleCallCuesUnderFiltersMatchReferences() throws {
         try assertAllMatchReferences(Self.filtered("rules-call"))

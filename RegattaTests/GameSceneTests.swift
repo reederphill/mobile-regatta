@@ -103,7 +103,7 @@ extension GameSceneTests {
     }
 
     /// The standing fleet adds one node to the SpriteKit scene, its SK3DNode (#597), whatever the fleet: every boat,
-    /// buoy and the committee boat is in its SceneKit scene, at `Boat3D.nodeCount` nodes a boat, a node a buoy and
+    /// buoy and the committee boat is in its SceneKit scene, at `Boat3D.nodeCount` nodes a boat (and `kiteNodeCount` more on a skiff, #311), a node a buoy and
     /// `Fleet3D.fixedNodeCount` besides.
     @Test func tiltedFleetDrawsWithinBudget() throws {
         let (scene, session) = try Self.scene(fixture: "fleet")
@@ -114,7 +114,9 @@ extension GameSceneTests {
         #expect(all(scene).filter { $0 is SK3DNode }.map(ObjectIdentifier.init) == [ObjectIdentifier(fleet.node)],
                 "one SK3DNode, the fleet's")
         #expect(Self.nodeCount(fleet.node) == 0, "the SK3DNode holds no SpriteKit nodes")
-        let budget = Fleet3D.fixedNodeCount + fleet.buoyTones.count + boats * Boat3D.nodeCount
+        // A class with a spinnaker (#311) adds its pole and kite: two nodes a boat.
+        let kite = session.driver.renderWorld.boatClass.spinnaker == nil ? 0 : Boat3D.kiteNodeCount
+        let budget = Fleet3D.fixedNodeCount + fleet.buoyTones.count + boats * (Boat3D.nodeCount + kite)
         #expect(fleet.sceneNodeCount <= budget, "\(fleet.sceneNodeCount) SceneKit nodes, budget \(budget)")
     }
 }
