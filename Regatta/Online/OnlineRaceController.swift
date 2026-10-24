@@ -399,12 +399,18 @@ final class OnlineRaceController: OnlineSequence {
                      keepsResults: Bool = true, follows: Bool = false) {
         guard phase != .idle else { return }
         var follows = follows
-        if keepsResults, let kept = link?.resultsToKeep(), kept.keepsAsLastRace, outcome != .cancelled {
-            // A newer race is Home's: the one before it is no longer followed.
-            stopFollowing()
-            host?.keepLastRace(kept)
-            // Rows still sailing, or the rating not in: Home or Race again before the close.
-            if !kept.isFinal || kept.online?.rating == .pending { follows = true }
+        if keepsResults, outcome != .cancelled {
+            if let kept = link?.resultsToKeep(), kept.keepsAsLastRace {
+                // A newer race is Home's: the one before it is no longer followed.
+                stopFollowing()
+                host?.keepLastRace(kept)
+                // Rows still sailing, or the rating not in: Home or Race again before the close.
+                if !kept.isFinal || kept.online?.rating == .pending { follows = true }
+            } else if !isBeforeGun {
+                // Nothing of hers to keep yet: before the close the server's report lists a disqualified seat neither
+                // as scored nor as sailing (e2e run 40016922723). The race was hers past the gun: its close keeps it.
+                follows = true
+            }
         }
         if follows, let raceID = handOff?.raceID { follow(raceID) }
         if let link {

@@ -283,6 +283,39 @@ nonisolated final class CountingQueue: QueueService, @unchecked Sendable {
         #expect(!rig.race.isFollowing)
     }
 
+    /// Disqualified mid-race, Home before the close (e2e run 40016922723): the server's report before the close lists
+    /// a DSQ seat neither as scored nor as sailing, so the sheet has no row of hers and nothing can be kept. The race
+    /// was hers past the gun, so it is followed, and once it closes it is Home's Last race, her DSQ row with it.
+    @Test func homeWithNoRowOfHersBeforeTheCloseFollowsTheRace() async throws {
+        let rig = SequenceRig()
+        await rig.sail(to: 300)
+        var open = SequenceRig.openReport
+        open.results.rows.removeAll { $0.seat == open.seat }
+        open.sailing.removeAll { $0 == open.seat }
+        rig.link.kept = SequenceRig.sheet(open)
+        #expect(rig.link.kept?.myRow == nil)
+        rig.link.isPlayerDone = true
+        rig.race.tick()
+        rig.race.home()
+        await rig.race.leaving?.value
+        await rig.settle()
+        #expect(rig.model.lastRace == nil, "no row of hers to keep before the close")
+        #expect(rig.race.isFollowing, "the race she was in past the gun isn't followed to its close")
+
+        var closed = SequenceRig.closedReport
+        closed.results.rows = closed.results.rows.map { row in
+            var row = row
+            if row.seat == closed.seat { row.code = .dsq; row.finishTick = nil }
+            return row
+        }
+        rig.session.last = LastRace(report: closed, rating: nil)
+        rig.session.push(RatingChange(raceID: SequenceRig.raceID, outcome: .unrated))
+        await rig.settle()
+        let kept = try #require(rig.model.lastRace)
+        #expect(kept.online?.raceID == SequenceRig.raceID.rawValue && kept.myRow?.result == .dsq && kept.isFinal)
+        #expect(!rig.race.isFollowing)
+    }
+
     /// A leave before the gun gives the race away: nothing follows it, and its push changes nothing.
     @Test func briefingLeaveFollowsNothing() async {
         let rig = SequenceRig()
