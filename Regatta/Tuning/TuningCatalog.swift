@@ -508,6 +508,8 @@ enum TuningCatalog {
 
     /// The group whose panel carries the pressure overlay's toggle (#289).
     static let pressureOverlayGroup = "water"
+    /// The group whose panel carries the near-miss reach's toggle (#344).
+    static let nearMissReachGroup = "boat"
 
     private static func water(_ name: String, _ title: String, _ path: WritableKeyPath<WaterStyle, Double>,
                               _ range: ClosedRange<Double>, _ step: Double, unit: String = "") -> TuningSlider {

@@ -17,18 +17,41 @@ extension RulesConfig.NearMissSweep {
 
     /// The right-of-way boat's hull at every check of the sweep, heading offset by heading offset: what `hits`
     /// tries the keep-clear boat against, worked out once for a boat it is asked of against many (the escape
-    /// simulation's candidates, #92).
-    struct Swept {
+    /// simulation's candidates, #92). Public as the near-miss reach a client draws (#344): the umpire's own sweep, so
+    /// the drawing never works one out of its own.
+    public struct Swept: Sendable, Equatable {
         /// By heading offset (`headingOffsets`), then by check: none if `seconds` is shorter than `stepTicks`.
-        let hulls: [[[Vec2]]]
+        public let hulls: [[[Vec2]]]
         /// Each hull's centre, likewise.
-        let centres: [[Vec2]]
+        public let centres: [[Vec2]]
         /// Seconds from now of each check.
-        let times: [Double]
+        public let times: [Double]
+
+        /// The reach's outline (#344): the convex hull of every swept hull's corners, anticlockwise, empty when the
+        /// sweep checks nothing. Drawing only: the umpire never asks it, it asks `hits`.
+        public var outline: [Vec2] { Self.convexHull(hulls.flatMap { $0.flatMap { $0 } }) }
+
+        /// Andrew's monotone chain: the convex hull of `points`, anticlockwise from the lowest x.
+        static func convexHull(_ points: [Vec2]) -> [Vec2] {
+            let sorted = points.sorted { $0.x != $1.x ? $0.x < $1.x : $0.y < $1.y }
+            guard sorted.count > 2 else { return sorted }
+            func chain(_ points: [Vec2]) -> [Vec2] {
+                var chain: [Vec2] = []
+                for p in points {
+                    while chain.count >= 2,
+                          (chain[chain.count - 1] - chain[chain.count - 2]).cross(p - chain[chain.count - 2]) <= 0 {
+                        chain.removeLast()
+                    }
+                    chain.append(p)
+                }
+                return chain
+            }
+            return Array(chain(sorted).dropLast() + chain(sorted.reversed()).dropLast())
+        }
     }
 
-    /// `rightOfWay`'s `Swept` hulls.
-    func swept(_ rightOfWay: Boat, hull: BoatClass.Hull) -> Swept {
+    /// `rightOfWay`'s `Swept` hulls: the umpire's sweep (`hits`), and the near-miss reach a client draws (#344).
+    public func swept(_ rightOfWay: Boat, hull: BoatClass.Hull) -> Swept {
         let ticks = RulesConfig.ticks(seconds)
         guard ticks >= stepTicks else { return Swept(hulls: [], centres: [], times: []) }
         let outline = hull.outline

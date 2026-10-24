@@ -244,6 +244,15 @@ final class TuningModel {
         }
     }
 
+    /// The near-miss reach on each right-of-way boat (#344, `NearMissReach`), live on the practice race.
+    var showsNearMissReach: Bool {
+        get { tuning.showsNearMissReach }
+        set {
+            tuning.showsNearMissReach = newValue
+            changed()
+        }
+    }
+
     /// Back to the bundled defaults and the standard look.
     func resetAll() {
         tuning = Tuning()
@@ -325,6 +334,9 @@ final class TuningModel {
         if session.easeTuning != tuning.ease { session.easeTuning = tuning.ease }
         let showsPressure = tuning.showsPressure && !liveSessionHidesPressure
         if session.scene.showsPressureOverlay != showsPressure { session.scene.showsPressureOverlay = showsPressure }
+        // `-nearMissReach` turns it on whatever the panel says.
+        let showsReach = tuning.showsNearMissReach || LaunchOptions.current.nearMissReach
+        if session.scene.showsNearMissReach != showsReach { session.scene.showsNearMissReach = showsReach }
         session.isTuned = liveSessionSailsTunedFiles || tuning.water != .standard || tuning.camera != .standard
             || tuning.boat != .standard || tuning.hint != .standard || tuning.ease != .standard
     }

@@ -109,6 +109,9 @@ struct TickFrame {
     let owed: [OwedPenalty?]
     /// The rules' penalty windows (`raceFormat.penalty`): the arc's and notice's deadlines, never literals.
     let penalty: RulesConfig.Penalty?
+    /// The rules' near-miss sweep (`incidents.nearMissSweep`, #88): the near-miss reach the debug overlay draws (#344),
+    /// never a literal. Nil draws none.
+    let nearMissSweep: RulesConfig.NearMissSweep?
     /// The fleet's wind shadow after the tick (`Race.wake`, #377): every boat's turbulence ribbons, drawn by
     /// `TurbulenceTrailLayer`. The race's own, so the scene draws exactly what the sim sails (online, the prediction's:
     /// a client's wake regrows from its own prediction, never the server's). Nil draws none (the help legend's frames).
@@ -152,6 +155,7 @@ struct TickFrame {
         keepClear = seat.map { race.keepClearRelations(of: $0) }
         owed = race.boats.indices.map { race.owedPenalty(ofSeat: $0) }
         penalty = race.rules.raceFormat.penalty
+        nearMissSweep = race.rules.incidents.nearMissSweep
         wake = race.wake
         backwindSails = race.boats.indices.map { race.backwindSail(ofSeat: $0) }
         backwindSides = race.boats.indices.map { race.backwindSide(ofSeat: $0) }
@@ -163,8 +167,9 @@ struct TickFrame {
     init(tick: Int, boats: [Boat], standings: [Int], wind: WindField, isOver: Bool, heldInputs: [BoatInput]? = nil,
          closeTick: Int? = nil, gaps: [Double?]? = nil, keepClear: [RightOfWay?]? = nil, owed: [OwedPenalty?]? = nil,
          penalty: RulesConfig.Penalty? = nil, wake: TurbulenceRibbons? = nil, backwindSails: [Double]? = nil,
-         backwindSides: [Tack?]? = nil, seatedTick: Int? = nil) {
+         backwindSides: [Tack?]? = nil, seatedTick: Int? = nil, nearMissSweep: RulesConfig.NearMissSweep? = nil) {
         self.tick = tick
+        self.nearMissSweep = nearMissSweep
         self.boats = boats
         self.standings = standings
         self.wind = wind
@@ -191,7 +196,8 @@ struct TickFrame {
         }
         return TickFrame(tick: tick - 1, boats: moved, standings: standings, wind: wind, isOver: isOver, heldInputs: heldInputs,
                          closeTick: closeTick, gaps: gaps, keepClear: keepClear, owed: owed, penalty: penalty, wake: wake,
-                         backwindSails: backwindSails, backwindSides: backwindSides, seatedTick: seatedTick)
+                         backwindSails: backwindSails, backwindSides: backwindSides, seatedTick: seatedTick,
+                         nearMissSweep: nearMissSweep)
     }
 
     /// Where `seat` stands in the fleet, from 1.
