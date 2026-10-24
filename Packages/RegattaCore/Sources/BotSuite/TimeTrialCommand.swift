@@ -32,6 +32,9 @@ public struct TimeTrialOptions: Hashable, Sendable {
     public var tuneOnly: [String] = []
     /// `--tune-skip <prefix>`: leave the tunables whose names start so as they are (repeatable).
     public var tuneSkip: [String] = []
+    /// `--start` (#584): the start trial, from her place in the opening at T−60 to T+60 (`StartTrial`), on the start
+    /// suite's seeds (`StartTrialSeed.pool`; `--holdout`, its hold-outs).
+    public var start = false
     public var jobs: Int?
     /// Where to write the JSON report; `-` for stdout (the text report then goes to stderr).
     public var jsonPath: String?
@@ -67,6 +70,10 @@ public struct TimeTrialOptions: Hashable, Sendable {
           --tune-skip <prefix>   leave the tunables whose names start so as they are (repeatable)
           --json <path|->        write the JSON report there (- for stdout)
           --jobs <n>             seeds sailed at once (default: the performance cores)
+          --start                the start trial (#584): from her place in a ten-boat opening at T-60 to T+60, on the
+                                 start suite's 200 seeds (--holdout: its 40 hold-outs; --seeds and --only as above,
+                                 S3 or SH3); the oracle's start against each sailor's, by its worth at T+60.
+                                 Not with --laps, --tune, --tunables or --oracle-from
         One boat, no fleet: from a fixed start at the gun, the oracle searches for the fastest lap of each seed's
         course and each bot sails it alone; the table is where each loses her time behind the oracle.
         Exits 2 on a usage or setup error.
@@ -125,11 +132,18 @@ public struct TimeTrialOptions: Hashable, Sendable {
             case "--tune-only": tuneOnly.append(try value(flag))
             case "--tune-skip": tuneSkip.append(try value(flag))
             case "--jobs": jobs = try number(flag)
+            case "--start": start = true
             case "-h", "--help": help = true
             default: throw BotSuiteError.usage("unknown argument: \(flag)")
             }
         }
         if tuneOut != nil && oracleFrom.isEmpty { throw BotSuiteError.usage("--tune needs --oracle-from") }
+        if start {
+            if laps != nil || tuneOut != nil || tunablesPath != nil || !oracleFrom.isEmpty {
+                throw BotSuiteError.usage("--start: not with --laps, --tune, --tunables or --oracle-from")
+            }
+            if pools.contains(.validation) { throw BotSuiteError.usage("--start: the pools are reference and holdout") }
+        }
         if oracle.checkpointSeconds < Oracle.minimumSegmentSeconds {
             throw BotSuiteError.usage("--checkpoint: at least \(Oracle.minimumSegmentSeconds) s")
         }
@@ -167,6 +181,26 @@ public struct TimeTrialOptions: Hashable, Sendable {
     public var sailors: [TimeTrialSailor] {
         guard !tiers.isEmpty || !profiles.isEmpty else { return TimeTrialSailor.standard }
         return tiers.map(TimeTrialSailor.tier) + profiles.map(TimeTrialSailor.profile)
+    }
+
+    /// The start trial's seeds to sail (`--start`): the start suite's, or its hold-outs for `--holdout`, in the order
+    /// given.
+    public func startSeeds() throws -> [StartTrialSeed] {
+        let pool = (pools.isEmpty ? [.reference] : pools).flatMap { pool -> [StartTrialSeed] in
+            pool == .holdout ? StartTrialSeed.holdOut : StartTrialSeed.pool
+        }
+        if let seedCount, seedCount > pool.count {
+            throw BotSuiteError.usage("--seeds: the pool has \(pool.count) seeds")
+        }
+        if let unknown = only.first(where: { name in !pool.contains { $0.name == name } }) {
+            throw BotSuiteError.usage("--only: no seed \(unknown) in the pool")
+        }
+        let chosen = only.isEmpty ? Array(pool.prefix(seedCount ?? pool.count)) : pool.filter { only.contains($0.name) }
+        return chosen.map { seed in
+            var seed = seed
+            if let boatClass { seed.trial.boatClass = boatClass }
+            return seed
+        }
     }
 
     /// The seeds to sail.
@@ -440,29 +474,39 @@ public enum TimeTrial {
                 print(TimeTrialOptions.usage)
                 return 0
             }
+            if options.start {
+                let report = try StartTrial.run(options.startSeeds(), sailors: options.sailors, oracle: options.oracle,
+                                                jobs: options.jobs ?? BotSuite.defaultJobs)
+                try emit(report.lines, json: report.jsonData, to: options.jsonPath)
+                return 0
+            }
             if let out = options.tuneOut {
                 try TimeTrialTuner.run(options, out: out) { print($0) }
                 return 0
             }
             let report = try run(options)
-            let toStdout = options.jsonPath == "-"
-            for line in report.lines {
-                if toStdout { printError(line) } else { print(line) }
-            }
-            if let path = options.jsonPath {
-                let data = try report.jsonData()
-                if toStdout {
-                    print(String(decoding: data, as: UTF8.self))
-                } else {
-                    try data.write(to: URL(fileURLWithPath: path))
-                }
-            }
+            try emit(report.lines, json: report.jsonData, to: options.jsonPath)
             return 0
         } catch {
             printError("regatta-timetrial: \(error)")
             if case BotSuiteError.usage = error { printError(TimeTrialOptions.usage) }
             return 2
         }
+    }
+}
+
+/// Prints a report's `lines`, and writes its JSON to `path` if given: to stdout for `-`, the lines then to stderr.
+private func emit(_ lines: [String], json: () throws -> Data, to path: String?) throws {
+    let toStdout = path == "-"
+    for line in lines {
+        if toStdout { printError(line) } else { print(line) }
+    }
+    guard let path else { return }
+    let data = try json()
+    if toStdout {
+        print(String(decoding: data, as: UTF8.self))
+    } else {
+        try data.write(to: URL(fileURLWithPath: path))
     }
 }
 
