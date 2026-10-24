@@ -47,6 +47,37 @@ import Testing
         #expect(Self.report.seeds.map(\.fleetDigest) == (try Self.fleets.map { try Replayer.digest(of: $0.log) }))
     }
 
+    /// The oracle's search forks the fleet's race at every checkpoint. A snapshot alone doesn't carry the umpire's
+    /// memory, and after an import a fleet calls fouls the race doesn't (S1: a penalty on seat 8 a tick after an import at
+    /// T−40); with it handed on (`Race.importSnapshot(_:umpire:)`) the race forked every 2 s is the logged one to the bit.
+    @Test func aFleetForkedWithItsUmpireIsTheLoggedRace() throws {
+        for fleet in Self.fleets {
+            let log = fleet.log
+            let setup = log.header.setup
+            let files = try RaceFiles(resolving: setup)
+            var race = try Race(setup: setup, files: files, mode: .authoritative(windSeed: log.header.windSeed))
+            var next = 0
+            while race.tick < log.finalTick {
+                if race.tick.isMultiple(of: 2 * Race.tickRate), let umpire = race.umpire {
+                    let fork = try Race(setup: setup, files: files, mode: .authoritative(windSeed: log.header.windSeed))
+                    try fork.importSnapshot(race.exportSnapshot(), umpire: umpire)
+                    race = fork
+                }
+                let tick = race.tick + 1
+                while next < log.inputs.count && log.inputs[next].tick == tick {
+                    let record = log.inputs[next]
+                    switch record.kind {
+                    case .held(let input): race.apply(input, seat: record.seat, atTick: tick)
+                    case .tap(let tap): race.tap(tap, seat: record.seat, atTick: tick)
+                    }
+                    next += 1
+                }
+                race.step()
+            }
+            #expect(race.digest() == (try Replayer.digest(of: log)))
+        }
+    }
+
     /// #584 stage 2: a hole she can only barge into is no hole. The oracle's start against the frozen fleet is never
     /// over the line at the gun and has no penalty called on her. (At this narrow search it may find no start at all
     /// against a fleet: S1 seat 0 doesn't by T+60 at a beam of 3, and starts on the gun at the tool's beam of 8.)

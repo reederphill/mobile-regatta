@@ -599,6 +599,9 @@ public struct StartOracle {
         var trail: Oracle.Trail?
         /// A penalty was called on her on the way here (a bot's own start serves it): no start for the oracle to have.
         var fouled = false
+        /// The umpire's memory in `world` (`Race.importSnapshot(_:umpire:)`): a snapshot doesn't carry it, and with a fleet
+        /// on the water a node sailed on without it would call fouls the race doesn't, and miss ones it does.
+        var umpire: UmpireState?
         /// Her worth at T+60 as estimated (`estimate`), or her worth once there: higher is better.
         var score: Double
         var done: Bool { world.tick >= StartGeometry.horizonTick }
@@ -625,8 +628,9 @@ public struct StartOracle {
         var nodes = 0
         var ticks = 0
         let boat = course.origin.seats[her].boat
-        let root = Node(world: course.origin, helm: Oracle.Helm(course: .angle(boomSide: boat.boomSide, twa: boat.twa)),
+        var root = Node(world: course.origin, helm: Oracle.Helm(course: .angle(boomSide: boat.boomSide, twa: boat.twa)),
                         ease: course.origin.seats[her].heldInput.ease, bot: nil, pure: nil, trail: nil, score: 0)
+        root.umpire = race.umpire
         var beam = [root]
         var best: Node?
         var levels = 0
@@ -670,6 +674,15 @@ public struct StartOracle {
             beam = select(children)
         }
         return Plan(inputs: best?.trail?.all ?? [], worth: best?.score ?? -.infinity, nodes: nodes, ticks: ticks)
+    }
+
+    /// `race` in `node`'s world, its umpire's memory too.
+    private func load(_ node: Node, into race: Race) throws {
+        if let umpire = node.umpire {
+            try race.importSnapshot(node.world, umpire: umpire)
+        } else {
+            try race.importSnapshot(node.world)
+        }
     }
 
     /// The helm after a start action at `node`; nil where it is the same as another, or she is through a turn.
@@ -731,7 +744,7 @@ public struct StartOracle {
 
     /// `node`'s child sailed by `pilot` to the next checkpoint, and scored there.
     private func sail(from node: Node, pilot: Pilot, race: Race, ticks: inout Int) throws -> Node {
-        try race.importSnapshot(node.world)
+        try load(node, into: race)
         let startTick = race.tick
         var endTick = min(startTick + Int(options.checkpointSeconds * Double(Race.tickRate)), StartGeometry.horizonTick)
         if startTick < 0 { endTick = min(endTick, 0) }
@@ -766,6 +779,7 @@ public struct StartOracle {
         var child = Node(world: race.exportSnapshot(), helm: node.helm, ease: node.ease, bot: nil, pure: nil, trail: trail,
                          score: lost ? -.infinity : estimate(race))
         child.fouled = node.fouled || called || boat.penaltyTurnsOwed > 0
+        child.umpire = race.umpire
         switch pilot {
         case .helm(let helm, let ease):
             child.helm = helm
@@ -806,7 +820,7 @@ public struct StartOracle {
     /// `node` sailed on `horizonSeconds` (not past T+60) as the executor would sail her, and scored there: a horizon
     /// that ends over the line at the gun scores nothing, one that fouls pays the lap oracle's turn in metres.
     private func horizonScore(_ node: Node, race: Race, ticks: inout Int) throws -> Double {
-        try race.importSnapshot(node.world)
+        try load(node, into: race)
         let profile = Oracle.rolloutProfile
         var driver = node.bot.flatMap { $0.profile == profile ? $0.driver : nil } ?? takeOver(profile).takingOver()
         let endTick = min(race.tick + Int(options.horizonSeconds * Double(Race.tickRate)), StartGeometry.horizonTick)

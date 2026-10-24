@@ -2349,3 +2349,16 @@ extension Race {
         return nil
     }
 }
+
+extension Race {
+    /// `importSnapshot(_:)`, then the umpire's memory `umpire` handed on with it (#584): a race forked whole, for an
+    /// offline search that sails one world on several ways (the start trial's hold-one-out, a fleet on the water). A
+    /// snapshot never carries the umpire's memory (#88), so a tool that saves a world to sail it again saves `umpire`
+    /// beside it, as `WorldSnapshotTests` hand it on. An authoritative race's alone: a prediction has no umpire. Throws as
+    /// `importSnapshot(_:)` does, leaving the race unchanged.
+    public func importSnapshot(_ snapshot: WorldSnapshot, umpire: UmpireState) throws {
+        precondition(self.umpire != nil, "only an authoritative race has an umpire")
+        try importSnapshot(snapshot)
+        self.umpire = umpire
+    }
+}
