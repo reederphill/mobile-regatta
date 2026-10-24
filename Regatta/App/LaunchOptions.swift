@@ -199,6 +199,8 @@ struct LaunchOptions: Equatable {
     var tilt: Double?
     /// `-boats <n>` (#596, Debug builds): the launch race's fleet, 2…16.
     var boats: Int?
+    /// `-water none|a|b|c` (#604 probe, Debug builds): the water look.
+    var water: String?
     var hidesScene = false
     var appearance: Appearance?
     var vision: VisionFilter?
@@ -257,7 +259,7 @@ struct LaunchOptions: Equatable {
             case "-fps120": fps120 = true
             case "-captureAppAttestFixture": captureAppAttestFixture = true
             case "-fakeServices", "-referenceRace", "-beatMetres", "-devIdentity", "-devRestrictions", "-termsVersion", "-tap",
-                 "-boats":
+                 "-boats", "-water":
                 guard let value = takeValue(of: argument, from: &rest) else { continue }
                 apply(argument, value)
             #endif
@@ -291,7 +293,7 @@ struct LaunchOptions: Equatable {
                           "-onlineResults"]
         #if DEBUG
         flags.formUnion(["-tuning", "-fps120", "-captureAppAttestFixture", "-fakeServices", "-referenceRace", "-beatMetres", "-devIdentity", "-devRestrictions",
-                         "-termsVersion", "-tap", "-boats"])
+                         "-termsVersion", "-tap", "-boats", "-water"])
         #endif
         return flags
     }()
@@ -343,6 +345,8 @@ struct LaunchOptions: Equatable {
             if let n = Double(value), DeviceSettings.tiltRange.contains(n) { tilt = n } else { reject(argument, value, "degrees off vertical, 5…55") }
         case "-boats":
             if let n = Int(value), (2...16).contains(n) { boats = n } else { reject(argument, value, "a whole number of boats, 2…16") }
+        case "-water":
+            if ["none", "a", "b", "c"].contains(value) { water = value } else { reject(argument, value, "none, a, b or c") }
         case "-appearance":
             if let style = Appearance(rawValue: value) { appearance = style } else { reject(argument, value, "light or dark") }
         case "-vision":

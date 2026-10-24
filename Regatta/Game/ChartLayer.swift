@@ -132,7 +132,13 @@ final class ChartLayer {
             for column in 0..<grid.columns {
                 let weight = ChartGeometry.shallowsWeight(depth: current.depth(column: column, row: row),
                                                           maxDepth: current.maxDepth, fraction: style.shallowFraction)
-                pixels += ShallowsTint.colour(weight: weight).rgb8 + [255]
+                var colour = ShallowsTint.colour(weight: weight)
+                // #604 probe, look A: a gentle depth gradient under the tint, darker over the deepest nodes.
+                if WaterLook.current == .a, current.maxDepth > 0 {
+                    let deep = (current.depth(column: column, row: row) / current.maxDepth).clamped(to: 0...1)
+                    colour = colour.mixed(with: OKLab(ChartPalette.puff), 0.28 * deep * deep * (3 - 2 * deep))
+                }
+                pixels += colour.rgb8 + [255]
             }
         }
         return pixels

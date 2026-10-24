@@ -30,6 +30,23 @@ extension WaterWorld {
     }
 }
 
+/// The #604 probe's water looks (Debug `-water none|a|b|c`): none is today's water; A light on the water (glitter
+/// on the ripple, a depth gradient under the shallows); B cat's paws (the ripple follows the wind it lies in);
+/// C swell (long low crests rolling downwind under the ripple, foam along them). PROBE: never merged.
+nonisolated enum WaterLook: String {
+    case none, a, b, c
+    static let current: WaterLook = {
+        #if DEBUG
+        // `LaunchOptions` validates `-water`; read here off the arguments, as the look is wanted off the main actor.
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let k = arguments.firstIndex(of: "-water"), k + 1 < arguments.count else { return .none }
+        return WaterLook(rawValue: arguments[k + 1]) ?? .none
+        #else
+        return .none
+        #endif
+    }()
+}
+
 /// What the camera shows, in world points.
 struct WaterView: Equatable {
     /// The camera's position.
@@ -113,6 +130,10 @@ final class WaterNode: SKNode {
     private let streakTextures = WaterNode.sharedStreakTextures
     private let whitecapTexture = WaterNode.sharedWhitecapTexture
     private var puffNodes: [SKSpriteNode] = []
+    /// Look C: the swell, one sprite under the puffs, its crests drawn in world coordinates by its shader.
+    private let swellSprite = SKSpriteNode()
+    /// Look B: each lattice tile's streak scroll, tile heights, so a streak in a puff runs ahead of the lattice.
+    private var scrolls: [RippleLattice.Index: Double] = [:]
     private var tileNodes: [Tile] = []
 
     /// The size a streak tile's texture is drawn for: `style.rippleSpacing` scales it from here.
@@ -144,6 +165,12 @@ final class WaterNode: SKNode {
         overlaySide.verticalAlignmentMode = .center
         overlaySide.isHidden = true
         addChild(pressureSprite)
+        if WaterLook.current == .c {
+            swellSprite.zPosition = -0.5
+            swellSprite.shader = Self.swellShader
+            swellSprite.color = .white
+            addChild(swellSprite)
+        }
         addChild(puffLayer)
         addChild(rippleLayer)
         addChild(overlayLines)
@@ -158,6 +185,7 @@ final class WaterNode: SKNode {
         updatePressure(world, view: view)
         updateRipple(world, view: view, dt: dt)
         updatePuffs(world.puffs)
+        updateSwell(world, view: view)
         updateOverlay(world, view: view)
     }
 
@@ -260,6 +288,9 @@ final class WaterNode: SKNode {
         let share = Whitecaps.share(in: world.conditions, style: style, quality: quality)
         let period = max(style.whitecapSeconds, 0.1)
         let scale = CGFloat(tileScale * style.rippleSpacing / Self.tileSize)
+        let look = WaterLook.current
+        var nextScrolls: [RippleLattice.Index: Double] = [:]
+        if look == .b { nextScrolls.reserveCapacity(scrolls.count) }
         streaks.removeAll(keepingCapacity: true)
         whitecaps.removeAll(keepingCapacity: true)
         var n = 0
@@ -285,9 +316,40 @@ final class WaterNode: SKNode {
                     tile.streak.zRotation = CGFloat(-(wind.direction + .pi))
                     streaks.append(Streak(position: metres, windDirection: wind.direction))
                 }
-                updateWhitecap(tile, at: index, share: share, time: world.time, period: period)
+                var tileShare = share
+                switch look {
+                case .a:
+                    // The light's bearing in the tile's texture: fixed on the water, turned into the tile's frame.
+                    let r = -Double(tile.streak.zRotation) + Self.lightBearing
+                    tile.streak.setValue(SKAttributeValue(vectorFloat2: SIMD2(Float(cos(r)), Float(sin(r)))), forAttribute: "a_light")
+                    tile.streak.setValue(SKAttributeValue(float: Float(WaterHash.unit(i, j, 1, salt: 0x474C_4954) * 97)), forAttribute: "a_seed")
+                case .b:
+                    let gust = Self.gust(local: wind, course: course)
+                    let lull = max(-gust, 0), puff = max(gust, 0)
+                    // Sparse in lulls: tiles drop out as the lull deepens.
+                    if WaterHash.unit(i, j, 2, salt: 0x5350_4152) < 0.75 * lull { tile.streak.isHidden = true }
+                    tile.streak.yScale = scale * CGFloat(1 + 0.6 * puff)
+                    // The streaks run with the wind they lie in: faster than the lattice in a puff, slower in a lull.
+                    var scroll = scrolls[index] ?? WaterHash.unit(i, j, 3, salt: 0x5343_524C)
+                    if let wind, dt > 0 {
+                        let extra = 2 * style.rippleDrift * (wind.speed - Whitecaps.meanWind(of: world.conditions))
+                            * pointsPerMeter * dt
+                        scroll += extra / (Self.tileSize * Double(scale) * (1 + 0.6 * puff))
+                    }
+                    scroll -= scroll.rounded(.down)
+                    nextScrolls[index] = scroll
+                    tile.streak.setValue(SKAttributeValue(float: Float(gust)), forAttribute: "a_gust")
+                    tile.streak.setValue(SKAttributeValue(float: Float(scroll)), forAttribute: "a_scroll")
+                    // Whitecaps bias toward the puffs and leave the lulls.
+                    tileShare = min(share * (1 + 2.5 * gust), 0.9)
+                    if share == 0, puff > 0.6 { tileShare = 0.15 * (puff - 0.6) / 0.4 }
+                case .none, .c:
+                    break
+                }
+                updateWhitecap(tile, at: index, share: max(tileShare, 0), time: world.time, period: period)
             }
         }
+        if look == .b { scrolls = nextScrolls }
         for tile in tileNodes[n...] where !tile.streak.isHidden {
             tile.streak.isHidden = true
             tile.cap.isHidden = true
@@ -331,7 +393,7 @@ final class WaterNode: SKNode {
     }
     /// The wave for `quality` and `style` (#597).
     private func applyDepth() {
-        rippleShader = quality == .full ? Self.waveShader : nil
+        rippleShader = quality == .full ? Self.lookShader : nil
         Self.rippleAlpha.floatValue = Float(style.rippleAlpha)
     }
 
@@ -367,6 +429,146 @@ final class WaterNode: SKNode {
         gl_FragColor = vec4(u_tint * a, a);
     }
     """, uniforms: [waveClock, rippleTint, rippleAlpha])
+
+    // MARK: - #604 probe looks
+
+    /// Look A's light: the bearing it comes from on the water, radians in the world frame (from the upper left of
+    /// a north-up chart, as the land relief's).
+    private static let lightBearing = 2.4
+
+    /// Look B: how much more (+) or less (−) wind a tile lies in than the course wind, −1…1 at a quarter's difference.
+    private static func gust(local: GroundWind?, course: GroundWind?) -> Double {
+        guard let local, let course, course.speed > 0 else { return 0 }
+        return ((local.speed / course.speed - 1) / 0.25).clamped(to: -1...1)
+    }
+
+    private static let lookShader: SKShader = {
+        switch WaterLook.current {
+        case .none, .c: return waveShader
+        case .a: return glitterShader
+        case .b: return catspawShader
+        }
+    }()
+
+    private static let puffTint: SKUniform = {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        ChartPalette.puff.uiColor.getRed(&r, green: &g, blue: &b, alpha: &a)
+        return SKUniform(name: "u_puff_tint", vectorFloat3: SIMD3(Float(r), Float(g), Float(b)))
+    }()
+
+    /// Look A: the ripple, its streaks' lit edge brightened toward the light and glitter specks twinkling on them,
+    /// both in the tile's texture, so they ride with the water.
+    private static let glitterShader: SKShader = {
+        let shader = SKShader(source: """
+        float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        void main() {
+            vec2 uv = v_tex_coord;
+            uv.y += 0.01 * sin(u_clock * 2.0 + uv.x * 12.0);
+            float base = texture2D(u_texture, uv).a;
+            // Lit edge: alpha falls away toward the light on the side of a streak that faces it.
+            vec2 off = a_light * vec2(0.25 * 0.012, 0.012);
+            float edge = max(0.0, base - texture2D(u_texture, uv + off).a);
+            // Glitter: a speck in a few cells of the streaks, twinkling on race time.
+            vec2 cellP = vec2(uv.x * 4.0 * 22.0, uv.y * 22.0);
+            vec2 cell = floor(cellP);
+            float h = h21(cell + a_seed);
+            float tw = 0.5 + 0.5 * sin(u_clock * (1.5 + 3.0 * h) + h * 40.0);
+            float d = length(fract(cellP) - 0.5);
+            float spark = step(0.9, h) * pow(tw, 5.0) * smoothstep(0.45, 0.05, d) * smoothstep(0.15, 0.6, base);
+            float a = base * u_ripple_alpha;
+            float g = clamp(0.22 * edge + 0.85 * spark, 0.0, 1.0);
+            gl_FragColor = vec4(u_tint * a * (1.0 - g) + vec3(g), a + g - a * g);
+        }
+        """, uniforms: [waveClock, rippleTint, rippleAlpha])
+        shader.attributes = [SKAttribute(name: "a_light", type: .vectorFloat2), SKAttribute(name: "a_seed", type: .float)]
+        return shader
+    }()
+
+    /// Look B: the ripple following the wind it lies in: in a puff the streaks double up, lengthen and darken to the
+    /// puff's tone; in a lull they fade toward glassy. Each streak scrolls along itself by its tile's `a_scroll`.
+    private static let catspawShader: SKShader = {
+        let shader = SKShader(source: """
+        void main() {
+            vec2 uv = v_tex_coord;
+            uv.y = fract(uv.y - a_scroll);
+            uv.y += 0.01 * sin(u_clock * 2.0 + uv.x * 12.0);
+            float g = max(a_gust, 0.0);
+            float l = max(-a_gust, 0.0);
+            float t1 = texture2D(u_texture, uv).a;
+            float k = floor(uv.x * 4.0);
+            vec2 uv2 = vec2((k + 0.15 + 0.7 * fract(fract(uv.x * 4.0) + 0.5)) / 4.0, fract(uv.y + 0.43));
+            float t2 = texture2D(u_texture, uv2).a;
+            float cov = max(t1, t2 * g);
+            float a = cov * u_ripple_alpha * (1.0 + 0.5 * g - 0.8 * l);
+            vec3 tint = mix(u_tint, u_puff_tint, smoothstep(0.1, 0.6, g));
+            gl_FragColor = vec4(tint * a, a);
+        }
+        """, uniforms: [waveClock, rippleTint, rippleAlpha, puffTint])
+        shader.attributes = [SKAttribute(name: "a_gust", type: .float), SKAttribute(name: "a_scroll", type: .float)]
+        return shader
+    }()
+
+    /// Look C's frame: the sprite's centre in its own (downwind-up) axes, its size, and the swell (wavelength and
+    /// speed in points, foam 0…1).
+    private static let swellOrigin = SKUniform(name: "u_origin", vectorFloat2: .zero)
+    private static let swellSize = SKUniform(name: "u_size", vectorFloat2: .zero)
+    private static let swellFoam = SKUniform(name: "u_foam", float: 0)
+
+    /// Look C: long low crests across the course wind, rolling downwind (wavelength 18 m, a 6 s period, so the
+    /// 600 s clock wraps on a whole number of crests), meandering, broken into lengths by noise; each crest a
+    /// faint lift of the lull tone with a faint puff-tone shadow on its lee, foam specks along the tops.
+    private static let swellShader = SKShader(source: """
+    float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    float vnoise(vec2 p) {
+        vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+        float a = h21(i), b = h21(i + vec2(1.0, 0.0)), c = h21(i + vec2(0.0, 1.0)), d = h21(i + vec2(1.0, 1.0));
+        return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+    }
+    void main() {
+        float lambda = 144.0;
+        float speed = 24.0;
+        vec2 p = (v_tex_coord - 0.5) * u_size + u_origin;
+        float y = p.y + 0.18 * lambda * sin(p.x / (2.7 * lambda) + u_clock * 0.104720);
+        float phase = (y - speed * u_clock) / lambda;
+        float c = 0.5 + 0.5 * cos(6.2831853 * phase);
+        float crest = pow(c, 5.0);
+        float lee = pow(0.5 + 0.5 * cos(6.2831853 * (phase + 0.2)), 6.0);
+        float m = smoothstep(0.25, 0.75, vnoise(vec2(p.x / (3.5 * lambda), floor(phase) * 1.7)));
+        float lift = 0.22 * crest * m;
+        float shade = 0.16 * lee * m;
+        vec2 cellP = p / (lambda * 0.07);
+        vec2 cell = floor(cellP);
+        float h = h21(cell + floor(phase) * 13.0);
+        vec2 at = 0.25 + 0.5 * vec2(h21(cell + 3.1), h21(cell + 7.7));
+        float d = length(fract(cellP) - at);
+        float foam = step(1.0 - 0.2 * u_foam, h) * pow(c, 16.0) * m * smoothstep(0.3, 0.05, d) * 0.75;
+        vec3 lullC = vec3(0.235, 0.435, 0.580);
+        vec3 puffC = vec3(0.0, 0.176, 0.302);
+        vec3 rgb = lullC * lift + puffC * shade;
+        float a = lift + shade;
+        rgb = rgb * (1.0 - foam) + vec3(0.89, 0.93, 0.95) * foam;
+        a = a + foam - a * foam;
+        gl_FragColor = vec4(rgb, a);
+    }
+    """, uniforms: [waveClock, swellOrigin, swellSize, swellFoam])
+
+    /// Look C: the swell sprite covers the view, turned so its up is the course wind's downwind; its shader draws in
+    /// world coordinates, so the crests stay on the water as the view moves.
+    private func updateSwell(_ world: WaterWorld, view: WaterView) {
+        guard WaterLook.current == .c, let course = world.courseWind else { return }
+        let rect = view.rect
+        let side = hypot(rect.width, rect.height) * 1.2
+        let rotation = CGFloat(-(course.direction + .pi))
+        swellSprite.size = CGSize(width: side, height: side)
+        swellSprite.position = CGPoint(x: rect.midX, y: rect.midY)
+        swellSprite.zRotation = rotation
+        let c = cos(-rotation), s = sin(-rotation)
+        let local = SIMD2(Float(rect.midX * c - rect.midY * s), Float(rect.midX * s + rect.midY * c))
+        Self.swellOrigin.vectorFloat2Value = local
+        Self.swellSize.vectorFloat2Value = SIMD2(Float(side), Float(side))
+        let knots = RegattaCore.knots(metresPerSecond: Whitecaps.meanWind(of: world.conditions))
+        Self.swellFoam.floatValue = Float(((knots - 6) / 12).clamped(to: 0...1))
+    }
 
     private func makeTile() -> Tile {
         // A z each, from its slot (`DrawOrder`; a view takes a few hundred): a frame gives the slots out in
