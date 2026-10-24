@@ -118,28 +118,24 @@ enum LitWater {
         vec2 dp = vec2(-dn.y, dn.x);
         vec2 grad = vec2(0.0);
         float hgt = 0.0;
-        float amp = 0.35 + 1.1 * rough;
-        for (int i = 0; i < 6; i++) {
+        float amp = 0.5 + 0.7 * rough;
+        for (int i = 0; i < 9; i++) {
             float fi = float(i);
-            float lambda = 6.0 * pow(0.68, fi);
-            float ang = fi == 0.0 ? 0.0 : (fi == 1.0 ? 0.62 : (fi == 2.0 ? -0.8 : (fi == 3.0 ? 0.35 : (fi == 4.0 ? -0.4 : 1.0))));
+            float lambda = 4.2 * pow(0.76, fi);
+            // Directions spread about downwind (a hashed angle a wave, ±1.3 rad), short crests: each wave's
+            // amplitude under its own drifting noise envelope about a wavelength across.
+            float ang = (h21(vec2(fi, 3.7)) - 0.5) * 2.6 * (0.5 + 0.5 * h21(vec2(fi, 9.1)));
+            if (i == 0) { ang = 0.0; }
             vec2 dir = dn * cos(ang) + dp * sin(ang);
             float k = 6.2831 / lambda;
             float om = sqrt(9.81 * k);
-            float group = 0.15 + 1.7 * vnoise(m / (lambda * 3.0) + vec2(fi * 7.1, fi * 3.3) + dn * t * 0.05);
-            float steep = 0.1 * amp * group * smoothstep(5.0, 12.0, lambda * pxPerM);
-            float ph = k * dot(dir, m) - om * t + fi * 1.7;
-            hgt += steep / k * sin(ph) * k / 6.2831 * 4.0;
+            float ca = cos(fi * 2.4), sa = sin(fi * 2.4);
+            vec2 em = vec2(m.x * ca - m.y * sa, m.x * sa + m.y * ca) / (lambda * 1.4);
+            float env = smoothstep(0.2, 0.85, vnoise(em + vec2(fi * 7.1, fi * 3.3) - dn * t * 0.12));
+            float steep = (0.12 + 0.02 * fi) * amp * env * smoothstep(2.5, 6.0, lambda * pxPerM);
+            float ph = k * dot(dir, m) - om * t + 6.2831 * h21(vec2(fi, 1.3));
+            hgt += steep * sin(ph) * env;
             grad += steep * cos(ph) * dir;
-        }
-        // Chop: two octaves of drifting value noise, finite differences, rough water only where it shows.
-        float e = 0.08;
-        for (int o = 0; o < 2; o++) {
-            float sc = o == 0 ? 0.9 : 0.42;
-            float w = (o == 0 ? 0.3 : 0.22) * (0.25 + rough) * smoothstep(5.0, 12.0, sc * pxPerM);
-            vec2 q = m / sc - dn * t * (1.1 / sc) * 0.5 + vec2(float(o) * 13.0, 0.0);
-            float n0 = vnoise(q);
-            grad += w * vec2(vnoise(q + vec2(e, 0.0)) - n0, vnoise(q + vec2(0.0, e)) - n0) / e;
         }
         return vec3(grad, hgt);
     }
@@ -174,24 +170,24 @@ enum LitWater {
         vec3 shallowC = vec3(0.09, 0.36, 0.40);
         vec3 body = mix(deepC, shallowC, dep.r) * (1.0 + 0.25 * dep.r);
         body *= 0.9 + 0.25 * max(dot(n, l), 0.0);
-        body *= 1.0 - 0.22 * puff + 0.08 * lull;
+        body *= 1.0 - 0.3 * puff + 0.12 * lull;
         // Fresnel-weighted sky, exaggerated for the phone; rough water scatters the reflection (darker puffs),
         // glassy water mirrors the sky (lighter lulls).
         float ndv = max(dot(n, v), 0.0);
         float F = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);
         vec3 r = reflect(-v, n);
         float cohere = clamp(1.15 - 0.55 * rough - 0.35 * puff + 0.45 * lull, 0.25, 1.6);
-        vec3 refl = sky(r, l) * clamp(F * 4.0 + 0.06, 0.0, 1.0) * cohere;
+        vec3 refl = sky(r, l) * clamp(F * 6.0 + 0.04, 0.0, 1.0) * cohere;
         // Sun glitter: Blinn-Phong, sharper on glassy water.
         vec3 h = normalize(l + v);
-        float shin = mix(500.0, 45.0, rough);
-        float spec = pow(max(dot(n, h), 0.0), shin) * (shin + 8.0) / 25.0 * 0.5;
-        vec3 col = body + refl + vec3(1.0, 0.96, 0.88) * spec;
+        float shin = mix(600.0, 90.0, rough);
+        float spec = pow(max(dot(n, h), 0.0), shin) * (shin + 8.0) / 25.0 * 0.22;
+        vec3 col = body + refl + vec3(1.0, 0.96, 0.88) * spec * (1.0 - 0.5 * puff);
         // Foam on the highest crests above the foam wind, more in puffs.
-        float patchy = smoothstep(0.62, 0.9, vnoise(m / 3.5 - u_down * u_clock * 0.5));
+        float patchy = smoothstep(0.78, 0.97, vnoise(m / 6.0 - u_down * u_clock * 0.4)) * smoothstep(0.5, 0.8, vnoise(m / 2.3 + vec2(5.0, 1.0) - u_down * u_clock * 0.7));
         float crest = patchy * smoothstep(0.45, 0.85, vnoise(m * 1.4 - u_down * u_clock * 0.8)) * smoothstep(0.0, 0.6, wv.z + 0.3);
-        float foam = crest * u_wind.y * (0.35 + puff) * smoothstep(3.0, 8.0, pxPerM);
-        col = mix(col, vec3(0.92, 0.95, 0.97), clamp(foam, 0.0, 0.85));
+        float foam = crest * u_wind.y * (0.3 + 0.9 * puff) * (1.0 - lull) * smoothstep(3.0, 8.0, pxPerM);
+        col = mix(col, vec3(0.92, 0.95, 0.97), clamp(foam * 0.8, 0.0, 0.7));
         gl_FragColor = vec4(min(col, vec3(1.0)), 1.0);
     }
     """
@@ -215,26 +211,23 @@ enum LitWater {
     float2 waveSlope(float2 m, float2 dn, float t, float rough, float pxPerM) {
         float2 dp = float2(-dn.y, dn.x);
         float2 grad = float2(0.0);
-        float amp = 0.35 + 1.1 * rough;
-        for (int i = 0; i < 6; i++) {
+        float amp = 0.5 + 0.7 * rough;
+        for (int i = 0; i < 9; i++) {
             float fi = float(i);
-            float lambda = 6.0 * pow(0.68, fi);
-            float ang = fi == 0.0 ? 0.0 : (fi == 1.0 ? 0.62 : (fi == 2.0 ? -0.8 : (fi == 3.0 ? 0.35 : (fi == 4.0 ? -0.4 : 1.0))));
+            float lambda = 4.2 * pow(0.76, fi);
+            // Directions spread about downwind (a hashed angle a wave, ±1.3 rad), short crests: each wave's
+            // amplitude under its own drifting noise envelope about a wavelength across.
+            float ang = (h21(float2(fi, 3.7)) - 0.5) * 2.6 * (0.5 + 0.5 * h21(float2(fi, 9.1)));
+            if (i == 0) { ang = 0.0; }
             float2 dir = dn * cos(ang) + dp * sin(ang);
             float k = 6.2831 / lambda;
             float om = sqrt(9.81 * k);
-            float group = 0.15 + 1.7 * vnoise(m / (lambda * 3.0) + float2(fi * 7.1, fi * 3.3) + dn * t * 0.05);
-            float steep = 0.1 * amp * group * smoothstep(5.0, 12.0, lambda * pxPerM);
-            float ph = k * dot(dir, m) - om * t + fi * 1.7;
+            float ca = cos(fi * 2.4), sa = sin(fi * 2.4);
+            float2 em = float2(m.x * ca - m.y * sa, m.x * sa + m.y * ca) / (lambda * 1.4);
+            float env = smoothstep(0.2, 0.85, vnoise(em + float2(fi * 7.1, fi * 3.3) - dn * t * 0.12));
+            float steep = (0.12 + 0.02 * fi) * amp * env * smoothstep(2.5, 6.0, lambda * pxPerM);
+            float ph = k * dot(dir, m) - om * t + 6.2831 * h21(float2(fi, 1.3));
             grad += steep * cos(ph) * dir;
-        }
-        float e = 0.08;
-        for (int o = 0; o < 2; o++) {
-            float sc = o == 0 ? 0.9 : 0.42;
-            float w = (o == 0 ? 0.3 : 0.22) * (0.25 + rough) * smoothstep(5.0, 12.0, sc * pxPerM);
-            float2 q = m / sc - dn * t * (1.1 / sc) * 0.5 + float2(float(o) * 13.0, 0.0);
-            float n0 = vnoise(q);
-            grad += w * float2(vnoise(q + float2(e, 0.0)) - n0, vnoise(q + float2(0.0, e)) - n0) / e;
         }
         return grad;
     }
@@ -243,6 +236,7 @@ enum LitWater {
     float u_scale;
     float u_wind;
     float u_body;
+    float u_roughPuff;
     float2 u_center;
     float2 u_rho;
     float2 u_down;
@@ -277,10 +271,14 @@ enum LitWater {
     float3 deepC = float3(0.035, 0.17, 0.27);
     float3 shallowC = float3(0.09, 0.36, 0.40);
     float3 body = mix(deepC, shallowC, dep.r) * (1.0 + 0.25 * dep.r) * u_body;
-    body *= 1.0 - 0.22 * puff * u_wind + 0.08 * lull;
-    _surface.diffuse = float4(body, 1.0);
+    body *= 1.0 - 0.3 * puff + 0.12 * lull;
+    // The body's colour is light coming up out of the water, not the sun on a matte surface: emitted, no diffuse; the surface's own light is the sky's and the sun's reflection.
+    _surface.emission = float4(body, 1.0);
+    _surface.diffuse = float4(0.0, 0.0, 0.0, 1.0);
     _surface.metalness = 0.0;
-    _surface.roughness = clamp(0.06 + 0.4 * rough + 0.25 * puff - 0.05 * lull, 0.03, 0.8);
+    // Briefed: puffs rough (u_roughPuff 1, `REGATTA_ROUGH_PUFF`); with the sun ahead that spreads the glitter over
+    // them and they read lighter, so by default the roughness follows the wind only gently.
+    _surface.roughness = clamp(0.1 + 0.15 * rough + u_roughPuff * (0.5 * puff - 0.05 * lull), 0.04, 0.85);
     """
 
     /// The sky for J's lighting environment: an equirectangular gradient, pale at the horizon, deep blue overhead,
@@ -343,6 +341,7 @@ final class LitWaterPlane {
         material.lightingModel = .physicallyBased
         material.writesToDepthBuffer = false
         material.diffuse.contents = UIColor(red: 0.04, green: 0.17, blue: 0.27, alpha: 1)
+        material.emission.contents = UIColor(red: 0.04, green: 0.17, blue: 0.27, alpha: 1)
         material.metalness.contents = 0.0
         material.roughness.contents = 0.2
         material.shaderModifiers = [.surface: LitWater.jModifier]
@@ -359,23 +358,43 @@ final class LitWaterPlane {
         material.setValue(SCNVector4(d.map0.x, d.map0.y, d.map0.z, d.map0.w), forKey: "u_dmap0")
         material.setValue(SCNVector4(d.map1.x, d.map1.y, d.map1.z, d.map1.w), forKey: "u_dmap1")
         material.setValue(Self.bodyGain, forKey: "u_body")
+        material.setValue(Self.roughPuff, forKey: "u_roughPuff")
         plane.materials = [material]
         planeNode = SCNNode(geometry: plane)
         planeNode.eulerAngles = SCNVector3(-Float.pi / 2, 0, 0)
         planeNode.categoryBitMask = Self.category
         scene.rootNode.addChildNode(planeNode)
 
+        // The sun on the water: the fleet's light's direction, its own exposure, lighting only the plane.
+        let sun = SCNLight()
+        sun.type = .directional
+        sun.intensity = Self.sunIntensity
+        sun.categoryBitMask = Self.category
+        let sunNode = SCNNode()
+        sunNode.light = sun
+        let l = LitWater.sun
+        sunNode.position = SCNVector3(l.x, l.z, -l.y)
+        sunNode.look(at: SCNVector3(0, 0, 0))
+        scene.rootNode.addChildNode(sunNode)
         scene.lightingEnvironment.contents = LitWater.skyImage()
         scene.lightingEnvironment.intensity = Self.skyIntensity
     }
 
     static let skyIntensity: CGFloat = {
         if let v = ProcessInfo.processInfo.environment["REGATTA_SKY"], let x = Double(v) { return CGFloat(x) }
-        return 1.5
+        return 3
+    }()
+    static let sunIntensity: CGFloat = {
+        if let v = ProcessInfo.processInfo.environment["REGATTA_SUNI"], let x = Double(v) { return CGFloat(x) }
+        return 14000
+    }()
+    static let roughPuff: NSNumber = {
+        if let v = ProcessInfo.processInfo.environment["REGATTA_ROUGH_PUFF"], let x = Double(v) { return NSNumber(value: x) }
+        return 0
     }()
     static let bodyGain: NSNumber = {
         if let v = ProcessInfo.processInfo.environment["REGATTA_BODY"], let x = Double(v) { return NSNumber(value: x) }
-        return 0.55
+        return 1.0
     }()
 
     /// Inside `Fleet3D.update`'s transaction: the plane under the view, the uniforms for this frame.

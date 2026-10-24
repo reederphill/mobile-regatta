@@ -114,6 +114,9 @@ final class Fleet3D {
         if WaterLook.current == .j {
             // The fleet's camera draws category 1 (every node's default); the plane only the water's.
             camera.categoryBitMask = 1
+            // The fleet's lights light the fleet; the plane takes its own copy of the sun (`LitWaterPlane`).
+            sun.categoryBitMask = 1
+            ambient.categoryBitMask = 1
             let lit = LitWaterPlane(scene: scene, fleetCamera: cameraNode, sceneSize: sceneSize)
             lit.planeNode.renderingOrder = -1
             litWater = lit
