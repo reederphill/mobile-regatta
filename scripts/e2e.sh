@@ -11,7 +11,7 @@
 #      new version as the player who accepted the old one in 1.
 #   3. race: a 4 s queue and a 12 s race. OnlineQueueRaceUITests queues, races to the close, leaves a briefing,
 #      rejoins a race it dropped out of, leaves one for good, and gets its livery back from the server.
-#   4. pair: a 30 s queue, and a headless second person (regatta-loadclient --queue-player 7001) queued beside the
+#   4. pair: a 75 s queue and a 75 s race, and a headless second person (regatta-loadclient --queue-player 7001) queued beside the
 #      app, when the test says the app is about to join: OnlineQueueRaceUITests/testTwoHumansShareOneFleet.
 #   5. kill: the server is killed (-9) while the app is in a race and started again on the same port and database:
 #      OnlineQueueRaceUITests/testServerKilledMidRaceCancelsToHome. No retry: a second try would find no kill.
@@ -236,11 +236,13 @@ run_tests race -only-testing:RegattaUITests/OnlineQueueRaceUITests
 
 # 4. pair (#162): the app and a headless second person in one fleet. xcodebuild takes a minute or two to reach the
 # test, so she doesn't join on the script's clock: the test arranges a race on the server as it taps Race online, and
-# she joins as soon as /health shows it. The 30 s to the lock take either order of the two joins. The race closes
-# 30 s after its gun: the test leaves it after the gun, and on CI's simulator reading the clock and working the race
-# menu took longer than 12 s (run 40016922723: the close came first, and Leave race found the results).
+# she joins as soon as /health shows it. The 75 s to the lock take either order of the two joins. The race closes
+# 75 s after its gun: the test leaves it after the gun and queues again, and the close's rating push must come while
+# she is queued. So she must be back in the queue before the close (run 40069036504: from the gun to Race online
+# took her about 50 s, and a 30 s close came down while Leave race's confirm was up), and the close must come before
+# her second queue locks, which it does with the lock no shorter than the race.
 stop_server
-start_server free QUEUE_LOCK_SECONDS=30 QUEUE_RACE_SECONDS=30 CATCH_FINISHERS=off
+start_server free QUEUE_LOCK_SECONDS=75 QUEUE_RACE_SECONDS=75 CATCH_FINISHERS=off
 echo "== pair: OnlineQueueRaceUITests/testTwoHumansShareOneFleet with regatta-loadclient --queue-player 7001"
 pair_port=$port
 (

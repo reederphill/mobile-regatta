@@ -9,8 +9,8 @@ import XCTest
 /// in `REGATTA_E2E_PHASE`; a test skips outside its phase, and without a server (`REGATTA_ONLINE_HOST`):
 /// - `race`: the queue locks 4 s after the join, a queue race closes 12 s after the gun, and a race everyone dropped
 ///   out of waits two minutes for someone to come back.
-/// - `pair`: the queue locks 30 s after the first join, a queue race closes 30 s after the gun (time to leave it
-///   after the gun on a slow simulator), and the script queues a headless second person
+/// - `pair`: the queue locks 75 s after the first join, a queue race closes 75 s after the gun (time to leave it
+///   after the gun and queue again on a slow simulator, before the close), and the script queues a headless second person
 ///   (`regatta-loadclient --queue-player 7001`) beside the app, once the test has arranged a race on the server to
 ///   say the app is about to join (the script watches `/health` for it).
 /// - `kill`: the script kills the server while the app is in a race, and starts it again on the same port.
@@ -333,8 +333,8 @@ final class OnlineQueueRaceUITests: XCTestCase {
         // which /health counts. The second person joins the queue within a few seconds of it.
         try await arrange(host: host, player: newPlayer(), service: "RaceSessionService", situation: "inProgress")
         joinTheQueue(app)
-        // The lock is 30 s after whichever of the two joined first.
-        XCTAssertTrue(app.buttons["briefing-leave"].waitForExistence(timeout: 60), "the fleet never locked: no takeover")
+        // The lock is 75 s after whichever of the two joined first.
+        XCTAssertTrue(app.buttons["briefing-leave"].waitForExistence(timeout: 105), "the fleet never locked: no takeover")
         // Both rows from one snapshot of the briefing: it is up for seconds, and on a loaded simulator a query per row
         // can outlast it (main 39785610313: the second row's query took 4 s, hers began after the race had replaced
         // the briefing and took 74 s over the race's tree).
@@ -349,29 +349,34 @@ final class OnlineQueueRaceUITests: XCTestCase {
 
         // #163, the ticket's "rating push arrives while queued": past the gun she leaves the race (RET; or, a bot having
         // got her disqualified in the sequence, the results' Home: rated either way, two humans were at the gun), and
-        // queues again. The close, 30 s after the gun, pushes her rating change, and
-        // Home's Last race shows it while the queue bar is up.
+        // queues again. The close, 75 s after the gun, pushes her rating change, and Home's Last race shows it while the
+        // queue bar is up. (Her second queue locks 75 s after she joins it, so after the close.)
         try await waitForTheGun(app)
-        leaveAfterTheGun(app)
+        guard leaveAfterTheGun(app) else { return }
         XCTAssertTrue(app.otherElements["race-viewport"].waitForNonExistence(timeout: 15), "Leave left the race up")
         waitForRaceOnlineOpen(app, "after leaving after the gun")
         joinTheQueue(app)
-        // The badge first ("Rating plus/minus …" in the row's label), then its sign.
+        // The badge ("Rating plus/minus …" in the row's label): the close's push, while she is queued. Its sign isn't
+        // asked: she placed behind Dev 7001 only if the headless client sailed on to the close (run 40069036504 had
+        // both humans RET), and a rated tie reads "Rating plus 0".
         let row = app.buttons["last-race"]
         let rated = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "Rating "), object: row)
-        XCTAssertEqual(XCTWaiter().wait(for: [rated], timeout: 60), .completed,
+        XCTAssertEqual(XCTWaiter().wait(for: [rated], timeout: 90), .completed,
                        "no rating badge on the Last race row while queued: \(row.exists ? row.label : "no row")")
         XCTAssertTrue(element(app, "queue-bar").exists, "the badge landed after the queue bar went")
-        // Retired (or disqualified) against Dev 7001, who sailed on: she lost rating.
-        XCTAssertTrue(row.label.contains("Rating minus"), "the retired race's badge isn't a loss: \(row.label)")
     }
 
     /// Her way off the water past the gun. Sitting still through the sequence she can be fouled by a bot and, owing a
     /// turn she never sails, disqualified before the gun (CI 40049197023: "Rule 12 against you, DSQ" at -0:25): then
     /// her race is done, the results are up over it, and the race menu has no Leave (`RaceView` shows no online menu
     /// once she is done). Their Home is her way out, the one the app gives her. Past the gun either way she was at it,
-    /// so the race is rated, and she placed behind Dev 7001, who sails on: RET by the menu's Leave, DSQ by Home.
-    @MainActor private func leaveAfterTheGun(_ app: XCUIApplication) {
+    /// so the race is rated: RET by the menu's Leave, DSQ by Home.
+    ///
+    /// False, with the failure recorded, when the race closed before she could leave it: the app takes her Home with
+    /// the race as her Last race (`OnlineRaceController.raceIsOver`), and the rest of the test can't hold (the push
+    /// came before she queued). A tap on a confirm the close took away fails the tap, and XCTest preempts every later
+    /// event (run 40069036504: "Event dispatch preempted by earlier failure" on Race online).
+    @MainActor private func leaveAfterTheGun(_ app: XCUIApplication) -> Bool {
         let home = app.buttons["results-menu"]
         if !home.exists {
             let menu = app.buttons["race-pause"]
@@ -383,12 +388,17 @@ final class OnlineQueueRaceUITests: XCTestCase {
         }
         if home.exists {
             home.tap()
-            return
+            return true
         }
         app.buttons["pause-leave"].tap()
         let confirm = app.buttons["race-leave-confirm-leave"]
-        XCTAssertTrue(confirm.waitForExistence(timeout: 10), "Leave race didn't ask")
+        guard confirm.waitForExistence(timeout: 10) else {
+            let last = app.buttons["last-race"]
+            XCTFail("Leave race's confirm went before the tap: the race closed first? Last race: \(last.exists ? last.label : "none")")
+            return false
+        }
         confirm.tap()
+        return true
     }
 
     /// The race clock (its value is the race tick) 2 s past the gun or more: a leave now is a retirement.
