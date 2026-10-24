@@ -93,6 +93,7 @@ private struct LeakyLobby: LobbyService {
     func unblock(_ player: GamePlayerID) async throws { await base.unblock(player) }
     func blockedPlayers() async throws -> [BlockedPlayer] { await base.blockedPlayers() }
     func report(message: MessageID) async throws {}
+    func boatCard(_ player: GamePlayerID) async throws -> BoatCard { try await base.boatCard(player) }
     func report(player: GamePlayerID) async throws { try await base.report(player: player) }
     func report(race: RaceID, seat: Int, reason: RaceReportReason) async throws { try await base.report(race: race, seat: seat, reason: reason) }
 }

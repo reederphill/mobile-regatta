@@ -54,6 +54,7 @@ public struct LobbyServiceContract: ContractSuite {
             try await contactsAreStripped(makeService(.open))
             try await filteredIsNotSent(makeService(.open))
             try await blocking(makeService(.open))
+            try await boatCards(makeService(.open))
         }
         if parts.contains(.reports) { try await reporting(makeService(.open)) }
         guard parts.contains(.chat) else { return }
@@ -172,6 +173,26 @@ public struct LobbyServiceContract: ContractSuite {
         try await requireThrows(LobbyError.cannotBlockSelf, "block(yourself)") { try await service.block(me) }
     }
 
+    /// Another player's boat card is hers, with a sail number (#142); there's none for herself, a player nobody has,
+    /// or one she blocked, and unblocking gives it back.
+    private func boatCards(_ service: any LobbyService) async throws {
+        let me = try await ownID(service)
+        guard let author = try await service.history().compactMap(\.post?.author).first(where: { $0.gamePlayerID != me }) else {
+            try fail("no other player's line for a boat card")
+        }
+        let card = try await service.boatCard(author.gamePlayerID)
+        try await require(card.gamePlayerID == author.gamePlayerID && !card.nickname.isEmpty && card.livery.sailNumber > 0,
+                          "\(author.nickname)'s boat card is \(card)")
+        try await requireThrows(LobbyError.unknownPlayer, "boatCard(yourself)") { try await service.boatCard(me) }
+        try await requireThrows(LobbyError.unknownPlayer, "boatCard(nobody)") {
+            try await service.boatCard(GamePlayerID("contract-no-such-player"))
+        }
+        try await service.block(author.gamePlayerID)
+        try await requireThrows(LobbyError.unknownPlayer, "a blocked player's boat card") { try await service.boatCard(author.gamePlayerID) }
+        try await service.unblock(author.gamePlayerID)
+        try await require(try await service.boatCard(author.gamePlayerID).gamePlayerID == author.gamePlayerID, "unblocking didn't give the card back")
+    }
+
     /// A reported line is hidden from the reporter at once. System lines, own seats and bots can't be reported.
     private func reporting(_ service: any LobbyService) async throws {
         let me = try await ownID(service)
@@ -236,5 +257,8 @@ public struct LobbyServiceContract: ContractSuite {
         try await requireThrows(LobbyError.closed(closure), "history() while closed for \(closure)") { try await service.history() }
         try await requireThrows(LobbyError.closed(closure), "free text while closed for \(closure)") { try await service.post("hello") }
         try await requireThrows(LobbyError.closed(closure), "quick-chat while closed for \(closure)") { try await service.post(.gg) }
+        try await requireThrows(LobbyError.closed(closure), "boatCard() while closed for \(closure)") {
+            try await service.boatCard(GamePlayerID("contract-anyone"))
+        }
     }
 }

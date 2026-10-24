@@ -95,7 +95,7 @@ extension ServiceEndpoint {
                                     ratingConfig: rating, seats: { try await archive.seating(of: $0) })
         let hub = LobbyHub(settings: lobbySettings, store: lobbyStore, ratings: book,
                            moderation: moderation, wordList: words, classifier: checker.map { ClassifierGate($0) },
-                           chip: { await liveries.chip(of: $0) })
+                           chip: { await liveries.chip(of: $0) }, card: { try await liveries.livery(of: $0) })
         moderation.attach(hub)
         let analyticsStore = analyticsStore ?? InMemoryAnalyticsStore()
         let online: (any OnlineDataStore)? = onlineData ?? (store as? InMemoryAccountStore).map {

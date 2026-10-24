@@ -24,7 +24,8 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         onlineStatus = OnlineStatus(services: app.services, isInitiallyOnline: OnlineStatus.isInitiallyOnline(.current),
                                     session: app.online,
                                     raceTimescale: LaunchOptions.current.fakeServices == nil ? 1 : LaunchOptions.current.timescale,
-                                    photos: app.playerPhotos, leaderboard: app.leaderboard)
+                                    photos: app.playerPhotos, leaderboard: app.leaderboard,
+                                    leaderboardTop: app.leaderboardTop)
         let launchOptions = LaunchOptions.current
         showWindow(launchOptions: launchOptions)
         if launchOptions.uiTesting {
@@ -110,6 +111,8 @@ struct AppRoot: View {
             .environment(\.lobbyService, onlineStatus.services.lobby)
             .environment(\.onlineServices, onlineStatus.services)
             .environment(\.onlineStatus, onlineStatus)
+            // Hide lobby chat is the device's (T1): the lobby closes its feed while it is on.
+            .onChange(of: model.deviceSettings.hidesLobbyChat, initial: true) { _, hides in onlineStatus.lobby.hidesChat = hides }
     }
 }
 

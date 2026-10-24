@@ -137,7 +137,8 @@ final class OnlineSequenceUITests: RaceUITestCase {
     }
 
     /// Leave race after the gun is final (owner 2026-10-12): the question says she is scored as retired, and Home has
-    /// Race online open again, with no Rejoin race and no Last race row.
+    /// Race online open again, with no Rejoin race, and no Last race row while the race runs on (it is her Last race
+    /// once it closes, #163 G1).
     @MainActor func testLeaveAfterTheGunGoesHomeWithNoRejoin() {
         let app = launch("joinable", ["-raceSeconds", "240"])
         sailToTheWater(app)
@@ -155,7 +156,7 @@ final class OnlineSequenceUITests: RaceUITestCase {
         Thread.sleep(forTimeInterval: 5)
         XCTAssertFalse(app.buttons["race-rejoin"].exists, "a race she left offers a way back")
         XCTAssertTrue(app.buttons["race-online"].isEnabled)
-        XCTAssertFalse(app.buttons["last-race"].exists, "a race she retired from is Home's Last race")
+        XCTAssertFalse(app.buttons["last-race"].exists, "a race she retired from is Home's Last race before it closes")
         XCTAssertFalse(element(app, "home-notice").exists)
     }
 

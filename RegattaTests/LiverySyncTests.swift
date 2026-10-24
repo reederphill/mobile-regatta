@@ -92,6 +92,20 @@ import Testing
         #expect(host.myLivery == Self.servers && profiles.asked == 1)
     }
 
+    /// #163, T5: at a race's close the server's count comes down, while the livery is still locked (the cover may be
+    /// up), and the livery never does: neither the server's copy nor a save.
+    @Test func raceClosedReadsTheCountWhileLockedAndPullsNoLivery() async {
+        let (sync, host, profiles) = rig()
+        profiles.completedRaces = 7
+        host.isLiveryLocked = true
+        await sync.raceClosed()
+        #expect(host.adoptedCounts == [7] && profiles.asked == 1)
+        #expect(host.myLivery == Self.local && profiles.saves.isEmpty, "the server's livery isn't taken at a close")
+        sync.mayAskService = { false }
+        await sync.raceClosed()
+        #expect(host.adoptedCounts == [7] && profiles.asked == 1, "nothing asked of a gated player")
+    }
+
     /// The server's count of her completed races comes down with its livery (#139, T3), even when the livery is the
     /// device's already; never in a locked fleet or for a gated player, and not on a read that failed.
     @Test func theServerCountComesDownAtSignIn() async {

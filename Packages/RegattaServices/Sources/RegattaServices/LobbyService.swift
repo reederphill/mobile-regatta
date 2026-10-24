@@ -1,3 +1,5 @@
+import RegattaCore
+
 // The one global lobby (#17, #34): a chat feed on the home screen, readable by anyone signed in who has accepted
 // the terms, with free text through a server-side filter and a quick-chat row. No chat from fleet lock until the
 // player finishes. Block and report on a long-press; reports go to an admin queue reviewed within 24 h.
@@ -168,6 +170,22 @@ public struct BlockedPlayer: Equatable, Sendable {
     }
 }
 
+/// A lobby player's boat card (#25, #142): her current boat as the half-height sheet shows it, the full livery with its
+/// sail number, beside what her lines carry.
+public struct BoatCard: Equatable, Sendable {
+    public var gamePlayerID: GamePlayerID
+    public var nickname: String
+    public var rating: Rating
+    public var livery: Livery
+
+    public init(gamePlayerID: GamePlayerID, nickname: String, rating: Rating, livery: Livery) {
+        self.gamePlayerID = gamePlayerID
+        self.nickname = nickname
+        self.rating = rating
+        self.livery = livery
+    }
+}
+
 public enum LobbyError: Error, Equatable, Sendable {
     /// The lobby is closed to the player: reading and posting both.
     case closed(LobbyClosure)
@@ -187,6 +205,8 @@ public enum LobbyError: Error, Equatable, Sendable {
     case notReportable
     /// Blocking yourself.
     case cannotBlockSelf
+    /// No boat card: a player the lobby doesn't know, a blocked pair either way, or herself (#142).
+    case unknownPlayer
 }
 
 public enum LobbyLimits {
@@ -227,4 +247,9 @@ public protocol LobbyService: Sendable {
     func report(player: GamePlayerID) async throws
     /// Reports another human's racing in a race the player sailed, by seat, from the results screen (#26).
     func report(race: RaceID, seat: Int, reason: RaceReportReason) async throws
+
+    /// Another player's boat card: her current livery and sail number (#25). Refused for herself, a player the lobby
+    /// doesn't know, and a blocked pair either way.
+    func boatCard(_ player: GamePlayerID) async throws -> BoatCard
 }
+

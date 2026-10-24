@@ -137,6 +137,11 @@ public actor OnlineSession {
     private let queueStates = Broadcast<QueueState>(nil)
     /// Counts the connections opened: what the services' calls and streams wait on (#162).
     private let opens = Broadcast<Int>(nil)
+    /// The rating changes the server pushes, read on one stream for the session and fanned out to every reader (#163):
+    /// a change the server replays on a reconnect reaches the first stream it primes alone, so a stream each would let
+    /// the next race's results take the change the race before's follower waits for.
+    private let ratingChangesSeen = Broadcast<RatingChange>(nil)
+    private var ratingReader: Task<Void, Never>?
     private var opened = 0
 
     private var isOnline: Bool
@@ -305,6 +310,22 @@ public actor OnlineSession {
                 continuation.finish()
             }
             continuation.onTermination = { _ in reader.cancel() }
+        }
+    }
+
+    /// Every rating change from here on, the latest first if there is one (`Broadcast`): the session's one stream of
+    /// them, started by the first reader, outliving connections as `resilient` does.
+    fileprivate nonisolated func ratingChanges() -> AsyncStream<RatingChange> {
+        let changes = ratingChangesSeen.subscribe()
+        Task { await self.readRatingChanges() }
+        return changes
+    }
+
+    private func readRatingChanges() {
+        guard ratingReader == nil else { return }
+        let (changes, seen) = (resilient { RemoteRaceSessionService($0).ratingChanges() }, ratingChangesSeen)
+        ratingReader = Task {
+            for await change in changes { seen.send(change) }
         }
     }
 
@@ -700,7 +721,8 @@ struct SessionQueueService: QueueService {
 }
 
 /// The race session on the session (#162). `results()` and `ratingChanges()` are opened again on each new connection:
-/// the server primes the first with the current report and replays rating changes she hasn't read.
+/// the server primes the first with the current report and replays rating changes she hasn't read. Rating changes are
+/// one stream for the session, fanned out to every reader (#163), so a replay reaches them all.
 struct SessionRaceSessionService: RaceSessionService {
     let session: OnlineSession
 
@@ -717,7 +739,7 @@ struct SessionRaceSessionService: RaceSessionService {
         })
     }
 
-    func ratingChanges() -> AsyncStream<RatingChange> { session.resilient { RemoteRaceSessionService($0).ratingChanges() } }
+    func ratingChanges() -> AsyncStream<RatingChange> { session.ratingChanges() }
 }
 
 /// The profile on the session (#162): what the livery sync needs of it.

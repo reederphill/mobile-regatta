@@ -25,6 +25,8 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     /// no photo and a leaderboard that only counts its taps.
     let playerPhotos: any PlayerPhotoSource
     let leaderboard: any LeaderboardPresenter
+    /// The leaderboard's top, the hidden lobby panel's (#142): GameKit's beside Game Center, a fixed five otherwise.
+    let leaderboardTop: any LeaderboardTopSource
 
     override init() {
         var (services, online, connector) = AppDelegate.makeServices(launchOptions: .current)
@@ -37,9 +39,9 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         #endif
         (self.services, self.online, raceConnector) = (services, online, connector)
         if AppDelegate.usesGameCenter(.current) {
-            (playerPhotos, leaderboard) = (GameKitPlayerPhoto(), GameKitLeaderboardPresenter())
+            (playerPhotos, leaderboard, leaderboardTop) = (GameKitPlayerPhoto(), GameKitLeaderboardPresenter(), GameKitLeaderboardTop())
         } else {
-            (playerPhotos, leaderboard) = (NoPlayerPhoto(), RecordingLeaderboardPresenter())
+            (playerPhotos, leaderboard, leaderboardTop) = (NoPlayerPhoto(), RecordingLeaderboardPresenter(), FixedLeaderboardTop())
         }
         super.init()
     }
@@ -50,7 +52,8 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
 
     private static func makeServices(launchOptions: LaunchOptions) -> (ServiceSet, OnlineStatus.Session?, RaceConnector) {
         // The fakes' online results scenarios fill in live, a sleep apart (the services package keeps no clock).
-        var services = launchOptions.fakeServices.map { ServiceSet.fake($0, wait: { try? await Task.sleep(for: $0) }) }
+        var services = launchOptions.fakeServices.map { ServiceSet.fake($0, wait: { try? await Task.sleep(for: $0) },
+                                                                                  clock: { Int(Date().timeIntervalSince1970) }) }
             ?? ServiceSet.unconnected(connectivity: PathConnectivityService())
         // A scripted queue plays at a pace a person can watch: a state a second, at `-timescale` (#140).
         if launchOptions.fakeServices != nil {

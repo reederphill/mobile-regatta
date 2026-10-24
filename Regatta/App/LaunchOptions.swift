@@ -23,6 +23,10 @@ import RegattaServices
 ///   and ends on the defaults even if an earlier run stopped before switching them back (#131).
 /// - `-scheme halves|tiller` overrides the device's steering scheme (#112).
 /// - `-camera course|boat` overrides the device's camera as course-up or boat-up (#113).
+/// - `-tilt <deg>` overrides the device's tilt, 5…55 degrees off vertical (#597). A render fixture draws at the
+///   default 45 without it, whatever the device's setting.
+/// - `-boats <n>` sails the launch race with `n` boats, 2…16, yours included (#596): for local previews. Debug builds
+///   only, like `-tuning`.
 /// - `-online` starts an online race on the dev server's instant race at launch (#68, Debug builds).
 /// - `-onlineHost <host:port>` is the dev race server, instead of the Settings page's field (Debug builds).
 /// - `-raceSeconds <n>` closes an online dev race `n` seconds after the gun (the server's e2e override), and the
@@ -57,7 +61,8 @@ import RegattaServices
 ///   `cancelled-race`, `online-results`, `online-results-unrated`, `terms-bump`, and #161's `suspended`,
 ///   `suspended-permanent`, `cooldown`, `cannot-race`, `update-required`, `terms-save-failed`, `session-failed`,
 ///   `unreachable` or `connecting`, #140's `joinable`, `joinable-alone` or `joinable-hold`, #141's `rejoinable` or
-///   `race-gone`, and #139's `profile-established` (`FakeServiceScenario`).
+///   `race-gone`, #139's `profile-established`, and #142's `lobby-free-text`, `lobby-muted` or `lobby-banned`
+///   (`FakeServiceScenario`).
 ///   Every scenario whose player gets past Race online's gate has a queue to join, to fleet lock and its briefing
 ///   (#140). The `joinable` ones, `signed-out`, `cancelled-race`, `race-gone` and `rejoinable` go on into a fake race
 ///   (#141, `FakeRaceDirector`): the gun 75 s after fleet lock, at `-timescale`. Debug builds only (#314): other builds don't know it, so a
@@ -72,7 +77,8 @@ import RegattaServices
 ///   water, the gun and your results; `race-menu`, `race-leave` and `confirm-leave` open the race menu, ask to leave
 ///   and leave; `race-home` and `race-again` are the results' buttons; `rejoin` taps Home's Rejoin race;
 ///   `leaderboard` opens the live leaderboard, `last-race` the Last race sheet; `race-ended` closes the fake race
-///   with the queue's stream lagging, so Rejoin race finds none.
+///   with the queue's stream lagging, so Rejoin race finds none. The lobby's (#142): `boat-card` opens the first other
+///   sailor's boat card once the lobby has lines, `blocked-players` pushes Settings → Blocked players.
 /// - `-myBoat <design-id>` opens My boat with that design tried on (#136): the stand-in for results' Try it deep link.
 /// - `-keepMyBoat` (with `-uitesting`) keeps My boat's livery, owned designs and races from the last launch, which UI
 ///   tests otherwise empty at launch: a relaunch that checks what was saved.
@@ -84,8 +90,8 @@ import RegattaServices
 ///   `RenderQualityPolicy`), whatever its own: for #172's device runs and the UI tests (Debug builds). A render
 ///   fixture or a UI test run draws at `-thermal`'s state, nominal without it, and never at the device's own state or
 ///   Low Power Mode, so references stay put.
-/// - `-cuesOnly` (with `-uitesting`) hides what the thermal tiers change, the ripple and whitecaps, the wakes and the
-///   sails, so a UI test can compare the race cues alone across tiers (#127).
+/// - `-cuesOnly` (with `-uitesting`) hides what the thermal tiers change, the ripple and whitecaps, the wakes
+///   and the sails, so a UI test can compare the race cues alone across tiers (#127).
 struct LaunchOptions: Equatable {
     enum SteeringScheme: String, CaseIterable {
         case halves, tiller
@@ -141,6 +147,10 @@ struct LaunchOptions: Equatable {
         case lastRace = "last-race"
         /// The fake race closes with the queue's stream lagging: Rejoin race is still up, and finds no race.
         case raceEnded = "race-ended"
+        /// The lobby (#142): the first other sailor's boat card, once the lobby has lines, and Settings → Blocked
+        /// players.
+        case boatCard = "boat-card"
+        case blockedPlayers = "blocked-players"
     }
     #endif
 
@@ -185,6 +195,10 @@ struct LaunchOptions: Equatable {
     var raceSeconds: Int?
     var startSeconds: Int?
     var laps: Int?
+    /// `-tilt <deg>` (#597): the race scene's tilt off vertical, 5…55, over Settings' Tilt.
+    var tilt: Double?
+    /// `-boats <n>` (#596, Debug builds): the launch race's fleet, 2…16.
+    var boats: Int?
     var hidesScene = false
     var appearance: Appearance?
     var vision: VisionFilter?
@@ -242,11 +256,13 @@ struct LaunchOptions: Equatable {
             case "-tuning": tuning = true
             case "-fps120": fps120 = true
             case "-captureAppAttestFixture": captureAppAttestFixture = true
-            case "-fakeServices", "-referenceRace", "-beatMetres", "-devIdentity", "-devRestrictions", "-termsVersion", "-tap":
+            case "-fakeServices", "-referenceRace", "-beatMetres", "-devIdentity", "-devRestrictions", "-termsVersion", "-tap",
+                 "-boats":
                 guard let value = takeValue(of: argument, from: &rest) else { continue }
                 apply(argument, value)
             #endif
             case "-seed", "-fixture", "-fixtures", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps",
+                 "-tilt",
                  "-appearance", "-vision", "-briefing", "-myBoat", "-completedRaces", "-thermal":
                 guard let value = takeValue(of: argument, from: &rest) else { continue }
                 apply(argument, value)
@@ -269,12 +285,13 @@ struct LaunchOptions: Equatable {
     private static let flags: Set<String> = {
         var flags: Set = ["-autostart", "-demo", "-perf", "-uitesting", "-resetSettings", "-online", "-hideScene", "-seed",
                           "-fixture", "-fixtures", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps",
+                          "-tilt",
                           "-appearance", "-vision", "-briefing", "-myBoat", "-keepMyBoat", "-completedRaces",
                           "-thermal", "-cuesOnly",
                           "-onlineResults"]
         #if DEBUG
         flags.formUnion(["-tuning", "-fps120", "-captureAppAttestFixture", "-fakeServices", "-referenceRace", "-beatMetres", "-devIdentity", "-devRestrictions",
-                         "-termsVersion", "-tap"])
+                         "-termsVersion", "-tap", "-boats"])
         #endif
         return flags
     }()
@@ -322,6 +339,10 @@ struct LaunchOptions: Equatable {
             if let n = Int(value), (1...60).contains(n) { startSeconds = n } else { reject(argument, value, "a whole number of seconds, 1…60") }
         case "-laps":
             if let n = Int(value), (1...9).contains(n) { laps = n } else { reject(argument, value, "a whole number of laps, 1…9") }
+        case "-tilt":
+            if let n = Double(value), DeviceSettings.tiltRange.contains(n) { tilt = n } else { reject(argument, value, "degrees off vertical, 5…55") }
+        case "-boats":
+            if let n = Int(value), (2...16).contains(n) { boats = n } else { reject(argument, value, "a whole number of boats, 2…16") }
         case "-appearance":
             if let style = Appearance(rawValue: value) { appearance = style } else { reject(argument, value, "light or dark") }
         case "-vision":
@@ -461,6 +482,9 @@ struct LaunchOptions: Equatable {
         var config = raceConfig(from: config)
         config.botSailsYourBoat = demo || perf
         if perf { config.opponents = Self.perfFleetSize - 1 }
+        #if DEBUG
+        if let boats { config.opponents = boats - 1 }
+        #endif
         return config
     }
 }

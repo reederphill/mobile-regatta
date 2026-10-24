@@ -318,13 +318,14 @@ struct ResultsDelayProbe: View {
 }
 
 /// UI tests only: which boat-side cues the scene draws (#122), as an accessibility value (`race-cues`), e.g.
-/// `laylines=1 ladder=0 vane=1 arrow=0` (`GameScene.cueSummary`). Read about four times a second.
+/// `laylines=1 ladder=0 vane=1 arrow=0 tilt=45` (`GameScene.cueSummary`, `tiltSummary`). Read about four times a
+/// second.
 struct CueProbe: View {
     let session: GameSession
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 0.25)) { _ in
-            let value = session.scene.cueSummary
+            let value = "\(session.scene.cueSummary) \(session.scene.tiltSummary)"
             Text(value)
                 .accessibilityLabel("Cues")
                 .accessibilityValue(value)

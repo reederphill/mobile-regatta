@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import RegattaCore
 import RegattaServices
 
 /// What the queue needs of the app at fleet lock and after (#140): `AppModel`.
@@ -25,6 +26,14 @@ protocol FleetLockHost: AnyObject {
     func keepLastRace(_ report: RaceReport, rating: RatingOutcome?)
     /// The rating the server pushed for the Last race row's race, after the cover was gone.
     func setLastRaceRating(_ outcome: RatingOutcome, raceID: RaceID)
+    /// The race a hand-off seats her in, with its briefing's seat liveries (#163): kept for that race's launch and results.
+    func keepHandOff(_ fleet: RaceFleet)
+    /// `raceID`'s seat liveries as its briefing showed them, if this device kept them.
+    func fleet(of raceID: RaceID) -> [Livery]?
+    /// Whether the service's last race, read as a session opens, replaces Home's Last race (#163, T4).
+    func adoptsLastRace(_ raceID: RaceID) -> Bool
+    /// An online race of hers closed and Home has its results (#163, T5): the server's race count is read again.
+    func onlineRaceClosed()
 }
 
 extension AppModel.Notice {

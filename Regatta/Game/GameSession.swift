@@ -201,6 +201,8 @@ final class GameSession {
         // The board only where the fixture asks for it (#268), held open if it says so: the session's controls are
         // its own here, never the app's.
         controls.showsLeaderboard = fixture.hud?.leaderboard != nil
+        // At the default tilt (#597), or `-tilt`'s: never the device's, so references stay put.
+        controls.tilt = ControlSettings.tilt(DeviceSettings.defaultTilt, launchOptions: .current)
         isLeaderboardExpanded = fixture.hud?.leaderboard == .expanded
         if let kind = fixture.hud?.notice {
             // A notice the replay can't make (it drains no events): shown for good, so the render holds still.

@@ -399,6 +399,8 @@ enum TuningCatalog {
                     // off the beam (`BoatStyle.heelScale`).
                     boat("heelScale", "Heel", \.heelScale, 0...2, 0.05),
                     boat("heelFullKnots", "Overpowered at", \.heelFullKnots, 8...30, 0.5, unit: " kn"),
+                    // #602: how fast the 2.5D boat's heel follows the sheets, per second.
+                    boat("heelEaseRate", "Heel ease", \.heelEaseRate, 1...20, 0.5, unit: " /s"),
                     boat("starvedFullLoss", "Starved flutter at", \.starvedFullLoss, 0.1...0.8, 0.05),
                     boat("flutterDegrees", "Flutter", \.flutterDegrees, 0...20, 0.5, unit: "°"),
                     boat("ghostAlpha", "Ghost fade", \.ghostAlpha, 0.1...0.9, 0.05),

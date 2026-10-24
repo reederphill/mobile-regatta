@@ -38,6 +38,9 @@ struct SettingsView: View {
                     Divider()
                     toggleRow("Auto zoom", isOn: $model.deviceSettings.autoZoom, id: "settings-autoZoom")
                     Divider()
+                    sliderRow("Tilt", value: $model.deviceSettings.tilt, in: DeviceSettings.tiltRange, step: 5,
+                              id: "settings-tilt")
+                    Divider()
                     toggleRow("Laylines", isOn: $model.deviceSettings.laylines, id: "settings-laylines")
                     Divider()
                     toggleRow("Ladder lines", isOn: $model.deviceSettings.ladderLines, id: "settings-ladderLines")
@@ -62,9 +65,7 @@ struct SettingsView: View {
                 section("Lobby") {
                     toggleRow("Hide lobby chat", isOn: $model.deviceSettings.hidesLobbyChat, id: "settings-hidesLobbyChat")
                     Divider()
-                    NavigationLink {
-                        BlockedPlayersPage()
-                    } label: {
+                    NavigationLink(value: AppModel.Page.blockedPlayers) {
                         rowLabel("Blocked players")
                     }
                     .accessibilityIdentifier("settings-blockedPlayers")
@@ -166,6 +167,27 @@ struct SettingsView: View {
         }
         .padding(16)
         .accessibilityIdentifier(id)
+    }
+
+    /// A slider with its title and its value in whole degrees (#597, Tilt): nothing more.
+    private func sliderRow(_ title: String, value: Binding<Double>, in range: ClosedRange<Double>, step: Double,
+                           id: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(title).font(MenuFont.body())
+                Spacer()
+                Text("\(Int(value.wrappedValue.rounded()))°")
+                    .font(MenuFont.body())
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .accessibilityHidden(true)
+            }
+            Slider(value: value, in: range, step: step)
+                .accessibilityLabel(title)
+                .accessibilityValue("\(Int(value.wrappedValue.rounded())) degrees")
+                .accessibilityIdentifier(id)
+        }
+        .padding(16)
     }
 
     private func pickerRow<Value: Hashable & CaseIterable>(

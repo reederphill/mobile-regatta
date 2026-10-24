@@ -7,9 +7,11 @@ import RegattaCore
 /// Presentation only: liveries never reach the simulation (`Boat.colorIndex` is the sim's), and they stay out of
 /// `FleetRoster`, which bot code reads. The same setup gives the same fleet everywhere.
 ///
-/// Until the wire carries liveries (a follow-up to #119), an online race draws the other players as bots are drawn,
-/// from their seat's seed, and your own as `yours` until the wire carries it (#162). Practice races and briefings wear
-/// the livery My boat stores (`AppModel.myLivery`, #136); render fixtures keep `yours`.
+/// An online race wears its briefing's fleet (#163): the server's liveries, locked at fleet lock, which the app keeps
+/// with the race's id (`RaceFleet`), since the race start doesn't carry them. Without them (a race whose briefing this
+/// device never had, a Debug instant race) it draws the other players as bots are drawn, from their seat's seed, and
+/// your own as `yours`. Practice races and briefings wear the livery My boat stores (`AppModel.myLivery`, #136);
+/// render fixtures keep `yours`.
 struct FleetLiveries: Equatable {
     /// The fixed livery render fixtures, UI tests' first launch and online races draw as yours, so they draw the same
     /// boat every launch; My boat stores your own (#136). The services fakes' livery: the plain skiff, sky-blue deck,
@@ -38,6 +40,16 @@ struct FleetLiveries: Equatable {
             var livery = livery
             livery.sailNumber = number
             return livery
+        }
+    }
+
+    /// An online race's fleet (#163): `briefing`'s liveries seat for seat when it has one for every seat `setup`
+    /// seats, else the seeded fleet with you in `mySeat`.
+    init(briefing: [Livery]?, setup: RaceSetup, mySeat: Int) {
+        if let briefing, briefing.count == setup.seats.count {
+            self.init(liveries: briefing)
+        } else {
+            self.init(setup: setup, mySeat: mySeat)
         }
     }
 

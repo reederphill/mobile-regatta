@@ -105,6 +105,30 @@ final class SettingsUITests: RaceUITestCase {
         app.terminate()
     }
 
+    /// Tilt (#597) opens at 45 and, slid to the floor, reaches the race: the scene draws at 5 (`race-cues`'s
+    /// `tilt=`, `CueProbe`). The first launch clears the device's settings and so does a launch at tear-down.
+    @MainActor func testTiltSliderChangesTheRace() {
+        resetSettingsAtTearDown()
+        var app = openSettings(reset: true)
+        let tilt = app.sliders["settings-tilt"].firstMatch
+        XCTAssertTrue(tilt.waitForExistence(timeout: 20), "no Tilt slider")
+        XCTAssertEqual(tilt.value as? String, "45 degrees", "Tilt isn't 45 by default")
+        // The slider's floor: 0 normalised is 5° (`DeviceSettings.tiltRange`).
+        tilt.adjust(toNormalizedSliderPosition: 0)
+        let moved = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "5 degrees"), object: tilt)
+        XCTAssertEqual(XCTWaiter.wait(for: [moved], timeout: 5), .completed, "Tilt reads \(String(describing: tilt.value))")
+        app.terminate()
+
+        app = launchRace()
+        let cues = app.staticTexts["race-cues"].firstMatch
+        XCTAssertTrue(cues.waitForExistence(timeout: 20), "no cue probe")
+        let (seen, last) = watch(cues, until: Date().addingTimeInterval(20)) {
+            ($0.value as? String)?.hasSuffix("tilt=5") == true
+        }
+        XCTAssertTrue(seen, "the race drew \(String(describing: last?.value)), not tilt 5")
+        app.terminate()
+    }
+
     /// The live leaderboard (#268) is on by default: up on the HUD once the gun has gone. Turned off in Settings, a
     /// race after the gun has no board. The test turns it back on, so the next test starts from the defaults. The
     /// waits add up to under 3.5 min (`RaceUITestCase`): each race has a 5 s start sequence (`-startSeconds 5`) at

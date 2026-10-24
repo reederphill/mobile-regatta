@@ -41,6 +41,8 @@ public struct ServerLobbyService: LobbyService, ConnectionScoped {
         try await hub.report(race: race, seat: seat, reason: reason, by: player.teamPlayerID)
     }
 
+    public func boatCard(_ other: GamePlayerID) async throws -> BoatCard { try await hub.boatCard(other, for: player) }
+
     public func connectionEnded() async {
         hub.closeFeeds(feeds.take())
     }

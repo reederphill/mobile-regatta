@@ -83,6 +83,12 @@ final class OnlineStatus {
     private let photos: any PlayerPhotoSource
     /// Game Center's leaderboard, the profile's last row (#139).
     let leaderboard: any LeaderboardPresenter
+    /// The leaderboard's top, the hidden lobby panel's (#142).
+    let leaderboardTop: any LeaderboardTopSource
+    /// The lobby on Home (#142, T1): held here so pushed pages and sheets keep its feed.
+    let lobby: LobbyModel
+    /// The scene is in front: in the background the lobby lets its feed go.
+    private var isSceneActive = true
     private let session: Session?
     private let now: () -> Date
 
@@ -92,11 +98,15 @@ final class OnlineStatus {
     /// `photos` and `leaderboard` are Game Center's on a device (`AppDelegate`), stand-ins otherwise.
     init(services: ServiceSet, isInitiallyOnline: Bool = true, session: Session? = nil, raceTimescale: Double = 1,
          photos: any PlayerPhotoSource = NoPlayerPhoto(),
-         leaderboard: any LeaderboardPresenter = RecordingLeaderboardPresenter(), now: @escaping () -> Date = Date.init) {
+         leaderboard: any LeaderboardPresenter = RecordingLeaderboardPresenter(),
+         leaderboardTop: any LeaderboardTopSource = FixedLeaderboardTop(), now: @escaping () -> Date = Date.init,
+         lobbySleep: @escaping @Sendable (Duration) async -> Void = { try? await Task.sleep(for: $0) }) {
         self.services = services
         self.session = session
         self.photos = photos
         self.leaderboard = leaderboard
+        self.leaderboardTop = leaderboardTop
+        lobby = LobbyModel(lobby: services.lobby, now: now, sleep: lobbySleep)
         self.now = now
         isOnline = isInitiallyOnline
         // Until a window attaches its app model's link: a race nobody answers.
@@ -116,6 +126,7 @@ final class OnlineStatus {
         Task { [weak self] in
             for await status in services.connectivity.statusUpdates() {
                 self?.isOnline = status.isOnline
+                self?.updateLobby()
                 self?.queue.connectionChanged(isOnline: status.isOnline)
                 self?.race.connectionChanged(isOnline: status.isOnline)
                 // Offline the session tries nothing; back online it connects at once (#161).
@@ -157,6 +168,8 @@ final class OnlineStatus {
         case .queued(let queued): lobbyStatus.queuedPlayers = queued.queuedPlayers
         case .idle, .unavailable, .fleetLocked: lobbyStatus.queuedPlayers = nil
         }
+        // The takeover (T12): the keyboard goes with the pages and sheets.
+        if queue == .fleetLocked { lobby.dropFocus() }
         // A cooldown's seconds are counted from now (#161).
         queueLine = RestrictionLine(queue: queue, now: now())
     }
@@ -172,6 +185,7 @@ final class OnlineStatus {
         sessionPhase = phase
         if case .open = phase { tapFailed = false }
         guard session != nil else { return }
+        updateLobby()
         // Queued, a session that is gone took her place with it (#162).
         queue.sessionChanged(isOpen: isSessionOpen)
         if isSessionOpen, !wasOpen {
@@ -197,6 +211,20 @@ final class OnlineStatus {
         return isSessionOpen && lobbyStatus.hasAcceptedTerms && lobbyStatus.canRaceOnline
     }
 
+    /// Whether the lobby may be asked (#142, T2): as `mayAskService`, but by the chat rules rather than the racing
+    /// ones, so a multiplayer-restricted player still chats (#34).
+    var mayAskLobby: Bool {
+        guard session != nil else { return true }
+        return isSessionOpen && lobbyStatus.hasAcceptedTerms && lobbyStatus.canChat
+    }
+
+    /// Opens or closes the lobby's reads: Home's gates (rows 1-5 of the brief's matrix, but Hide lobby chat, which the
+    /// lobby takes itself), `mayAskLobby`, and the scene in front.
+    private func updateLobby() {
+        let gates = LobbyPanelState(isOnline: isOnline, status: lobbyStatus.hidingChat(false), retryLine: lobbyRetryLine)
+        lobby.setAllowed(gates == .lobby && mayAskLobby && isSceneActive)
+    }
+
     /// The session opened, or the terms were just accepted on it: a race she dropped out of may still run (a cold
     /// launch after a drop), and the livery is brought in line with the server's.
     private func throughTheGate() {
@@ -208,6 +236,8 @@ final class OnlineStatus {
     /// The scene became active, or went to the background: the queue is left there (#140), and the session's socket
     /// follows (#161).
     func setSceneActive(_ active: Bool) {
+        isSceneActive = active
+        updateLobby()
         queue.sceneChanged(isBackground: !active)
         race.sceneChanged(isBackground: !active)
         guard let session else { return }
@@ -249,7 +279,9 @@ final class OnlineStatus {
         lobbyStatus.canChat = player?.canChat ?? true
         lobbyStatus.canRaceOnline = player?.canRaceOnline ?? true
         signedInAlias = player?.alias
+        lobby.me = player?.gamePlayerID
         loadPhoto(for: player?.gamePlayerID)
+        updateLobby()
     }
 
     /// Loads the photo of a player newly signed in, and forgets it on sign-out (#139, T5).

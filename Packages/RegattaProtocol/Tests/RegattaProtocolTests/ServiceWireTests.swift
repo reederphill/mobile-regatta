@@ -68,11 +68,11 @@ import Testing
         #expect(throws: WireError.invalidValue("refusal")) { try Self.decode(.queueReply, [0, 2, 7]) }
         #expect(throws: WireError.invalidValue("raceSessionCall")) { try Self.decode(.raceSessionRequest, [0, 5]) }
         #expect(throws: WireError.invalidValue("raceSessionResult")) { try Self.decode(.raceSessionReply, [0, 8]) }
-        #expect(throws: WireError.invalidValue("lobbyCall")) { try Self.decode(.lobbyRequest, [0, 11]) }
+        #expect(throws: WireError.invalidValue("lobbyCall")) { try Self.decode(.lobbyRequest, [0, 12]) }
         #expect(throws: WireError.invalidValue("quickChat")) { try Self.decode(.lobbyRequest, [0, 4, 4]) }
         #expect(throws: WireError.invalidValue("reason")) { try Self.decode(.lobbyRequest, [0, 10, 0, 1, 2]) }
-        #expect(throws: WireError.invalidValue("lobbyResult")) { try Self.decode(.lobbyReply, [0, 9]) }
-        #expect(throws: WireError.invalidValue("lobbyError")) { try Self.decode(.lobbyReply, [0, 8, 10]) }
+        #expect(throws: WireError.invalidValue("lobbyResult")) { try Self.decode(.lobbyReply, [0, 10]) }
+        #expect(throws: WireError.invalidValue("lobbyError")) { try Self.decode(.lobbyReply, [0, 8, 11]) }
         #expect(throws: WireError.invalidValue("closure")) { try Self.decode(.lobbyReply, [0, 8, 0, 4]) }
         #expect(throws: WireError.invalidValue("standing")) { try Self.decode(.lobbyReply, [0, 0, 0, 0, 3]) }
         #expect(throws: WireError.invalidValue("profileCall")) { try Self.decode(.profileRequest, [0, 2]) }

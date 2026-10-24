@@ -52,7 +52,9 @@ import Testing
 
     @Test func aCallWaitsForTheSessionToOpenThenSaysNotConnected() async throws {
         let rig = SessionRig(isOnline: false)
-        await rig.session.start()
+        // The device's player given at once, not through `start()`'s task: a join before that task has run finds
+        // nobody signed in and is refused, and the wait below would never see its sleep.
+        await rig.session.deviceChanged(SessionRig.wren)
         let queue = rig.session.queue
         // The session opens while the call waits: it goes through.
         async let joined: Void = queue.join()
@@ -129,6 +131,26 @@ import Testing
         await rig.server.events.wait { $0.filter { $0 == .call("openRatingChanges", link: 2) }.count == 1 }
         rig.server.push(Fixtures.rating)
         #expect(await ratings.next() == Fixtures.rating)
+    }
+
+    /// #163 (T3): the session reads rating changes on one server stream and fans them out, so a change the server
+    /// replays once, on the stream it primes first, reaches every reader: the next race's results and the follower of
+    /// the race before. A reader that comes later still hears the latest.
+    @Test func ratingChangesAreOneStreamFannedOutToEveryReader() async {
+        let rig = SessionRig()
+        await rig.opened()
+        let pending = RatingChange(raceID: RaceID("race-1"), outcome: .unrated)
+        rig.server.script { $0.ratings = [pending] }
+        var results = rig.session.raceSession.ratingChanges().makeAsyncIterator()
+        var follower = rig.session.raceSession.ratingChanges().makeAsyncIterator()
+        #expect(await results.next() == pending)
+        #expect(await follower.next() == pending)
+        rig.server.push(Fixtures.rating)
+        #expect(await results.next() == Fixtures.rating)
+        #expect(await follower.next() == Fixtures.rating)
+        var late = rig.session.raceSession.ratingChanges().makeAsyncIterator()
+        #expect(await late.next() == Fixtures.rating)
+        #expect(calls(rig).filter { $0 == "openRatingChanges" }.count == 1, "one server stream for every reader")
     }
 
     @Test func aCancelledRaceEndsTheResultsStream() async {

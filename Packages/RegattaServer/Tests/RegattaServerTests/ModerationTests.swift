@@ -252,6 +252,18 @@ struct ModerationRig {
         #expect(Moderation.overriddenNickname(sailNumber: 42) == "Sailor 42")
     }
 
+    /// Her boat card shows an overridden nickname at once (#142): "Sailor" and her sail number.
+    @Test func anOverriddenNicknameShowsAsSailorOnHerBoatCard() async throws {
+        let rig = ModerationRig()
+        let gull = rig.lobby.player("gull")
+        _ = rig.lobby.service("gull")
+        let wren = rig.lobby.service("wren")
+        #expect(try await wren.boatCard(GamePlayerID("G:gull")).nickname == "gull")
+        _ = try await rig.moderation.overrideNickname("T:gull", by: rig.admin)
+        let number = try await StarterLiveries().livery(of: gull).sailNumber
+        #expect(try await wren.boatCard(GamePlayerID("G:gull")).nickname == "Sailor \(number)")
+    }
+
     /// The server shows an overridden nickname from sign-in: "Sailor" and her sail number.
     @Test func theServerSignsAnOverriddenPlayerInAsSailor() async throws {
         let endpoint = try ServiceEndpoint.make(config: .dev(), store: InMemoryAccountStore(), wordList: .empty)

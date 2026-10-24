@@ -12,7 +12,10 @@
 #                 -timescale 4` (7 opponents, the launch race), your boat finishes >= 14 s of wall-clock time before the
 #                 close: the sim ticks at 30 Hz and -timescale 4 runs at most 120 ticks/s, so >= 1,680 ticks (#445: at
 #                 -timescale 8 the 3,360 ticks it needed were more than a one-lap fleet spreads). Her finish tick goes in
-#                 the table too (`resultsSheetFinishTick`): the test watches the race clock up to it (#572).
+#                 the table too (`resultsSheetFinishTick`): the test watches the race clock up to it (#572). Since #583,
+#                 3,600 ticks, the close's full 120 s after the first finish: she wins. The test's waits after her
+#                 finish (the 3 s delay, up to 15 s for the sheet, its 20 s clock watch) outlasted the 1,899 ticks seed 8
+#                 left once she finished second: CI's runner, at about 2x, reached the close under the sheet.
 #   firstRounding RaceAssemblyUITests.testPracticeRaceOnTheNewCoreReachesTheGunAndAFirstRounding: `-demo -timescale 8`
 #                 (the launch race, 7 opponents, 2 laps), your boat starts within 2 s of the gun and rounds the
 #                 windward mark within 140 s of it with no rule call against her (#477: CI's simulator ran the race at
@@ -24,9 +27,8 @@
 #                 runner read her start speed in two bots' wakes and the bar fell under the long ease).
 set -euo pipefail
 
-# The timescale ResultsUITests launches at, and the ticks that give it 14 s of wall-clock time after your finish.
-results_timescale=4
-results_min_gap_ticks=$((14 * 30 * results_timescale))
+# The ticks from your finish to the close ResultsUITests needs: the full 120 s, she wins (#583).
+results_min_gap_ticks=$((120 * 30))
 # ResultsUITests' start sequence (`-startSeconds`): 10 s, not the launch race's 60, so a slow runner reaches her finish
 # sooner (#572).
 results_start_seconds=10
@@ -81,7 +83,7 @@ cat >"$generated" <<SWIFT
 /// The seeds the UI tests launch, each the first in 1...400 meeting its test's condition.
 enum SeedTable {
     /// \`ResultsUITests.testSheetAppearsAbout3sAfterFinishWhileSceneRenders\`: the \`-demo -laps 1 -startSeconds $results_start_seconds\` race
-    /// on which your boat finishes at least $results_min_gap_ticks ticks (14 s at \`-timescale $results_timescale\`) before the close. Probed: she
+    /// on which your boat finishes at least $results_min_gap_ticks ticks before the close: she wins. Probed: she
     /// finishes at tick $finish, the race closes at $close (ticks from the gun).
     static let resultsSheet: UInt64 = $seed
     /// The tick, from the gun, your boat finishes at on \`resultsSheet\`: the test watches the race clock up to it.
