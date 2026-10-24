@@ -10,8 +10,8 @@ import RegattaCore
 /// last 15–20 s the fleet is slow and committed, so a held course is a fair guess.
 ///
 /// - Candidate holes (`holeSpots`): spots along the line, in from its ends.
-/// - Each hole's score, metres up the course: the room to leeward of it at the gun (the projected boat nearest it on the
-///   pin side, capped at `roomCap` hull lengths: a hole with nobody below it is as good as one with room enough); less
+/// - Each hole's score, metres up the course: the room to leeward of it at the gun (to the projected boat nearest it on
+///   the pin side, or to a hull length clear of the pin, capped at `roomCap` hull lengths); less
 ///   what she would be late there (her run in, sailed forward on her class's dynamics, `secondsToLine`, against the time
 ///   to the gun), in metres at the polar's best; less the metres the hole gives up to the favoured end, as she reads the
 ///   line's bias (`lineBiasSine`); less `airCost` for each projected boat just to windward of it at the gun (within
@@ -36,9 +36,9 @@ extension BotBrain {
 
     static let nationalFromSeconds = 20.0
     static let regionalFromSeconds = 10.0
-    /// The candidate holes: spots along the line, 0 the pin … 1 the committee boat, in from the ends by the favoured-end
-    /// inset.
-    static let holeSpots: [Double] = (1...19).map { Double($0) * 0.05 }
+    /// The candidate holes: spots along the line, 0 the pin … 1 the committee boat, a tenth of it in from either end: a hole
+    /// at a mark is one she rounds the mark into, and back out of if she is over.
+    static let holeSpots: [Double] = (2...18).map { Double($0) * 0.05 }
     /// She plans again only this often, seconds, and holds her hole between.
     static let startReplanSeconds = 1.0
     /// Hull lengths of room to leeward past which more is worth no more.
@@ -134,10 +134,12 @@ extension BotBrain {
             }
         }
         let vmg = max(view.boatClass.polar.bestUpwind(tws: b.polarWindSpeed).vmg, 0.3)
-        // Room to leeward at the gun: along the line, pinward, to the nearest projected boat near the line.
+        // Room to leeward at the gun: along the line, pinward, to the nearest projected boat near the line, or to the pin
+        // itself, a hull length clear of it: the mark bounds the room at the end nobody else is.
         let near = projected.filter { -line.side($0) < 4 * length }
         let pinward = near.map { (point - $0).dot(along.normalized) }.filter { $0 > 0 }
-        let room = min(pinward.min() ?? .infinity, Self.roomCap * length)
+        let toPin = max(0, spot * line.length - length)
+        let room = min(pinward.min() ?? .infinity, toPin, Self.roomCap * length)
         let windward = near.map { ($0 - point).dot(along.normalized) }.filter { $0 > 0 && $0 < Self.airLengths * length }.count
         let late = max(0, run - toGun)
         let biasMetres = lineBiasSine(b, view) * line.length
