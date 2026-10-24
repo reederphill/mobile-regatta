@@ -77,9 +77,9 @@ extension BotBrain {
     /// much berth, though it keeps clear of her (`startKeepClear`, #337 round 4, untuned).
     static let penalisedBerthLengths = 2.5
     /// Hull lengths, centre to centre, she keeps from a boat she must keep clear of before her start.
-    static let keepClearDistance = 1.3
+    static let keepClearDistance = ProbeKnobs.keepClearDistance
     /// How much further than that a heading must pass it to keep her clear.
-    static let keepClearMargin = 1.2
+    static let keepClearMargin = ProbeKnobs.keepClearMargin
     /// The headings she weighs keeping clear before her start: her hold angle to this, every `keepClearStep`.
     static let keepClearDeepest = deg2rad(170)
     static let keepClearStep = deg2rad(10)

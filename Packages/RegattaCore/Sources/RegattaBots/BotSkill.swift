@@ -153,7 +153,7 @@ public struct BotWeaknesses: Hashable, Sendable {
 
     /// Seconds ahead a bot of `skill` looks for a collision she must keep clear of: 2.5 s at skill 0 to 4.5 s at 1,
     /// #99's and #101's tuned lookahead, now a weakness of its own (#103, placeholder).
-    public static func keepClearLookahead(skill: Double) -> Double { 2.5 + 2 * skill }
+    public static func keepClearLookahead(skill: Double) -> Double { 2.5 + ProbeKnobs.lookaheadSlope * skill }
 
     /// The rules whose encounters she can misjudge (#103): the give-way rules, rules 10, 11 and 12, racing and before
     /// her start (#280), and the mark-room she owes (18.2). Not rule 13 (a tacking boat finishes her tack whatever she

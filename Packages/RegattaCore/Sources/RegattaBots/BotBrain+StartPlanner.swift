@@ -54,6 +54,7 @@ extension BotBrain {
 
     /// Her depth at `skill`, a live bot's; nil below the Regional band, and for the suite's profiles and the cautious bot.
     static func startPlanDepth(skill: Double) -> StartPlanDepth? {
+        guard ProbeKnobs.plannerOn else { return nil }
         if skill >= BotTier.national.skillBand.lowerBound { return StartPlanDepth(fromSeconds: nationalFromSeconds, stride: 1) }
         if skill >= BotTier.regional.skillBand.lowerBound { return StartPlanDepth(fromSeconds: regionalFromSeconds, stride: 2) }
         return nil

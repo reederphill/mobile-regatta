@@ -80,7 +80,7 @@ extension BotBrain {
     /// `keepClearMargin`. Placeholder.
     static let thinMargin = keepClearMargin
     /// Hull lengths of progress a thin margin costs a course (#531: "the tack wins on a thin margin"). Placeholder.
-    static let thinMarginCost = 1.0
+    static let thinMarginCost = ProbeKnobs.thinMarginCost
     /// Seconds ahead she rolls the boats at most. Placeholder.
     static let scorerHorizon = 10.0
 
