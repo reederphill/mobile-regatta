@@ -719,19 +719,21 @@ extension LitWater {
         var mid = SIMD3<Double>(0x3A, 0x68, 0x88) / 255
         var pale = SIMD3<Double>(0x7C, 0xB4, 0xBE) / 255
         var size = 0.34
-        var tA = 0.75
-        var tB = 0.745
-        var tC = 0.71
-        var rim = 0.03
-        var shadow = 0.04
-        var off = 0.22
+        var tA = 0.752
+        var tB = 0.747
+        var tC = 0.712
+        var rim = 0.02
+        var shadow = 0.05
+        var off = 0.30
         var soft = 2.0
         var sparks = 0.6
         var cell = 30.0
-        var stretch = 2.0
+        var stretch = 3.0
+        var upX = -1.0
+        var upY = 1.0
         var puff = 1.0
         var calm = 0.03
-        var warp = 4.0
+        var warp = 2.0
         var drift = 0.25
         var ref = 2.4
 
@@ -758,6 +760,9 @@ extension LitWater {
             if let v = num("REGATTA_TOON_SPARKS") { t.sparks = v }
             if let v = num("REGATTA_TOON_CELL") { t.cell = v }
             if let v = num("REGATTA_TOON_STRETCH") { t.stretch = v }
+            if let v = env["REGATTA_TOON_UP"]?.split(separator: ",").compactMap({ Double($0) }), v.count == 2 {
+                t.upX = v[0]; t.upY = v[1]
+            }
             if let v = num("REGATTA_TOON_PUFF") { t.puff = v }
             if let v = num("REGATTA_TOON_CALM") { t.calm = v }
             if let v = num("REGATTA_TOON_WARP") { t.warp = v }
@@ -770,7 +775,7 @@ extension LitWater {
         var source: String {
             func f(_ x: Double) -> String { String(format: "%.4f", x) }
             func v3(_ c: SIMD3<Double>) -> String { "vec3(\(f(c.x)), \(f(c.y)), \(f(c.z)))" }
-            let cA = 26 * size, cB = 12 * size, cC = 5 * size, w0 = warp * size / 0.4
+            let cA = 26 * size, cB = 12 * size, cC = 5 * size, w0 = warp * size / 0.34
             return """
             float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
             float vnoise(vec2 p) {
@@ -783,15 +788,20 @@ extension LitWater {
             float isl(vec2 p, float C, vec2 r, vec2 sd, float t, vec2 dn) {
                 vec2 a = vec2(dot(p, dn), dot(p, vec2(-dn.y, dn.x)) / \(f(stretch)));
                 vec2 q = vec2(a.x * r.x - a.y * r.y, a.x * r.y + a.y * r.x) / C + sd + vec2(0.6, 0.35) * t * 0.012;
-                return 0.70 * vnoise(q) + 0.24 * vnoise(q * 2.3 + sd.yx) + 0.06 * vnoise(q * 5.1 + sd);
+                // The second octave ridged: creases and tendrils rather than round puddles.
+                float r2 = 1.0 - abs(2.0 * vnoise(q * 2.4 + sd.yx) - 1.0);
+                return 0.66 * vnoise(q) + 0.34 * r2 - 0.07;
             }
             // The warp: two octaves drifting their own ways, so no two neighbours share a size or spacing.
             vec2 warpAt(vec2 m, float t, vec2 dn) {
                 vec2 dp = vec2(-dn.y, dn.x);
-                vec2 q1 = m / \(f(26 * size)) + dp * t * 0.004;
-                vec2 q2 = vec2(m.x * 0.8 - m.y * 0.6, m.x * 0.6 + m.y * 0.8) / \(f(8.5 * size)) - dp * t * 0.01;
+                vec2 q1 = m / \(f(30 * size / 0.34)) + dp * t * 0.004;
+                vec2 q2 = vec2(m.x * 0.8 - m.y * 0.6, m.x * 0.6 + m.y * 0.8) / \(f(9 * size / 0.34)) - dp * t * 0.01;
+                // A fine octave, small enough that the far side stays far: capes and bays on the outlines.
+                vec2 q3 = vec2(m.x * 0.34 + m.y * 0.94, -m.x * 0.94 + m.y * 0.34) / \(f(4.5 * size / 0.34)) + dn * t * 0.02;
                 return vec2(vnoise(q1) - 0.5, vnoise(q1 + vec2(7.3, 2.1)) - 0.5) * 2.0 * \(f(w0))
-                     + vec2(vnoise(q2 + vec2(3.1, 9.7)) - 0.5, vnoise(q2 + vec2(1.7, 4.4)) - 0.5) * \(f(w0 * 0.35));
+                     + vec2(vnoise(q2 + vec2(3.1, 9.7)) - 0.5, vnoise(q2 + vec2(1.7, 4.4)) - 0.5) * \(f(w0 * 0.25))
+                     + vec2(vnoise(q3 + vec2(5.3, 0.8)) - 0.5, vnoise(q3 + vec2(0.6, 6.2)) - 0.5) * \(f(w0 * 0.16));
             }
             #define CUT(F, T) smoothstep((T) - max(fwidth(F), 1e-5) * s, (T) + max(fwidth(F), 1e-5) * s, F)
             void main() {
@@ -817,17 +827,19 @@ extension LitWater {
                 float rim = \(f(rim)) * (1.0 + 1.2 * puff - 0.8 * lull);
                 float shd = \(f(shadow)) * (1.0 + 1.5 * puff - 0.9 * lull);
                 // The far side, in world metres (screen-up under the camera's turn).
-                vec2 up = vec2(-u_cam.y, u_cam.x);
+                vec2 up = vec2(\(f(upX)) * u_cam.y, \(f(upY)) * u_cam.x);
                 vec2 rA = vec2(0.94, 0.34), rB = vec2(0.5, -0.87), rC = vec2(-0.77, 0.64);
                 vec2 sA = vec2(1.7, 9.2), sB = vec2(6.1, 3.3), sC = vec2(2.9, 7.7);
                 float FA = isl(p, \(f(cA)), rA, sA, t, dn);
                 float FB = isl(p, \(f(cB)), rB, sB, t, dn);
-                float FC = isl(p, \(f(cC)), rC, sC, t, dn);
+                // The small layer is closed once zoomed out past it: skip it.
+                bool onC = z < 1.2;
+                float FC = onC ? isl(p, \(f(cC)), rC, sC, t, dn) : 0.0;
                 float GA = isl(p - up * \(f(cA * off)), \(f(cA)), rA, sA, t, dn);
                 float HA = isl(p - up * \(f(cA * off * 0.5)), \(f(cA)), rA, sA, t, dn);
                 float HB = isl(p - up * \(f(cB * off * 0.5)), \(f(cB)), rB, sB, t, dn);
                 float GB = isl(p - up * \(f(cB * off)), \(f(cB)), rB, sB, t, dn);
-                float GC = isl(p - up * \(f(cC * off)), \(f(cC)), rC, sC, t, dn);
+                float GC = onC ? isl(p - up * \(f(cC * off)), \(f(cC)), rC, sC, t, dn) : 0.0;
                 float s = \(f(soft)) * 0.5;
                 float pA = max(max(CUT(FA, tA), CUT(FB, tB)), CUT(FC, tC));
                 // The fringe: the island swept a little to its far side (two steps), barely grown, so a deep shape
@@ -871,22 +883,22 @@ extension LitWater {
                 vec2 sm = (ci + 0.3 + 0.4 * rnd) * cellM;
                 vec2 lc = pm / cellM - ci;
                 float edge = min(min(lc.x, 1.0 - lc.x), min(lc.y, 1.0 - lc.y)) * cellM * 8.0 / u_scale;
-                float on = step(h21(ci + vec2(cyc * 1.7, 11.0)), \(f(sparks)));
+                float on = step(h21(ci + vec2(cyc * 1.7, 11.0)), \(f(sparks)) * (1.0 - 0.4 * clamp(z, 0.0, 1.0)));
                 vec2 sw0 = sm + dn * t * \(f(drift));
                 if (on > 0.0) {
                     vec2 sp = sm + warpAt(sm, t, dn);
                     float inA = isl(sp, \(f(cA)), rA, sA, t, dn) - tA;
                     float inB = isl(sp, \(f(cB)), rB, sB, t, dn) - tB;
-                    float inC = isl(sp, \(f(cC)), rC, sC, t, dn) - tC;
+                    float inC = onC ? isl(sp, \(f(cC)), rC, sC, t, dn) - tC : -1.0;
                     on *= smoothstep(0.0, 0.03, max(max(inA, inB), inC));
                 }
                 vec2 dw = (sw0 - m) * 8.0 / u_scale;
                 vec2 ds = vec2(dw.x * u_cam.x + dw.y * u_cam.y, -dw.x * u_cam.y + dw.y * u_cam.x);
                 ds.y *= u_view.z;
                 float fade = sin(3.14159 * life); fade *= fade;
-                float core = exp(-(ds.x * ds.x * 0.12 + ds.y * ds.y) / 5.0);
+                float core = exp(-(ds.x * ds.x * 0.08 + ds.y * ds.y) / 5.0);
                 float glow = exp(-(ds.x * ds.x * 0.15 + ds.y * ds.y) / 25.0) * 0.4;
-                float armX = exp(-abs(ds.x) / 9.0) * exp(-ds.y * ds.y / 0.9);
+                float armX = exp(-abs(ds.x) / 12.0) * exp(-ds.y * ds.y / 0.9);
                 float armY = exp(-abs(ds.y) / 4.5) * exp(-ds.x * ds.x / 0.8);
                 float star = clamp((core * 1.6 + glow + armX + 0.7 * armY) * fade * on * smoothstep(0.0, 7.0, edge), 0.0, 1.0);
                 col = mix(col, vec3(1.0, 0.99, 0.95), star);
