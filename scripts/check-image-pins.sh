@@ -3,7 +3,7 @@
 # scripts/linux-test.sh pins as IMAGE (changing it changes the simulation version), and CI's persistence job
 # (.github/workflows/ci.yml, #144) tests the server's Postgres stores in it. Fails unless every container image
 # botsuite.yml names, and every swift image ci.yml names, is exactly that IMAGE, so the pins can't drift.
-# check.sh runs it.
+# nightly.yml runs it.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"

@@ -18,7 +18,7 @@
 #                 test in another worktree reinstalls its own app on.
 #   DEMO_PLAYERS  two dev player numbers (default "1 2": "Dev 1" and "Dev 2")
 #
-# The build holds check.sh's build lock (scripts/heavy.sh): don't run this script under heavy.sh.
+# The build holds the machine-wide build lock (scripts/heavy.sh): don't run this script under heavy.sh.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"

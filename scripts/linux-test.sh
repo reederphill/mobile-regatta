@@ -6,7 +6,7 @@
 # - every package builds with its tests (RegattaCore with RegattaBots, RegattaProtocol, RegattaClient,
 #   RegattaServices, RegattaServer), since
 #   each must build on the race server.
-# Unit tests run on macOS (scripts/check.sh). --all runs every package's tests here too.
+# Unit tests run on macOS (scripts/test.sh). --all runs every package's tests here too.
 #
 #   scripts/linux-test.sh [--all]
 #

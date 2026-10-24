@@ -3,7 +3,7 @@
 # server runs. Its exit status is the gate: any threshold or tick-budget breach fails it. Never on a pull request: it
 # stays red on main until #389 tunes the placeholder thresholds (owner, 2026-10-04), and no merge waits on it. The tick
 # times on a hosted runner are noisy; the authoritative tick budget is the Bench workflow's on the reference server.
-# The image pin is linux-test.sh's IMAGE; scripts/check-image-pins.sh (run by check.sh) holds them equal.
+# The image pin is linux-test.sh's IMAGE; scripts/check-image-pins.sh (run by nightly.yml) holds them equal.
 #
 # The matrix is split into one job per profile mix (keep in step with matrix.json's profileMixes, plus the parity mix,
 # which the bundled matrix doesn't sail), and each job's summaries and gates read its own races alone:
@@ -24,11 +24,6 @@
 name: Bot suite
 
 on:
-  push:
-    branches: [ "main" ]
-    paths:
-      - "Packages/RegattaCore/**"
-      - ".github/workflows/botsuite.yml"
   schedule:
     - cron: "30 3 * * *"
   workflow_dispatch:

@@ -15,7 +15,7 @@ Infer the repo from `git remote -v`; `gh` does this automatically when run insid
 
 ## Acceptance items
 
-Each acceptance item names the test that proves it: `<Package>: <Suite>.<test>` (for example `RegattaClient: LeadTests.leadNeverExceedsThirtyTicks`), or `new: <Suite>.<test>` for a test the ticket adds. The acceptance check runs exactly those tests (`docs/agents/validation.md`).
+Each acceptance item says what "done" looks like. Name a test only where one proves it (`<Package>: <Suite>.<test>`); a visual item is proven by a screenshot on the PR.
 
 ## Pull requests as a triage surface
 

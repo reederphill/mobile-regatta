@@ -36,7 +36,7 @@ source scripts/lib.sh
 
 destination="${E2E_DESTINATION:-platform=iOS Simulator,name=iPhone 17}"
 step_seconds=$(( ${E2E_STEP_TIMEOUT_MINUTES:-15} * 60 ))
-# check.sh's RegattaServer build, with its flags, so a checked tree builds nothing here.
+# scripts/test.sh's RegattaServer build, with its flags, so a tested tree builds nothing here.
 scratch="$root/.build/check/RegattaServer"
 optimize=(-Xswiftc -O)
 log="$(mktemp -t regatta-e2e-server)"

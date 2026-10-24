@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Runs one heavy command outside check.sh (a `swift test --filter` or `-only-testing` rerun, linux-test.sh)
-# holding check.sh's machine-wide lock, so it doesn't swap against another worktree's build.
+# Runs one heavy command alone (a `swift test --filter` or `-only-testing` rerun, linux-test.sh)
+# holding the machine-wide build lock, so it doesn't swap against another worktree's build.
 #
 #   scripts/heavy.sh [--simulator] <command...>
 #

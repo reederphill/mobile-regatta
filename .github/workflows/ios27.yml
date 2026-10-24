@@ -1,21 +1,9 @@
 name: iOS 27 SDK
 
 # The app built with the iOS 27 SDK (#107). It runs on GitHub's Xcode 27 image, which is slow and bills macOS
-# minutes, so it doesn't run on every push: only when shipping-relevant files change on main, weekly, and by
-# hand, never on a pull request. Its runs hold one of the account's few macOS runners for 30-45 min, so a run
+# minutes, so it runs weekly and by hand, never on a push or a pull request. Its runs hold one of the account's few macOS runners for 30-45 min, so a run
 # on every pull request left CI's macOS jobs queued behind it (it was about half the macOS capacity).
 on:
-  push:
-    branches: [ "main" ]
-    paths:
-      - "Regatta/Info.plist"
-      - "Regatta.xcodeproj/**"
-      - "**/*.entitlements"
-      - "**/PrivacyInfo.xcprivacy"
-      - "Regatta/App/**"
-      - "**/RaceViewportPolicy.swift"
-      - "scripts/check-shipping-config.sh"
-      - ".github/workflows/ios27.yml"
   schedule:
     - cron: "0 6 * * 1"  # Mondays 06:00 UTC
   workflow_dispatch:
@@ -67,21 +55,13 @@ jobs:
           xcrun simctl spawn 'iPhone 17' launchctl list | grep 'com.phillreeder.regatta' \
             || { echo "Regatta isn't running 15 s after launch" >&2; exit 1; }
           echo "Regatta is running on iOS 27."
-      # Each test gets 5 min, so a hang fails that test instead of the job: a UI test's element read once
-      # blocked for 21 min and the job ran out of time before the iPad started. The allowance is a ceiling on
-      # the whole test, so no test's own waits add up to more than 3.5 min (RaceUITestCase); the slowest
-      # passing test, a render fixture, takes about 2. A failed test runs once more, as in ci.yml: the
-      # simulator now and then fails to launch the app ("Failed to get background assertion"). A test that
-      # fails twice fails the job. The sixteen-boat practice race asks for 7 min itself
-      # (executionTimeAllowance, #473), which the maximum of 420 lets it have.
-      - name: xcodebuild test (unit + UI) on iOS 27, iPhone and iPad
-        env:
-          # A failed reference compare leaves its render here, uploaded below as render-actuals (#215; ci.yml).
-          TEST_RUNNER_REFERENCE_ACTUALS_DIR: ${{ github.workspace }}/render-actuals
+      # A hung test fails itself after 5 min; a failed test runs once more (the simulator now and then fails to launch).
+      - name: xcodebuild test (unit) on iOS 27, iPhone and iPad
         run: |
           xcodebuild test -project Regatta.xcodeproj -scheme Regatta \
             -destination 'platform=iOS Simulator,name=iPhone 17,OS=27.0' \
             -destination 'platform=iOS Simulator,name=iPad Air 13-inch (M4),OS=27.0' \
+            -only-testing:RegattaTests \
             -disable-concurrent-destination-testing \
             -test-timeouts-enabled YES -default-test-execution-time-allowance 300 \
             -maximum-test-execution-time-allowance 420 \
@@ -99,13 +79,3 @@ jobs:
             Regatta-ios27.xcresult
             launch-ios27.png
           if-no-files-found: ignore
-      # The references are pinned to ci.yml's iOS 26.5 run, which is what scripts/adopt-references.sh <PR>
-      # takes; this one is for a look at how iOS 27 draws (adopt it only with its run id, on purpose).
-      - name: Upload the renders that failed their reference compare (render-actuals)
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: render-actuals
-          path: render-actuals
-          if-no-files-found: ignore
-          retention-days: 5

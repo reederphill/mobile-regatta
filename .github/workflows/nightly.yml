@@ -1,0 +1,182 @@
+name: Nightly
+
+# Everything too slow or too pinned to today's behaviour to gate a merge: the golden and RegattaBots digests on the
+# pinned Linux replay platform (ADR 0002: the server must replay a stored log bit-exactly), the server image under
+# load, Postgres, every package's tests with the bot suites, the app's unit tests on the simulator, and the online
+# race end to end (scripts/e2e.sh). A red night is a ticket, not a block. A digest change means the change that moved
+# the sim takes the next simulationRevision and a new Goldens.json row from the linux job's log.
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Golden and builds on the pinned Linux replay platform
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      LINUX_SCRATCH: ${{ github.workspace }}/.linux-scratch
+      LINUX_TEST_TIMEOUT_MINUTES: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: .linux-scratch
+          key: linux-scratch-${{ hashFiles('scripts/linux-test.sh', 'Packages/*/Package.resolved') }}
+          restore-keys: linux-scratch-
+      - name: The bot suite's image pin is linux-test.sh's
+        run: scripts/check-image-pins.sh
+      - name: Golden and RegattaBots replay digests (debug and release); every package builds
+        shell: bash  # explicit, so the step runs with pipefail and a failure isn't hidden by tee
+        run: scripts/linux-test.sh 2>&1 | tee linux-test.log
+      - name: Golden digest
+        if: always()
+        run: |
+          grep -o 'GOLDEN simulationVersion=.*' linux-test.log | sort -u | tee -a "$GITHUB_STEP_SUMMARY" || true
+      - name: Let the cache read the container's build
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" .linux-scratch || true
+
+  container:
+    name: Server image; load clients sail a race in the Linux container
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image (Dockerfile)
+        run: docker build --platform linux/amd64 -t regatta-server .
+      - name: The server refuses to start without ENV=dev
+        run: |
+          set +e
+          docker run --rm regatta-server
+          status=$?
+          set -e
+          echo "exit status $status"
+          test "$status" -eq 78
+      - name: One client, then 16 in one race, within the bandwidth budget (#67, #27)
+        run: |
+          docker run -d --name regatta -e ENV=dev -p 8080:8080 regatta-server
+          for i in $(seq 1 30); do curl --silent --fail localhost:8080/health && break; sleep 1; done
+          curl --silent --show-error --fail localhost:8080/health
+          echo
+          docker exec regatta regatta-loadclient --clients 1 --race-seconds 5 --start-seconds 2
+          docker exec regatta regatta-loadclient --clients 16 --race-seconds 20 --start-seconds 5 --check-bandwidth \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Server log
+        if: always()
+        run: docker logs regatta || true
+
+  persistence:
+    name: Server persistence against Postgres
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    container:
+      image: swift:6.3.3-noble@sha256:8de8ea332a61e961ead4ef41029c2552b18e1a70dd5942d25ecf7d8de2eec5b5
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: regatta
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      REGATTA_REQUIRE_DATABASE: "1"
+      REGATTA_TEST_DATABASE_URL: postgres://postgres:regatta@postgres:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: .build/persistence
+          key: persistence-${{ hashFiles('scripts/linux-test.sh', 'Packages/RegattaServer/Package.resolved') }}
+          restore-keys: persistence-
+      # Every suite that needs the database: the Persistence target's (migrations, race registry, data files, players,
+      # sessions and terms acceptances) and the service endpoint's against Postgres (#145). A new database-backed suite
+      # joins this filter.
+      - name: Migrations, the stores, and the service endpoint against Postgres
+        run: >-
+          swift test --package-path Packages/RegattaServer --scratch-path .build/persistence
+          --filter '^PersistenceTests\.' --filter 'ServiceEndpointPersistenceTests'
+
+  macos:
+    name: Packages on macOS, the bot suites included
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: .build/check
+          key: test-v1-${{ runner.os }}-${{ hashFiles('Packages/*/Package.resolved') }}
+          restore-keys: test-v1-${{ runner.os }}-
+      - name: Every package's tests, the bot suites included
+        run: scripts/test.sh --bots
+      - name: Same digest across two test processes
+        timeout-minutes: 10
+        run: scripts/check-digest-stable.sh
+
+  app:
+    name: App unit tests on the iOS Simulator
+    # Pinned so the SDK and simulator runtime only change on purpose: Xcode 26.6, iOS 26.5.
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - name: xcodebuild test (RegattaTests) on iPhone
+        run: |
+          xcodebuild test -project Regatta.xcodeproj -scheme Regatta \
+            -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' -only-testing:RegattaTests \
+            -test-timeouts-enabled YES -default-test-execution-time-allowance 300 \
+            -derivedDataPath DerivedData -resultBundlePath Regatta.xcresult
+      - name: Upload the result bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Regatta.xcresult
+          path: Regatta.xcresult
+          if-no-files-found: ignore
+          retention-days: 5
+
+  e2e:
+    name: Online race end to end (app on the iOS Simulator, local RegattaServer)
+    runs-on: macos-26
+    # 41 minutes on main before #166's delete phase (a queue race, a deletion and a relaunch, about 5 more).
+    timeout-minutes: 65
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      TEST_RUNNER_CI: "true"
+      TEST_RUNNER_GITHUB_ACTIONS: "true"
+      E2E_DESTINATION: platform=iOS Simulator,name=iPhone 17,OS=26.5
+      # The race phase sails three queue races since #163 (about 13 minutes with its build): room for a retry.
+      E2E_STEP_TIMEOUT_MINUTES: "25"
+    steps:
+      - uses: actions/checkout@v4
+      # The server's accounts live in Postgres (#161); macOS runners have no Docker, so Homebrew's.
+      - name: Install Postgres
+        run: brew list postgresql@17 > /dev/null 2>&1 || HOMEBREW_NO_AUTO_UPDATE=1 brew install postgresql@17
+      - name: scripts/e2e.sh (an instant race; the account and a terms bump; the queue to the close, rejoin, a second person, a killed server; Delete my online data)
+        run: |
+          scripts/e2e.sh -retry-tests-on-failure -test-iterations 2 \
+            -derivedDataPath DerivedData -resultBundlePath E2E.xcresult
+      - name: Upload the result bundles
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: E2E.xcresult
+          path: |
+            E2E.xcresult
+            E2E-terms-bump.xcresult
+            E2E-race.xcresult
+            E2E-pair.xcresult
+            E2E-kill.xcresult
+            E2E-delete.xcresult
+          if-no-files-found: ignore

@@ -46,14 +46,6 @@
 			);
 			target = AA0000000000000000000005 /* Regatta */;
 		};
-		AA0000000000000000000032 /* Exceptions for "RegattaUITests" folder in "RegattaTests" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				ImageDiff.swift,
-				ReferencePolicy.swift,
-			);
-			target = AA000000000000000000001B /* RegattaTests */;
-		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -72,9 +64,6 @@
 		};
 		AA000000000000000000001A /* RegattaUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				AA0000000000000000000032 /* Exceptions for "RegattaUITests" folder in "RegattaTests" target */,
-			);
 			path = RegattaUITests;
 			sourceTree = "<group>";
 		};

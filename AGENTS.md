@@ -8,13 +8,9 @@ Native iOS sailing race game. The simulation lives in `Packages/RegattaCore` (pu
 
 Issues, including the wayfinder design map, live in GitHub Issues on `reederphill/mobile-regatta` (use the `gh` CLI). See `docs/agents/issue-tracker.md`.
 
-### Validation
+### Workflow
 
-`scripts/check.sh` locally, CI before merge; the golden runs only in CI. See `docs/agents/validation.md`.
-
-### Orchestration
-
-One ticket per session, short briefs, fresh agents per round. See `docs/agents/orchestration.md`.
+One agent per ticket: change, `scripts/test.sh <Package>`, push, merge on green CI (about 15 min). Slow and behaviour-pinned checks run nightly and never block. See `docs/agents/workflow.md`.
 
 ### Domain docs
 
