@@ -64,7 +64,7 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
     BotProfile.swift        the bot suite's scripted profiles: baseline (groove only) and tactician (#231), blip-tacker (#238), hunter (#355), executor and Club-execution tactician (#105)
     FleetRoster.swift       display metadata: which seats are bots, and their sailing names
   Sources/BotSuite/       the headless bot-race suite (#97): harness, matrix, per-seat metrics, per-tier gate, the skill-gap gate (#231), the fun-pass gate (#238), JSON report; #105's mixes (execution, cautious, rivals, rank stability), the 16.1 watchdog and the placeholder keys #389 sets
-  Sources/regatta-botsuite `swift run -c release regatta-botsuite [--profile-mix <mix>] [--json <path|->]`: sails matrix.json, exits 1 on a breach; CI's botsuite.yml runs it on main and nightly
+  Sources/regatta-botsuite `swift run -c release regatta-botsuite [--profile-mix <mix>] [--json <path|->]`: sails matrix.json, exits 1 on a breach; botsuite.yml runs it nightly
   Tests/Goldens.json      golden digests keyed by simulation version
   Tests/Fixtures/         the golden 16-seat scripted race log, and a wind seed pool for the loader
 Packages/RegattaProtocol/ The race wire protocol: messages, frames and a binary codec, no transport (#63)
@@ -355,7 +355,7 @@ podman stop regatta
 Bandwidth: with 16 boats a client receives about 4.9 KB/s at worst (a snapshot of about 480 bytes with the
 umpire's relations 10 times a second, plus pongs and events) and joins in about 0.7 KB. Fewer boats send less.
 The 5 KB/s budget (#27) holds, with little room: `BandwidthBudgetTests` measures it for 16 clients on a virtual
-clock (#216), and CI's container job over real sockets. The 1 MB per race budget is measured only on the short
+clock (#216), and the nightly container job over real sockets. The 1 MB per race budget is measured only on the short
 races (8 to 20 s after the start sequence), where it passes trivially. A race costs the join plus that rate times
 its length from the join to the close, so it extrapolates to about 2.6 MB for an 8-minute race (with a 60 s
 sequence): at the measured rate 1 MB holds only to about 3.4 minutes. The two budgets disagree for real race lengths; which one

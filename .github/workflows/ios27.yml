@@ -8,10 +8,9 @@ on:
     - cron: "0 6 * * 1"  # Mondays 06:00 UTC
   workflow_dispatch:
 
-# Each commit on main gets its run (the group is the commit); a weekly or manual run supersedes the one before.
 concurrency:
-  group: ios27-${{ github.event_name == 'push' && github.sha || github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'push' }}
+  group: ios27-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   app:
@@ -19,10 +18,7 @@ jobs:
     # GitHub's Xcode 27 image (preview; macOS 27, arm64). Apps built with the iOS 27 SDK need the scene life
     # cycle and a launch screen, and UIRequiresFullScreen is ignored (#107).
     runs-on: xcode-27
-    # A green run is 42-45 min: about 25 to the first test, then about 10 per device, one after the other.
-    # The rest is room for the two fast-timescale race tests (RaceAssembly at 8×, RaceFinish at 32×, the ones
-    # that keep the app's main thread busy) to hang on both tries on both devices, 2 × 2 × 2 × the 5 min
-    # allowance below = 40 min, and one more launch that fails at the allowance: 45 + 40 + 5 = 90.
+    # About 25 min to the first test, then the unit tests on each device; the rest is room for a slow image.
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4

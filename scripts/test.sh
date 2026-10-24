@@ -2,10 +2,11 @@
 # The merge gate, here and in CI (ci.yml's `packages` job): builds each package with its tests and runs them.
 # Tests build at -O: the simulation runs about 15x faster than at -Onone, and the tests are mostly simulation.
 #
-#   scripts/test.sh [--bots] [Package ...]     (default: every package)
+#   scripts/test.sh [--bots] [Package ...] [-- <swift test arguments>]     (default: every package)
 #
 # The bot suites (RegattaBotsTests, BotSuiteTests) pin bot behaviour, so they churn whenever the bots are tuned:
-# they run nightly (nightly.yml), and here only with --bots. Any other narrowing is plain SwiftPM, e.g.
+# they run nightly (nightly.yml), and here only with --bots (a --filter for a bot suite needs --bots too). Any other
+# narrowing is plain SwiftPM, e.g.
 #   scripts/test.sh RegattaCore -- --filter WindTests
 # Each package builds in .build/check/<package> (SwiftPM keys its build plan on the scratch path; scripts/e2e.sh and
 # scripts/record-fixtures.sh reuse these builds).
