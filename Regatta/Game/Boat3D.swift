@@ -316,13 +316,13 @@ final class Boat3D {
     /// doesn't flap in step.
     private let seat: Int
     private var sailAngle: Float = 0
-    /// Her heel as drawn, radians about her fore-and-aft axis, eased to the pose's at `heelEaseRate`.
+    /// Her heel as drawn, radians about her fore-and-aft axis, eased to the pose's at `BoatStyle.heelEaseRate`.
     private(set) var heelAngle: Float = 0
+    /// Whether she has drawn a pose yet: her first frame takes the pose's heel outright, so a race start, a scene
+    /// rebuild or a resume doesn't ease her in from upright (#602).
+    private var hasPose = false
     /// Her heel at the pose's full heel (1): 28°.
     static let fullHeel: Float = 28 * .pi / 180
-    /// How fast her drawn heel follows the pose's, per second: about half a second to settle (95% in 0.5 s), as the
-    /// sheets go out or come in (#602).
-    static let heelEaseRate: Float = 6
     /// Whether she is far from your boat (`FarBoat`), kept across frames for its dead band.
     private(set) var isFar = false
     /// How much of her sail animation detail draws, 0…1: eased to 0 while she is far at `SailDetail.farReduced` and
@@ -389,7 +389,9 @@ final class Boat3D {
         // a tack; the standing hull showed each step as a snap.
         let lee: Float = pose.leeSide == .starboard ? -1 : 1
         let heelTarget = lee * Float(pose.heel) * Self.fullHeel
-        heelAngle += (heelTarget - heelAngle) * (settled ? 1 : min(1, Float(dt) * Self.heelEaseRate))
+        let snaps = settled || !hasPose
+        heelAngle += (heelTarget - heelAngle) * (snaps ? 1 : min(1, Float(dt) * Float(style.heelEaseRate)))
+        hasPose = true
         heelNode.eulerAngles = SCNVector3(0, 0, heelAngle)
 
         isFar = FarBoat.isFar(hullsFromYou: hullsFromYou, wasFar: isFar, hulls: style.farBoatHulls)

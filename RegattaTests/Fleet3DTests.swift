@@ -146,6 +146,25 @@ import RegattaCore
         #expect(fleet.presentedOrthographicScale == fleet.orthographicScale)
     }
 
+    /// #602: her first frame, not settled (a race start, a scene rebuild, a resume), already shows the pose's heel
+    /// rather than easing her in from upright; the ease rate is the style's.
+    @Test func heelStartsAtThePose() {
+        let boat = WakeTests.boat(speed: 6)
+        var pose = BoatPose(boat, ease: false, isGhost: false, boatClass: WakeTests.boatClass, style: Self.style)
+        pose.heel = 1
+        let drawn = Self.boat3D()
+        drawn.update(pose: pose, style: Self.style, x: 0, z: 0, yaw: 0, time: 2, dt: 1.0 / 60, settled: false)
+        #expect(abs(abs(drawn.heelAngle) - Boat3D.fullHeel) < 1e-6, "eased in from upright: \(drawn.heelAngle)")
+
+        // A slower style rate follows the sheets more slowly.
+        var slow = Self.style
+        slow.heelEaseRate = 1
+        let full = drawn.heelAngle
+        pose.heel = 0
+        drawn.update(pose: pose, style: slow, x: 0, z: 0, yaw: 0, time: 2, dt: 0.1, settled: false)
+        #expect(abs(drawn.heelAngle - full * 0.9) < 1e-5, "rate 1/s over 0.1 s: \(drawn.heelAngle) of \(full)")
+    }
+
     /// #602: easing the sheets stands her up over about half a second, sheeting in heels her back over the same;
     /// a settled frame (a frozen render fixture) snaps.
     @Test func heelEasesInsteadOfSnapping() {
