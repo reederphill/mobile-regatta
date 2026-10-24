@@ -48,10 +48,13 @@ extension WaterWorld {
 /// on the ripple, a depth gradient under the shallows); B cat's paws (the ripple follows the wind it lies in);
 /// C swell (long low crests rolling downwind under the ripple, foam along them). PROBE: never merged.
 nonisolated enum WaterLook: String {
-    case none, a, b, c, d, e, f, g, h, i, j, k
+    case none, a, b, c, d, e, f, g, h, i, j, k, l, m, n
     /// Round 4's lit water: J a physically based plane in the standing fleet's SceneKit scene, K the same light as a
     /// SpriteKit shader. The ripple streaks go (the light draws the surface).
-    var isLit: Bool { self == .j || self == .k }
+    var isLit: Bool { self == .j || usesLitSprite }
+    /// K and round 5's cel-shaded K: L three tones, M two, N four with a crest rim.
+    var usesLitSprite: Bool { self == .k || isCel }
+    var isCel: Bool { self == .l || self == .m || self == .n }
     /// Round 3's surface textures: G wavelets, H micro ripples, I caustic shimmer. Under today's water, which stays.
     var isTexture: Bool { self == .g || self == .h || self == .i }
     /// Round 2's stylized looks: D toon crests, E painterly bands, F wave curls. They replace the ripple.
@@ -213,7 +216,7 @@ final class WaterNode: SKNode {
             wakeLayer.zPosition = 0.7
             addChild(wakeLayer)
         }
-        if WaterLook.current == .k {
+        if WaterLook.current.usesLitSprite {
             // Under the pressure tone (−1) and the puffs: K is the water itself.
             litSprite.zPosition = -1.5
             litSprite.shader = LitWater.kShader
@@ -339,7 +342,7 @@ final class WaterNode: SKNode {
             drift = CGPoint(x: drift.x + downwind.x, y: drift.y + downwind.y)
         }
 
-        if WaterLook.current.isStylized || WaterLook.current == .k {
+        if WaterLook.current.isStylized || WaterLook.current.usesLitSprite {
             // The stylized looks draw their own ripple and foam; K its light and foam.
             streaks.removeAll(keepingCapacity: true)
             whitecaps.removeAll(keepingCapacity: true)
@@ -412,7 +415,7 @@ final class WaterNode: SKNode {
                     // Whitecaps bias toward the puffs and leave the lulls.
                     tileShare = min(share * (1 + 2.5 * gust), 0.9)
                     if share == 0, puff > 0.6 { tileShare = 0.15 * (puff - 0.6) / 0.4 }
-                case .none, .c, .d, .e, .f, .g, .h, .i, .j, .k:
+                case .none, .c, .d, .e, .f, .g, .h, .i, .j, .k, .l, .m, .n:
                     break
                 }
                 updateWhitecap(tile, at: index, share: max(tileShare, 0), time: world.time, period: period)
@@ -515,7 +518,7 @@ final class WaterNode: SKNode {
 
     private static let lookShader: SKShader = {
         switch WaterLook.current {
-        case .none, .c, .d, .e, .f, .g, .h, .i, .j, .k: return waveShader
+        case .none, .c, .d, .e, .f, .g, .h, .i, .j, .k, .l, .m, .n: return waveShader
         case .a: return glitterShader
         case .b: return catspawShader
         }
@@ -1469,7 +1472,7 @@ extension WaterNode {
             gust: image, gustRect: rect, downwind: SIMD2(Float(down.x), Float(down.y)),
             wind: Float(((knots - 4) / 18).clamped(to: 0.05...1)), foam: Float(((knots - 10) / 10).clamped(to: 0...1)),
             clock: clock, scale: Float(view.scale))
-        guard WaterLook.current == .k else { return }
+        guard WaterLook.current.usesLitSprite else { return }
         litSprite.isHidden = false
         litSprite.size = rect.size
         litSprite.position = CGPoint(x: rect.midX, y: rect.midY)

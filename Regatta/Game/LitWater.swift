@@ -65,7 +65,7 @@ enum LitWater {
     /// 0 leaves them to the roughness alone).
     static let puffAlpha: CGFloat = {
         if let v = ProcessInfo.processInfo.environment["REGATTA_LIT_PUFFS"], let x = Double(v) { return CGFloat(x) }
-        return 0.5
+        return WaterLook.current.isCel ? 0 : 0.5
     }()
 
     /// The sun, a unit vector in the screen's frame (x right, y up the screen, z up off the water): its bearing
@@ -107,37 +107,12 @@ enum LitWater {
 
     /// The height field's slope (metres a metre) at `m` (metres): four waves and two octaves of chop. GLSL for K; J's
     /// Metal copy below is the same sums.
-    static let kSource = """
+    static var kSource: String { """
     float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
     float vnoise(vec2 p) {
         vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
         float a = h21(i), b = h21(i + vec2(1.0, 0.0)), c = h21(i + vec2(0.0, 1.0)), d = h21(i + vec2(1.0, 1.0));
         return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
-    }
-    vec3 waves(vec2 m, vec2 dn, float t, float rough, float pxPerM) {
-        vec2 dp = vec2(-dn.y, dn.x);
-        vec2 grad = vec2(0.0);
-        float hgt = 0.0;
-        float amp = 0.5 + 0.7 * rough;
-        for (int i = 0; i < 9; i++) {
-            float fi = float(i);
-            float lambda = 4.2 * pow(0.76, fi);
-            // Directions spread about downwind (a hashed angle a wave, ±1.3 rad), short crests: each wave's
-            // amplitude under its own drifting noise envelope about a wavelength across.
-            float ang = (h21(vec2(fi, 3.7)) - 0.5) * 2.6 * (0.5 + 0.5 * h21(vec2(fi, 9.1)));
-            if (i == 0) { ang = 0.0; }
-            vec2 dir = dn * cos(ang) + dp * sin(ang);
-            float k = 6.2831 / lambda;
-            float om = sqrt(9.81 * k);
-            float ca = cos(fi * 2.4), sa = sin(fi * 2.4);
-            vec2 em = vec2(m.x * ca - m.y * sa, m.x * sa + m.y * ca) / (lambda * 1.4);
-            float env = smoothstep(0.2, 0.85, vnoise(em + vec2(fi * 7.1, fi * 3.3) - dn * t * 0.12));
-            float steep = (0.12 + 0.02 * fi) * amp * env * smoothstep(2.5, 6.0, lambda * pxPerM);
-            float ph = k * dot(dir, m) - om * t + 6.2831 * h21(vec2(fi, 1.3));
-            hgt += steep * sin(ph) * env;
-            grad += steep * cos(ph) * dir;
-        }
-        return vec3(grad, hgt);
     }
     vec3 sky(vec3 r, vec3 sun) {
         float up = clamp(r.z, 0.0, 1.0);
@@ -155,7 +130,34 @@ enum LitWater {
         float g = texture2D(u_gust, guv).r * 2.0 - 1.0;
         float puff = max(g, 0.0), lull = max(-g, 0.0);
         float rough = clamp(u_wind.x * (1.0 + 0.9 * g), 0.04, 1.0);
-        vec3 wv = waves(m, u_down, u_clock, rough, pxPerM);
+        vec2 g_big = vec2(0.0);
+        vec2 grad = vec2(0.0);
+        float hgt = 0.0;
+        {
+        vec2 dn = u_down; float t = u_clock;
+        vec2 dp = vec2(-dn.y, dn.x);
+                        float amp = 0.5 + 0.7 * rough;
+        for (int i = 0; i < 9; i++) {
+            float fi = float(i);
+            float lambda = 4.2 * pow(0.76, fi);
+            // Directions spread about downwind (a hashed angle a wave, ±1.3 rad), short crests: each wave's
+            // amplitude under its own drifting noise envelope about a wavelength across.
+            float ang = (h21(vec2(fi, 3.7)) - 0.5) * 2.6 * (0.5 + 0.5 * h21(vec2(fi, 9.1)));
+            if (i == 0) { ang = 0.0; }
+            vec2 dir = dn * cos(ang) + dp * sin(ang);
+            float k = 6.2831 / lambda;
+            float om = sqrt(9.81 * k);
+            float ca = cos(fi * 2.4), sa = sin(fi * 2.4);
+            vec2 em = vec2(m.x * ca - m.y * sa, m.x * sa + m.y * ca) / (lambda * 1.4);
+            float env = smoothstep(0.2, 0.85, vnoise(em + vec2(fi * 7.1, fi * 3.3) - dn * t * 0.12));
+            float steep = (0.12 + 0.02 * fi) * amp * env * smoothstep(2.5, 6.0, lambda * pxPerM);
+            float ph = k * dot(dir, m) - om * t + 6.2831 * h21(vec2(fi, 1.3));
+            hgt += steep * sin(ph) * env;
+            grad += steep * cos(ph) * dir;
+            g_big += steep * cos(ph) * dir * smoothstep(\(Cel.bandLo), \(Cel.bandHi), lambda * pxPerM);
+        }
+        }
+        vec3 wv = vec3(grad, hgt);
         vec3 nw = normalize(vec3(-wv.x, -wv.y, 1.0));
         vec3 n = vec3(nw.x * u_cam.x + nw.y * u_cam.y, -nw.x * u_cam.y + nw.y * u_cam.x, nw.z);
         vec3 v = u_view;
@@ -187,10 +189,105 @@ enum LitWater {
         float patchy = smoothstep(0.78, 0.97, vnoise(m / 6.0 - u_down * u_clock * 0.4)) * smoothstep(0.5, 0.8, vnoise(m / 2.3 + vec2(5.0, 1.0) - u_down * u_clock * 0.7));
         float crest = patchy * smoothstep(0.45, 0.85, vnoise(m * 1.4 - u_down * u_clock * 0.8)) * smoothstep(0.0, 0.6, wv.z + 0.3);
         float foam = crest * u_wind.y * (0.3 + 0.9 * puff) * (1.0 - lull) * smoothstep(3.0, 8.0, pxPerM);
+    \(finish)
+    }
+    """ }
+
+    /// K's finish: the lighting as it comes, foam blended on.
+    static let kFinish = """
         col = mix(col, vec3(0.92, 0.95, 0.97), clamp(foam * 0.8, 0.0, 0.7));
         gl_FragColor = vec4(min(col, vec3(1.0)), 1.0);
-    }
     """
+
+    static var finish: String { WaterLook.current.isCel ? Cel.current.source : kFinish }
+
+    /// #604 round 5: K cel-shaded. The light (K's body + sky, times a Lambert term from the fleet's sun) over what a
+    /// flat surface in the course wind would show at the same place is the band scalar `s`: puffs (rougher, darker
+    /// body, scattered sky) push it down, lulls up, wave faces toward the sun up. `s` is cut at the thresholds into
+    /// flat tones of the flat surface's colour (gains, as Lambert scales a hull's colour), each edge a smoothstep
+    /// `edge` screen pixels wide (`fwidth`); glitter is one flat tone where the sun's highlight passes `spec`; foam one
+    /// flat white where K's foam passes `foam`; N adds a lighter rim `rim` pixels wide on the lit side of the top
+    /// step. Knobs: `REGATTA_CEL` thresholds "t1,t2,…", `REGATTA_CEL_GAIN` "g0,g1,…" (one more than thresholds),
+    /// `REGATTA_CEL_EDGE`, `REGATTA_CEL_SPEC`, `REGATTA_CEL_FOAM`, `REGATTA_CEL_RIM`, `REGATTA_CEL_LAMB`,
+    /// `REGATTA_CEL_SKY` (the top band's mix toward the sky's colour).
+    struct Cel {
+        var thresholds: [Double]
+        var gains: [Double]
+        var edge = 0.75
+        var spec = 0.9
+        var foam = 0.35
+        var rim = 0.0
+        var rimGain = 1.18
+        var lambert = 1.5
+        var sky = 0.2
+        /// The shortest wave (screen points) the bands follow (`REGATTA_CEL_BANDPX`).
+        static let bandPx: Double = ProcessInfo.processInfo.environment["REGATTA_CEL_BANDPX"].flatMap(Double.init) ?? 9
+        static let bandLo = String(format: "%.2f", bandPx * 0.6)
+        static let bandHi = String(format: "%.2f", bandPx)
+
+        static let current: Cel = {
+            var c: Cel = switch WaterLook.current {
+            case .m: Cel(thresholds: [1.0], gains: [0.78, 1.2])
+            case .n: Cel(thresholds: [0.86, 1.0, 1.14], gains: [0.7, 0.88, 1.06, 1.26], rim: 1.5)
+            default: Cel(thresholds: [0.9, 1.1], gains: [0.74, 1.0, 1.26])
+            }
+            let env = ProcessInfo.processInfo.environment
+            func list(_ key: String) -> [Double]? {
+                env[key].map { $0.split(separator: ",").compactMap { Double($0) } }
+            }
+            if let t = list("REGATTA_CEL"), !t.isEmpty { c.thresholds = t }
+            if let g = list("REGATTA_CEL_GAIN"), !g.isEmpty { c.gains = g }
+            while c.gains.count < c.thresholds.count + 1 { c.gains.append((c.gains.last ?? 1) * 1.2) }
+            if let v = env["REGATTA_CEL_EDGE"].flatMap(Double.init) { c.edge = v }
+            if let v = env["REGATTA_CEL_SPEC"].flatMap(Double.init) { c.spec = v }
+            if let v = env["REGATTA_CEL_FOAM"].flatMap(Double.init) { c.foam = v }
+            if let v = env["REGATTA_CEL_RIM"].flatMap(Double.init) { c.rim = v }
+            if let v = env["REGATTA_CEL_RIMGAIN"].flatMap(Double.init) { c.rimGain = v }
+            if let v = env["REGATTA_CEL_LAMB"].flatMap(Double.init) { c.lambert = v }
+            if let v = env["REGATTA_CEL_SKY"].flatMap(Double.init) { c.sky = v }
+            print("#604 cel \(WaterLook.current): \(c)")
+            return c
+        }()
+
+        var source: String {
+            func f(_ x: Double) -> String { String(format: "%.4f", x) }
+            var bands = "    vec3 col0 = base0 * \(f(gains[0]));\n"
+            for (i, t) in thresholds.enumerated() {
+                let top = i == thresholds.count - 1
+                let tone = top ? "mix(base0 * \(f(gains[i + 1])), skyC, \(f(sky)))" : "base0 * \(f(gains[i + 1]))"
+                bands += "    col0 = mix(col0, \(tone), smoothstep(\(f(t)) - fw, \(f(t)) + fw, s));\n"
+            }
+            let top = thresholds.last ?? 1
+            let rimCode = rim > 0 ? """
+                float dpx = (s - \(f(top))) / max(fwidth(s), 1e-5);
+                float rimA = smoothstep(-0.5, 0.5, dpx) * (1.0 - smoothstep(\(f(rim)) - 0.5, \(f(rim)) + 0.5, dpx));
+                col0 = mix(col0, mix(base0 * \(f(gains.last! * rimGain)), skyC, \(f(sky))), rimA);
+            """ : ""
+            return """
+                vec3 lw = vec3(0.2126, 0.7152, 0.0722);
+                vec3 body0 = mix(deepC, shallowC, dep.r) * (1.0 + 0.25 * dep.r) * (0.9 + 0.25 * max(l.z, 0.0));
+                float F0 = 0.02 + 0.98 * pow(1.0 - max(v.z, 0.0), 5.0);
+                float coh0 = clamp(1.15 - 0.55 * u_wind.x, 0.25, 1.6);
+                vec3 base0 = body0 + sky(reflect(-v, vec3(0.0, 0.0, 1.0)), l) * clamp(F0 * 6.0 + 0.04, 0.0, 1.0) * coh0;
+                vec3 skyC = sky(vec3(0.0, 0.5, 0.866), l) * 0.75;
+                // The bands follow the waves a few screen points long and up (`bandPx`); the shorter ones only glitter.
+                vec3 nbw = normalize(vec3(-g_big.x, -g_big.y, 1.0));
+                vec3 nb = vec3(nbw.x * u_cam.x + nbw.y * u_cam.y, -nbw.x * u_cam.y + nbw.y * u_cam.x, nbw.z);
+                float FB = 0.02 + 0.98 * pow(1.0 - max(dot(nb, v), 0.0), 5.0);
+                vec3 reflB = sky(reflect(-v, nb), l) * clamp(FB * 6.0 + 0.04, 0.0, 1.0) * cohere;
+                float lam = max(dot(nb, l), 0.0) / max(l.z, 0.05);
+                float s = dot(body + reflB, lw) / max(dot(base0, lw), 1e-3) * pow(lam, \(f(lambert)));
+                float fw = max(fwidth(s), 1e-5) * \(f(edge));
+            \(bands)\(rimCode)
+                float sp = spec * (1.0 - 0.5 * puff);
+                float fws = max(fwidth(sp), 1e-5) * \(f(edge));
+                col0 = mix(col0, vec3(1.0, 0.97, 0.88), smoothstep(\(f(spec)) - fws, \(f(spec)) + fws, sp));
+                float fwf = max(fwidth(foam), 1e-5) * \(f(edge));
+                col0 = mix(col0, vec3(0.93, 0.96, 0.98), smoothstep(\(f(foam)) - fwf, \(f(foam)) + fwf, foam));
+                gl_FragColor = vec4(min(col0, vec3(1.0)), 1.0);
+            """
+        }
+    }
 
     static let kShader: SKShader = SKShader(
         source: kSource,

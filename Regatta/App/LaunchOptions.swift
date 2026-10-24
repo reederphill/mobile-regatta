@@ -346,7 +346,7 @@ struct LaunchOptions: Equatable {
         case "-boats":
             if let n = Int(value), (2...16).contains(n) { boats = n } else { reject(argument, value, "a whole number of boats, 2…16") }
         case "-water":
-            if ["none", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"].contains(value) { water = value } else { reject(argument, value, "none or a…k") }
+            if ["none", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n"].contains(value) { water = value } else { reject(argument, value, "none or a…n") }
         case "-appearance":
             if let style = Appearance(rawValue: value) { appearance = style } else { reject(argument, value, "light or dark") }
         case "-vision":
