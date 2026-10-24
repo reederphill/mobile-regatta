@@ -156,6 +156,7 @@ final class WaterNode: SKNode {
     /// Look F: the curls round the hulls and along the wakes.
     private let wakeLayer = SKNode()
     private var wakeNodes: [SKSpriteNode] = []
+    private var styledReferenceScale: CGFloat?
 
     /// The size a streak tile's texture is drawn for: `style.rippleSpacing` scales it from here.
     private static let tileSize = 96.0
@@ -882,7 +883,10 @@ final class WaterNode: SKNode {
         Self.styledOrigin.vectorFloat2Value = SIMD2(Float(rect.midX * c - rect.midY * s), Float(rect.midX * s + rect.midY * c))
         Self.styledSize.vectorFloat2Value = SIMD2(Float(side), Float(side))
         Self.styledRot.vectorFloat2Value = SIMD2(Float(cos(rotation)), Float(sin(rotation)))
-        Self.styledScale.floatValue = Float(view.scale)
+        // Screen-sized at the first frame's zoom; zoomed out, the marks shrink as the square root of the zoom, so
+        // they neither swamp the small fleet nor close up into hatching.
+        if styledReferenceScale == nil, view.scale > 0 { styledReferenceScale = view.scale }
+        Self.styledScale.floatValue = Float((view.scale * (styledReferenceScale ?? view.scale)).squareRoot())
         let mean = Whitecaps.meanWind(of: world.conditions)
         Self.styledRoll.floatValue = Float(0.25 * mean * pointsPerMeter)
         let knots = RegattaCore.knots(metresPerSecond: mean)
