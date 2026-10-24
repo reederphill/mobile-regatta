@@ -538,7 +538,8 @@ extension LitWater {
         var sparks = 0.9
         var tPale = 0.9
         var tDeep = 0.55
-        var puff = 0.9
+        var puff = 1.2
+        var drift = 0.55
         var warp = 7.0
         var ref = 1.0
         var cell = 36.0
@@ -561,6 +562,7 @@ extension LitWater {
             if let v = num("REGATTA_TOON_TP") { t.tPale = v }
             if let v = num("REGATTA_TOON_TD") { t.tDeep = v }
             if let v = num("REGATTA_TOON_PUFF") { t.puff = v }
+            if let v = num("REGATTA_TOON_DRIFT") { t.drift = v }
             if let v = num("REGATTA_TOON_WARP") { t.warp = v }
             if let v = num("REGATTA_TOON_REF") { t.ref = v }
             if let v = num("REGATTA_TOON_CELL") { t.cell = v }
@@ -603,7 +605,10 @@ extension LitWater {
                     float ang = i == 0 ? 0.0 : (i == 1 ? 0.5 : -0.42);
                     vec2 dir = dn * cos(ang) + dp * sin(ang);
                     float k = 6.2831 / lambda;
-                    float ph = k * dot(dir, p) - 6.2831 * t / (period * sqrt(S)) + 6.2831 * h21(vec2(fi, 1.3));
+                    // Calm: the components glide at nearly one speed (`period` sets the spread), so the islands drift and
+                    // slowly reshape instead of boiling.
+                    float c = \(f(drift)) * (1.0 + 0.6 / period);
+                    float ph = k * (dot(dir, p) - c * t) + 6.2831 * h21(vec2(fi, 1.3));
                     g += cos(ph) * dir;
                     h += sin(ph);
                     float ph2 = ph + 2.3 + 1.7 * fi;
@@ -649,7 +654,8 @@ extension LitWater {
                 vec3 midC = \(v3(mid));
                 vec3 paleC = \(v3(pale));
                 vec3 tealC = vec3(0.09, 0.36, 0.40);
-                midC = mix(midC, deepC, 0.25 * puff);
+                midC = mix(midC, deepC, 0.4 * puff);
+                midC = mix(midC, paleC, 0.12 * lull);
                 midC = mix(midC, tealC, 0.35 * dep.r);
                 deepC = mix(deepC, tealC, 0.25 * dep.r);
                 vec3 col = mix(midC, deepC, dA);
