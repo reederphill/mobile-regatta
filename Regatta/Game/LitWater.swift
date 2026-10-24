@@ -578,8 +578,9 @@ extension LitWater {
                 float a = h21(i), b = h21(i + vec2(1.0, 0.0)), c = h21(i + vec2(0.0, 1.0)), d = h21(i + vec2(1.0, 1.0));
                 return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
             }
-            // The swell at `m` (metres) for octave scale `S`: x, y its slope in the screen frame, z its height (unit-ish).
-            vec3 swell(vec2 m, float S, float t, vec2 dn, vec2 cam) {
+            // The swell at `m` (metres) for octave scale `S`: x the pale (sky) term, y the deep (sun-shadow) term, both
+            // unit-ish. The deep term reads the same waves at other phases under the same warp, so its shapes are its own.
+            vec2 swell(vec2 m, float S, float t, vec2 dn, vec2 cam, vec2 sunD) {
                 vec2 dp = vec2(-dn.y, dn.x);
                 vec2 mm = m / S;
                 // The slow warp: two value-noise octaves, rotated apart, drifting downwind.
@@ -594,19 +595,24 @@ extension LitWater {
                 wv += vec2(vnoise(q4 + vec2(2.8, 0.4)) - 0.5, vnoise(q4 + vec2(8.1, 5.2)) - 0.5) * 0.16;
                 vec2 p = mm + wv * \(f(warp));
                 vec2 g = vec2(0.0); float h = 0.0;
+                vec2 g2 = vec2(0.0); float h2 = 0.0;
                 for (int i = 0; i < 3; i++) {
                     float fi = float(i);
                     float lambda = i == 0 ? 34.0 : (i == 1 ? 21.0 : 13.0);
                     float period = i == 0 ? 8.0 : (i == 1 ? 6.5 : 5.0);
-                    float ang = i == 0 ? 0.0 : (i == 1 ? 0.36 : -0.30);
+                    float ang = i == 0 ? 0.0 : (i == 1 ? 0.5 : -0.42);
                     vec2 dir = dn * cos(ang) + dp * sin(ang);
                     float k = 6.2831 / lambda;
                     float ph = k * dot(dir, p) - 6.2831 * t / (period * sqrt(S)) + 6.2831 * h21(vec2(fi, 1.3));
                     g += cos(ph) * dir;
                     h += sin(ph);
+                    float ph2 = ph + 2.3 + 1.7 * fi;
+                    g2 += cos(ph2) * dir;
+                    h2 += sin(ph2);
                 }
                 vec2 gs = vec2(g.x * cam.x + g.y * cam.y, -g.x * cam.y + g.y * cam.x);
-                return vec3(gs, h) / 1.7;
+                vec2 gs2 = vec2(g2.x * cam.x + g2.y * cam.y, -g2.x * cam.y + g2.y * cam.x);
+                return vec2(gs.y * 0.8 + h * 0.6, dot(gs2, sunD) * 0.8 - h2 * 0.55) / 1.7;
             }
             void main() {
                 vec2 w = u_rect.xy + v_tex_coord * u_rect.zw;
@@ -619,16 +625,14 @@ extension LitWater {
                 float z = log2(max(u_scale / \(f(ref)), 1.0));
                 float zl = floor(z); float zf = fract(z);
                 float S0 = \(f(scale)) * exp2(zl);
-                vec3 a = swell(m, S0, t, u_down, u_cam);
-                vec3 b = swell(m, S0 * 2.0, t, u_down, u_cam);
-                vec3 sw = mix(a, b, smoothstep(0.0, 1.0, zf));
-                // The shadow side from the swell further along (decorrelated, so the deep shapes are their own,
-                // not a drop shadow under each island).
-                vec2 mo = m + vec2(57.0, -31.0) * S0;
-                vec3 sd = mix(swell(mo, S0, t, u_down, u_cam), swell(mo, S0 * 2.0, t, u_down, u_cam), smoothstep(0.0, 1.0, zf));
                 vec2 sunD = normalize(u_sun.xy + vec2(1e-4, 0.0));
-                float pale = sw.y * 0.8 + sw.z * 0.6;
-                float deep = dot(sd.xy, sunD) * 0.8 - sd.z * 0.55;
+                // Blend the two octaves, keeping the variance (so the cut covers the same share mid-blend).
+                float zb = smoothstep(0.3, 0.7, zf);
+                float zn = inversesqrt((1.0 - zb) * (1.0 - zb) + zb * zb);
+                vec2 sw = zb < 0.001 ? swell(m, S0, t, u_down, u_cam, sunD) : (zb > 0.999 ? swell(m, S0 * 2.0, t, u_down, u_cam, sunD)
+                    : (swell(m, S0, t, u_down, u_cam, sunD) * (1.0 - zb) + swell(m, S0 * 2.0, t, u_down, u_cam, sunD) * zb) * zn);
+                float pale = sw.x;
+                float deep = sw.y;
                 float tp = \(f(tPale)) + \(f(puff)) * puff - \(f(puff)) * 0.8 * lull;
                 float td = \(f(tDeep)) - \(f(puff)) * puff + \(f(puff)) * 0.8 * lull;
                 float ep = max(fwidth(pale), 1e-5) * \(f(soft)) * 0.5;
@@ -658,7 +662,7 @@ extension LitWater {
                 float foamA = smoothstep(ft - fe, ft + fe, fl) * smoothstep(0.15, 0.35, u_wind.y) * smoothstep(0.25, 0.6, puff);
                 col = mix(col, vec3(0.90, 0.95, 0.97), foamA);
                 // Stars: a candidate a cell (world-fixed, drifting downwind), its own cycle, inside the pale islands.
-                float Sr = \(f(scale)) * exp2(zl + (zf > 0.5 ? 1.0 : 0.0));
+                float Sr = \(f(scale)) * exp2(zl + (zb > 0.5 ? 1.0 : 0.0));
                 float cellM = \(f(cell)) * \(f(ref)) / 8.0 * Sr / \(f(scale));
                 vec2 pm = m - u_down * t * 0.35;
                 vec2 ci = floor(pm / cellM);
@@ -669,9 +673,10 @@ extension LitWater {
                 vec2 sm = (ci + 0.22 + 0.56 * rnd) * cellM;
                 float on = step(h21(ci + vec2(cyc * 1.7, 11.0)), \(f(sparks)));
                 vec2 sw0 = sm + u_down * t * 0.35;
-                vec3 ss = mix(swell(sw0, S0, t, u_down, u_cam), swell(sw0, S0 * 2.0, t, u_down, u_cam), smoothstep(0.0, 1.0, zf));
-                float sPale = ss.y * 0.8 + ss.z * 0.6;
-                on *= smoothstep(tp + 0.02, tp + 0.25, sPale);
+                if (on > 0.0) {
+                    float sPale = swell(sw0, zb < 0.5 ? S0 : S0 * 2.0, t, u_down, u_cam, sunD).x;
+                    on *= smoothstep(tp + 0.02, tp + 0.25, sPale);
+                }
                 vec2 dw = (sw0 - m) * 8.0 / u_scale;
                 vec2 ds = vec2(dw.x * u_cam.x + dw.y * u_cam.y, -dw.x * u_cam.y + dw.y * u_cam.x);
                 ds.y *= u_view.z;
