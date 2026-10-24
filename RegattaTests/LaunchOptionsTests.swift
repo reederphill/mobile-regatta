@@ -54,6 +54,21 @@ import RegattaServices
         #expect(controls.camera == .courseUp && controls.autoZoom)
     }
 
+    /// `-tilt <deg>` (#597): 5…55 degrees off vertical; outside it, or not a number, it's rejected and Settings' stands.
+    @Test func tiltTakesFiveToFiftyFiveDegrees() {
+        #expect(parse().tilt == nil)
+        #expect(parse("-tilt", "5").tilt == 5)
+        #expect(parse("-tilt", "45").tilt == 45)
+        #expect(parse("-tilt", "55").tilt == 55)
+        #expect(parse("-tilt", "32.5").tilt == 32.5)
+        for bad in ["0", "4", "56", "80", "-10", "steep"] {
+            let options = parse("-tilt", bad, "-autostart")
+            #expect(options.tilt == nil, "\(bad)")
+            #expect(!options.problems.isEmpty, "\(bad)")
+            #expect(options.autostart, "\(bad): the next flag still parses")
+        }
+    }
+
     @Test func skipsArgumentsItDoesNotKnow() {
         let options = parse("-NSTreatUnknownArgumentsAsOpen", "NO", "-ApplePersistenceIgnoreState", "YES", "-autostart")
         #expect(options.autostart)

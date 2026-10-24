@@ -116,9 +116,9 @@ import RegattaCore
         for _ in 0..<1000 where !done() { await Task.yield() }
     }
 
-    /// At `.farReduced` a boat far from yours draws her sail at its trim and fullness, with no flutter, luff shiver or
-    /// belly pump; a near one, yours and every boat at `.full` still swing. Her heel is the same either way, and so
-    /// is her wake.
+    /// At `.farReduced` a boat far from yours draws her sail (`Boat3D`, #597) at its trim and fullness, with no
+    /// flutter, luff shiver or belly pump; a near one, yours and every boat at `.full` still swing. Her hull, heel,
+    /// mast, boom and sail stand in the same places either way.
     @Test func farBoatsDropSailDetailOnly() throws {
         let style = BoatStyle.standard
         let boatClass = WakeTests.boatClass
@@ -127,35 +127,32 @@ import RegattaCore
         pose.flutter = 1
         pose.luffLift = 1
         let time = 1.3
+        let geometry = Boat3D.Geometry(boatClass: boatClass, ppm: 8)
 
-        func drawn(_ detail: SailDetail, hulls: Double, pose: BoatPose) -> BoatNode {
-            let node = BoatNode(boat: boat, isMine: false, color: .red, boatClass: boatClass, pointsPerMeter: 8, style: style)
-            node.update(with: boat, pose: pose, style: style, sailDetail: detail, hullsFromYou: hulls, time: time,
-                        dt: 0, settled: true)
-            return node
+        func drawn(_ detail: SailDetail, hulls: Double, pose: BoatPose) -> Boat3D {
+            let drawn = Boat3D(geometry: geometry, color: .red, seat: boat.id)
+            drawn.update(pose: pose, style: style, x: 0, z: 0, yaw: 0, sailDetail: detail, hullsFromYou: hulls,
+                         time: time, dt: 0, settled: true)
+            return drawn
         }
-        let side: CGFloat = pose.sailSide == .port ? -1 : 1
-        let trim = CGFloat(pose.sailTrim) * side, belly = side * CGFloat(pose.sailFullness)
+        let side: Float = pose.sailSide == .port ? -1 : 1
+        let trim = Float(pose.sailTrim) * side, belly = side * Float(pose.sailFullness)
 
         let far = drawn(.farReduced, hulls: 20, pose: pose)
-        #expect(far.isFar)
-        #expect(abs(far.sailLook.rotation - trim) < 1e-6 && abs(far.sailLook.xScale - belly) < 1e-6)
+        #expect(far.isFar && far.sailDetailShare == 0)
+        #expect(abs(far.sailLook.boom - trim) < 1e-5 && abs(far.sailLook.belly - belly) < 1e-5)
         for node in [drawn(.farReduced, hulls: 2, pose: pose), drawn(.full, hulls: 20, pose: pose),
                      drawn(.farReduced, hulls: 0, pose: pose)] {
-            #expect(abs(node.sailLook.rotation - trim) > 1e-3, "a near boat, or the full tier, still flutters")
-            #expect(abs(node.hullXScale - far.hullXScale) < 1e-9, "heel is the same at any distance")
+            #expect(abs(node.sailLook.boom - trim) > 1e-3, "a near boat, or the full tier, still flutters")
+            #expect(node.standingLook == far.standingLook, "hull, heel and rig are the same at any distance")
         }
-
-        // Her wake is the same far or near.
-        let near = drawn(.farReduced, hulls: 2, pose: pose)
-        #expect(far.effects.trail.alpha == near.effects.trail.alpha)
-        #expect(far.effects.shape == near.effects.shape)
 
         // Off the edge, she eases back to full detail rather than popping.
         let easing = drawn(.farReduced, hulls: 20, pose: pose)
-        easing.update(with: boat, pose: pose, style: style, sailDetail: .full, hullsFromYou: 20, time: time, dt: 0.1)
-        let eased = abs(easing.sailLook.rotation - trim)
-        let full = abs(drawn(.full, hulls: 20, pose: pose).sailLook.rotation - trim)
+        easing.update(pose: pose, style: style, x: 0, z: 0, yaw: 0, sailDetail: .full, hullsFromYou: 20, time: time,
+                      dt: 0.1, settled: false)
+        let eased = abs(easing.sailLook.boom - trim)
+        let full = abs(drawn(.full, hulls: 20, pose: pose).sailLook.boom - trim)
         #expect(eased > 1e-4 && eased < full)
     }
 
