@@ -245,15 +245,18 @@ public enum HoldOneOut {
                               oracleNodes: plan.nodes, oracleTicks: plan.ticks, oracleDigest: oracle.digest)
     }
 
-    /// The hold-one-out over `seeds`, each `seats` held out in turn (every seat when nil), up to `jobs` at once.
-    public static func run(_ seeds: [StartTrialSeed], seats: [Int]?, tierMix: TierMix, oracle options: Oracle.Options,
-                           jobs: Int = BotSuite.defaultJobs) throws -> HoldOneOutReport {
+    /// The hold-one-out over `seeds`, each `seats` held out in turn (every seat when nil; of those, only `tier`'s if given:
+    /// the confirmation run holds out a mixed fleet's National seats), up to `jobs` at once.
+    public static func run(_ seeds: [StartTrialSeed], seats: [Int]?, tier: BotTier? = nil, tierMix: TierMix,
+                           oracle options: Oracle.Options, jobs: Int = BotSuite.defaultJobs) throws -> HoldOneOutReport {
         let fleets = try BotSuite.inParallel(seeds, jobs: jobs) { seed in try fleet(seed, tierMix: tierMix) }
         struct Job: Sendable {
             let seed: Int
             let seat: Int
         }
-        let jobsList = seeds.indices.flatMap { k in (seats ?? Array(0..<seeds[k].fleetSize)).map { Job(seed: k, seat: $0) } }
+        let jobsList = seeds.indices.flatMap { k in
+            (seats ?? Array(0..<seeds[k].fleetSize)).filter { tier == nil || fleets[k].tiers[$0] == tier }.map { Job(seed: k, seat: $0) }
+        }
         let results = try BotSuite.inParallel(jobsList, jobs: jobs) { job in
             try run(fleets[job.seed].log, seat: job.seat, tier: fleets[job.seed].tiers[job.seat], seed: seeds[job.seed],
                     oracle: options)

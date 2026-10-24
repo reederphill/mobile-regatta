@@ -107,6 +107,8 @@ import Testing
         let options = try TimeTrialOptions(arguments: ["--start", "--hold-one-out", "all", "--fleet", "mixed", "--seeds", "2"])
         #expect(options.holdOut == [] && options.fleet == .mixed)
         #expect(try TimeTrialOptions(arguments: ["--start", "--hold-one-out", "3", "--hold-one-out", "5"]).holdOut == [3, 5])
+        let national = try TimeTrialOptions(arguments: ["--start", "--hold-one-out", "national", "--fleet", "mixed"])
+        #expect(national.holdOut == [] && national.holdOutTier == .national)
         #expect(throws: BotSuiteError.self) { try TimeTrialOptions(arguments: ["--hold-one-out", "3"]) }
         #expect(throws: BotSuiteError.self) { try TimeTrialOptions(arguments: ["--start", "--hold-one-out", "10"]) }
     }

@@ -38,6 +38,8 @@ public struct TimeTrialOptions: Hashable, Sendable {
     /// `--hold-one-out <seat|all>` (#584 stage 2): with `--start`, hold out this seat of each seed's fleet (every seat
     /// for `all`, an empty list) and plan its start again against the others' logged inputs (`HoldOneOut`).
     public var holdOut: [Int]?
+    /// `--hold-one-out <tier>`: hold out only the seats of this tier in each fleet (with `holdOut` empty).
+    public var holdOutTier: BotTier?
     /// `--fleet <mix>`: the hold-one-out's fleet (`TierMix`); the start suite's all-National by default.
     public var fleet = TierMix.national
     public var jobs: Int?
@@ -80,8 +82,9 @@ public struct TimeTrialOptions: Hashable, Sendable {
                                  S3 or SH3); the oracle's start against each sailor's, by its worth at T+60.
                                  Not with --laps, --tune, --tunables or --oracle-from
           --hold-one-out <s>     with --start (#584 stage 2): sail each seed's ten-boat fleet to T+60, then plan seat s's
-                                 start again (all: every seat) against the other nine sailing their logged inputs, the
-                                 rules on; the gap-finding gap by tier and by situation at T-60
+                                 start again (all: every seat; club, regional or national: that tier's seats) against
+                                 the other nine sailing their logged inputs, the rules on; the gap-finding gap by tier
+                                 and by situation at T-60
           --fleet <mix>          the hold-one-out's fleet: national (default), mixed, club, regional
         One boat, no fleet: from a fixed start at the gun, the oracle searches for the fastest lap of each seed's
         course and each bot sails it alone; the table is where each loses her time behind the oracle.
@@ -146,9 +149,12 @@ public struct TimeTrialOptions: Hashable, Sendable {
                 let text = try value(flag)
                 if text == "all" {
                     holdOut = []
+                } else if let tier = BotTier(rawValue: text) {
+                    holdOut = []
+                    holdOutTier = tier
                 } else {
                     guard let seat = Int(text), (0..<StartTrialSeed.fleetSize).contains(seat) else {
-                        throw BotSuiteError.usage("--hold-one-out: a seat 0-\(StartTrialSeed.fleetSize - 1) or all, not \(text)")
+                        throw BotSuiteError.usage("--hold-one-out: a seat 0-\(StartTrialSeed.fleetSize - 1), all or a tier, not \(text)")
                     }
                     holdOut = (holdOut ?? []) + [seat]
                 }
@@ -499,8 +505,9 @@ public enum TimeTrial {
                 return 0
             }
             if options.start, let seats = options.holdOut {
-                let report = try HoldOneOut.run(options.startSeeds(), seats: seats.isEmpty ? nil : seats, tierMix: options.fleet,
-                                                oracle: options.oracle, jobs: options.jobs ?? BotSuite.defaultJobs)
+                let report = try HoldOneOut.run(options.startSeeds(), seats: seats.isEmpty ? nil : seats, tier: options.holdOutTier,
+                                                tierMix: options.fleet, oracle: options.oracle,
+                                                jobs: options.jobs ?? BotSuite.defaultJobs)
                 try emit(report.lines, json: report.jsonData, to: options.jsonPath)
                 return 0
             }
