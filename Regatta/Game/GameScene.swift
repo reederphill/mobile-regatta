@@ -240,7 +240,7 @@ final class GameScene: SKScene {
         buildTilt()
     }
 
-    /// The standing fleet, the land's rim and the glint (#596).
+    /// The standing fleet and the land's rim (#596).
     private func buildTilt() {
         let frame = driver.currentFrame
         let fleet = Fleet3D(boats: frame.boats, colors: frame.boats.map { Palette.boat($0.colorIndex) },
@@ -255,11 +255,6 @@ final class GameScene: SKScene {
         fleet3D = fleet
 
         buildLandRim()
-
-        // The water's glint, on the camera: over the water (−10), under everything else.
-        water.glint.zPosition = -9.5
-        water.glint.size = size
-        cam.addChild(water.glint)
     }
 
     /// The land's rim (#596), built once: every land polygon in one path in world points (pieces that share an edge,
@@ -464,7 +459,6 @@ final class GameScene: SKScene {
                            cameraScale: rig.cameraScale, tiltDegrees: tiltDegrees, sceneSize: size,
                            sailDetail: sailDetail, hidesSails: drawsCuesOnly, time: world.time, dt: dt, settled: settled)
             updateLandRim()
-            if water.glint.size != size { water.glint.size = size }
         }
 
         updateCues(world, dt: dt, settled: settled)

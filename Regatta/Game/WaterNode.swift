@@ -81,11 +81,6 @@ final class WaterNode: SKNode {
     var quality = WaterQuality.full {
         didSet { applyDepth() }
     }
-    /// The light's glint band (#596, #597): hashed twinkles in a band across the screen, not sine stripes (they
-    /// moiré). The scene puts it on its camera, over the water and under everything else, sized to the view. The
-    /// cheap tier holds its sparkles still.
-    let glint = SKSpriteNode(color: .white, size: CGSize(width: 1, height: 1))
-
     /// How far the ripple has drifted downwind, world points.
     private(set) var drift = CGPoint.zero
     /// The streaks drawn last frame, in draw order.
@@ -97,14 +92,11 @@ final class WaterNode: SKNode {
     /// The tuning panel's pressure overlay (#289, Debug builds): the tone drawn `PressureOverlay.boost` times as
     /// strong, the pressure lanes' centrelines dotted and the pressure side labelled.
     var showsPressureOverlay = false
-    /// Hides the ripple, whitecaps and glint, what the thermal tiers change, for `-cuesOnly`'s UI test (#127, #597).
+    /// Hides the ripple and whitecaps, what the thermal tiers change, for `-cuesOnly`'s UI test (#127, #597).
     /// The pressure and puffs still draw.
     var hidesRipple: Bool {
         get { rippleLayer.isHidden }
-        set {
-            rippleLayer.isHidden = newValue
-            glint.isHidden = newValue
-        }
+        set { rippleLayer.isHidden = newValue }
     }
 
     /// The pressure tone's sprite's name: the one sprite whose texture is made each frame.
@@ -131,9 +123,6 @@ final class WaterNode: SKNode {
         self.style = style
         puffTexture = Self.puffTexture(for: style)
         super.init()
-        glint.blendMode = .add
-        glint.name = "glint"
-        glint.shader = Self.glintShader()
         applyDepth()
         // The pressure under the puffs; the tuning overlay's marks over everything the water draws.
         pressureSprite.zPosition = -1
@@ -340,38 +329,22 @@ final class WaterNode: SKNode {
     private(set) var rippleShader: SKShader? {
         didSet { if rippleShader !== oldValue { tileNodes.forEach { $0.streak.shader = rippleShader } } }
     }
-    /// Whether the glint's sparkles twinkle (1) or hold still (0, the cheap tier), for tests.
-    var glintTwinkles: Bool { glint.shader?.uniformNamed("u_twinkle")?.floatValue == 1 }
-    /// The glint's alpha and band as its shader reads them, for tests.
-    var glintLook: (alpha: Float, band: Float) {
-        (glint.shader?.uniformNamed("u_alpha")?.floatValue ?? 0, glint.shader?.uniformNamed("u_band")?.floatValue ?? 0)
-    }
-
-    /// The wave and glint for `quality` and `style` (#597).
+    /// The wave for `quality` and `style` (#597).
     private func applyDepth() {
         rippleShader = quality == .full ? Self.waveShader : nil
         Self.rippleAlpha.floatValue = Float(style.rippleAlpha)
-        guard let shader = glint.shader else { return }
-        shader.uniformNamed("u_twinkle")?.floatValue = quality == .full ? 1 : 0
-        shader.uniformNamed("u_alpha")?.floatValue = Float(style.glintAlpha)
-        // The shader's v runs up the sprite: the band's centre from the bottom.
-        shader.uniformNamed("u_band")?.floatValue = Float(1 - style.glintBand)
     }
 
-    /// The wave's and glint's clock: race seconds, wrapped at 600 (`setClock`), never SpriteKit's `u_time`, so a
-    /// frozen render fixture draws the same water in every frame and a paused race holds still (as
-    /// `TurbulenceTrailLayer`'s `u_clock`). The wave's is shared, as its shader is; the glint's is its own. Static, so
-    /// it assumes one race scene drawing at a time: a second live scene's water would draw at whichever set it last.
+    /// The wave's clock: race seconds, wrapped at 600 (`setClock`), never SpriteKit's `u_time`, so a frozen render
+    /// fixture draws the same water in every frame and a paused race holds still (as `TurbulenceTrailLayer`'s
+    /// `u_clock`). Shared, as its shader is. Static, so it assumes one race scene drawing at a time: a second live
+    /// scene's water would draw at whichever set it last.
     private static let waveClock = SKUniform(name: "u_clock", float: 0)
-    /// Race time as the wave's and glint's shaders read it, for tests.
-    var shaderClock: (wave: Float, glint: Float) {
-        (Self.waveClock.floatValue, glint.shader?.uniformNamed("u_clock")?.floatValue ?? .nan)
-    }
+    /// Race time as the wave's shader reads it, for tests.
+    var shaderClock: Float { Self.waveClock.floatValue }
 
     private func setClock(_ time: Double) {
-        let clock = Float(time - 600 * (time / 600).rounded(.down))
-        Self.waveClock.floatValue = clock
-        glint.shader?.uniformNamed("u_clock")?.floatValue = clock
+        Self.waveClock.floatValue = Float(time - 600 * (time / 600).rounded(.down))
     }
 
     /// The streaks' tint and strength as the wave shader draws them (`WaterStyle.rippleAlpha`): uniforms, not the
@@ -394,28 +367,6 @@ final class WaterNode: SKNode {
         gl_FragColor = vec4(u_tint * a, a);
     }
     """, uniforms: [waveClock, rippleTint, rippleAlpha])
-
-    /// The glint's own shader (its uniforms are this node's): a gaussian band at `u_band`, a haze along it and
-    /// sparkles hashed per cell, each twinkling on its own rate while `u_twinkle` is 1, held at its phase at 0.
-    private static func glintShader() -> SKShader {
-        let shader = SKShader(source: """
-        void main() {
-            vec2 uv = v_tex_coord;
-            float d = (uv.y - u_band) / 0.15;
-            float band = exp(-d * d * 1.6);
-            vec2 cell = floor(uv * vec2(260.0, 560.0));
-            float r = fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5453);
-            float t = u_clock * u_twinkle;
-            float twinkle = 0.5 + 0.5 * sin(t * (1.5 + 3.0 * r) + r * 40.0);
-            float sparkle = step(0.965, r) * pow(twinkle, 6.0);
-            float a = band * u_alpha * (0.125 + sparkle);
-            gl_FragColor = vec4(a, a, a, a);
-        }
-        """)
-        shader.uniforms = [SKUniform(name: "u_band", float: 0.7), SKUniform(name: "u_alpha", float: 0.2),
-                           SKUniform(name: "u_twinkle", float: 1), SKUniform(name: "u_clock", float: 0)]
-        return shader
-    }
 
     private func makeTile() -> Tile {
         // A z each, from its slot (`DrawOrder`; a view takes a few hundred): a frame gives the slots out in
