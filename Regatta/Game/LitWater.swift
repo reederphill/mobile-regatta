@@ -290,7 +290,7 @@ enum LitWater {
     }
 
     static let kShader: SKShader = SKShader(
-        source: WaterLook.current.isToon ? Toon.current.source : kSource,
+        source: WaterLook.current == .o6 ? Toon6.current.source : (WaterLook.current.isToon ? Toon.current.source : kSource),
         uniforms: [WaterNode.litClock, kRect, kDown, kCam, kView, kSun, kScale, kWind, kDepth, kMap0, kMap1,
                    WaterNode.litGust, WaterNode.litGustOrigin, WaterNode.litGustSize])
 
@@ -515,7 +515,7 @@ final class LitWaterPlane {
     }
 }
 
-/// #604 round 6: O, the toon ocean after the owner's reference ("Toon Ocean Animation"): a calm sea in three flat
+/// #604 round 6: O6 (was O; knobs now `REGATTA_TOON6_*`), the toon ocean after the owner's reference ("Toon Ocean Animation"): a calm sea in three flat
 /// tones with large smooth pale islands and sparse four-point stars. The surface is a long swell only (three
 /// components, 13–34 m, periods 5–8 s) under a slow noise warp, so the tones' regions are organic islands, not
 /// stripes. Two scalars from the swell's slope (screen frame) and height: `pale` the sky term (faces tilted toward the
@@ -529,7 +529,7 @@ final class LitWaterPlane {
 /// `REGATTA_TOON_PUFF` the wind's threshold shift, `REGATTA_TOON_WARP` metres, `REGATTA_TOON_REF` the camera scale
 /// the shapes are sized at, `REGATTA_TOON_CELL` star cell (screen points). PROBE: never merged.
 extension LitWater {
-    struct Toon {
+    struct Toon6 {
         var deep = SIMD3<Double>(0x0C, 0x32, 0x57) / 255
         var mid = SIMD3<Double>(0x17, 0x4D, 0x70) / 255
         var pale = SIMD3<Double>(0x7D, 0xB6, 0xC2) / 255
@@ -544,29 +544,28 @@ extension LitWater {
         var ref = 1.0
         var cell = 36.0
 
-        static let current: Toon = {
-            var t = Toon()
-            if WaterLook.current == .o2 { t.scale *= 2 }
+        static let current: Toon6 = {
+            var t = Toon6()
             let env = ProcessInfo.processInfo.environment
             func hex(_ key: String) -> SIMD3<Double>? {
                 guard let v = env[key], let n = Int(v.replacingOccurrences(of: "#", with: ""), radix: 16) else { return nil }
                 return SIMD3(Double((n >> 16) & 255), Double((n >> 8) & 255), Double(n & 255)) / 255
             }
             func num(_ key: String) -> Double? { env[key].flatMap(Double.init) }
-            if let c = hex("REGATTA_TOON_DEEP") { t.deep = c }
-            if let c = hex("REGATTA_TOON_MID") { t.mid = c }
-            if let c = hex("REGATTA_TOON_PALE") { t.pale = c }
-            if let v = num("REGATTA_TOON_SCALE") { t.scale = v }
-            if let v = num("REGATTA_TOON_SOFT") { t.soft = v }
-            if let v = num("REGATTA_TOON_SPARKS") { t.sparks = v }
-            if let v = num("REGATTA_TOON_TP") { t.tPale = v }
-            if let v = num("REGATTA_TOON_TD") { t.tDeep = v }
-            if let v = num("REGATTA_TOON_PUFF") { t.puff = v }
-            if let v = num("REGATTA_TOON_DRIFT") { t.drift = v }
-            if let v = num("REGATTA_TOON_WARP") { t.warp = v }
-            if let v = num("REGATTA_TOON_REF") { t.ref = v }
-            if let v = num("REGATTA_TOON_CELL") { t.cell = v }
-            print("#604 toon \(WaterLook.current): \(t)")
+            if let c = hex("REGATTA_TOON6_DEEP") { t.deep = c }
+            if let c = hex("REGATTA_TOON6_MID") { t.mid = c }
+            if let c = hex("REGATTA_TOON6_PALE") { t.pale = c }
+            if let v = num("REGATTA_TOON6_SCALE") { t.scale = v }
+            if let v = num("REGATTA_TOON6_SOFT") { t.soft = v }
+            if let v = num("REGATTA_TOON6_SPARKS") { t.sparks = v }
+            if let v = num("REGATTA_TOON6_TP") { t.tPale = v }
+            if let v = num("REGATTA_TOON6_TD") { t.tDeep = v }
+            if let v = num("REGATTA_TOON6_PUFF") { t.puff = v }
+            if let v = num("REGATTA_TOON6_DRIFT") { t.drift = v }
+            if let v = num("REGATTA_TOON6_WARP") { t.warp = v }
+            if let v = num("REGATTA_TOON6_REF") { t.ref = v }
+            if let v = num("REGATTA_TOON6_CELL") { t.cell = v }
+            print("#604 toon6 \(WaterLook.current): \(t)")
             return t
         }()
 
@@ -692,6 +691,200 @@ extension LitWater {
                 float armX = exp(-abs(ds.x) / 8.0) * exp(-ds.y * ds.y / 0.7);
                 float armY = exp(-abs(ds.y) / 3.8) * exp(-ds.x * ds.x / 0.7);
                 float star = clamp((core * 1.6 + glow + armX + 0.8 * armY) * fade * on, 0.0, 1.0);
+                col = mix(col, vec3(1.0, 0.99, 0.95), star);
+                gl_FragColor = vec4(col, 1.0);
+            }
+            """
+        }
+    }
+}
+
+/// #604 round 7: O, the toon ocean after the owner's second read of the reference: "the dark tone almost always
+/// surrounds the light tone". A mid field with pale islands, each carrying its own deep fringe: the island's back face,
+/// the same shape grown a little and pushed to its far side (screen-up, away from the viewer), so the deep hugs the
+/// pale and fades back into mid; no free-standing deep. Islands come from three layers of warped noise cut high (cells
+/// `size` × 30, 12, 5 m): mostly small flecks, some medium, a few large; a slow low-frequency field moves the layers'
+/// cuts apart so neighbours differ in size and spacing. Zooming out the small layer, then the medium, close (their
+/// cuts rise), and every cut rises a little more (`calm`), so the planing view is calmer than the start. Puffs: mid
+/// toward deep, pale shrinks, fringes grow, flecks above ~12 kn. Lulls: pale grows, fringes thin, small flecks go
+/// (glassy). Stars: larger and streakier, only inside the medium and large islands. Knobs (env): `REGATTA_TOON_DEEP|
+/// MID|PALE` hex, `REGATTA_TOON_SIZE` (O2 2), `REGATTA_TOON_TA|TB|TC` the layers' cuts, `REGATTA_TOON_RIM` (deep
+/// all round, in field units), `REGATTA_TOON_SHADOW` (the far-side fringe's growth), `REGATTA_TOON_OFF` (its push, a
+/// share of the cell), `REGATTA_TOON_SOFT` px, `REGATTA_TOON_SPARKS`, `REGATTA_TOON_CELL` (star cell, scene points),
+/// `REGATTA_TOON_PUFF`, `REGATTA_TOON_CALM`, `REGATTA_TOON_WARP` m, `REGATTA_TOON_DRIFT` m/s, `REGATTA_TOON_REF`
+/// (the camera scale the sizes are set at). PROBE: never merged.
+extension LitWater {
+    struct Toon {
+        var deep = SIMD3<Double>(0x2C, 0x48, 0x6E) / 255
+        var mid = SIMD3<Double>(0x3A, 0x68, 0x88) / 255
+        var pale = SIMD3<Double>(0x7C, 0xB4, 0xBE) / 255
+        var size = 0.4
+        var tA = 0.69
+        var tB = 0.69
+        var tC = 0.665
+        var rim = 0.022
+        var shadow = 0.05
+        var off = 0.26
+        var soft = 2.0
+        var sparks = 0.9
+        var cell = 44.0
+        var stretch = 2.0
+        var puff = 1.0
+        var calm = 0.03
+        var warp = 4.0
+        var drift = 0.25
+        var ref = 1.0
+
+        static let current: Toon = {
+            var t = Toon()
+            if WaterLook.current == .o2 { t.size *= 2 }
+            let env = ProcessInfo.processInfo.environment
+            func hex(_ key: String) -> SIMD3<Double>? {
+                guard let v = env[key], let n = Int(v.replacingOccurrences(of: "#", with: ""), radix: 16) else { return nil }
+                return SIMD3(Double((n >> 16) & 255), Double((n >> 8) & 255), Double(n & 255)) / 255
+            }
+            func num(_ key: String) -> Double? { env[key].flatMap(Double.init) }
+            if let c = hex("REGATTA_TOON_DEEP") { t.deep = c }
+            if let c = hex("REGATTA_TOON_MID") { t.mid = c }
+            if let c = hex("REGATTA_TOON_PALE") { t.pale = c }
+            if let v = num("REGATTA_TOON_SIZE") { t.size = v }
+            if let v = num("REGATTA_TOON_TA") { t.tA = v }
+            if let v = num("REGATTA_TOON_TB") { t.tB = v }
+            if let v = num("REGATTA_TOON_TC") { t.tC = v }
+            if let v = num("REGATTA_TOON_RIM") { t.rim = v }
+            if let v = num("REGATTA_TOON_SHADOW") { t.shadow = v }
+            if let v = num("REGATTA_TOON_OFF") { t.off = v }
+            if let v = num("REGATTA_TOON_SOFT") { t.soft = v }
+            if let v = num("REGATTA_TOON_SPARKS") { t.sparks = v }
+            if let v = num("REGATTA_TOON_CELL") { t.cell = v }
+            if let v = num("REGATTA_TOON_STRETCH") { t.stretch = v }
+            if let v = num("REGATTA_TOON_PUFF") { t.puff = v }
+            if let v = num("REGATTA_TOON_CALM") { t.calm = v }
+            if let v = num("REGATTA_TOON_WARP") { t.warp = v }
+            if let v = num("REGATTA_TOON_DRIFT") { t.drift = v }
+            if let v = num("REGATTA_TOON_REF") { t.ref = v }
+            print("#604 toon \(WaterLook.current): \(t)")
+            return t
+        }()
+
+        var source: String {
+            func f(_ x: Double) -> String { String(format: "%.4f", x) }
+            func v3(_ c: SIMD3<Double>) -> String { "vec3(\(f(c.x)), \(f(c.y)), \(f(c.z)))" }
+            let cA = 26 * size, cB = 12 * size, cC = 5 * size, w0 = warp * size / 0.4
+            return """
+            float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+            float vnoise(vec2 p) {
+                vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+                float a = h21(i), b = h21(i + vec2(1.0, 0.0)), c = h21(i + vec2(0.0, 1.0)), d = h21(i + vec2(1.0, 1.0));
+                return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+            }
+            // One layer's island field at `p` (warped metres): two noise octaves, rotated by `r`, cell `C`, slowly morphing.
+            // Stretched along the crests (across the wind), as the reference's islands lie along the swell.
+            float isl(vec2 p, float C, vec2 r, vec2 sd, float t, vec2 dn) {
+                vec2 a = vec2(dot(p, dn), dot(p, vec2(-dn.y, dn.x)) / \(f(stretch)));
+                vec2 q = vec2(a.x * r.x - a.y * r.y, a.x * r.y + a.y * r.x) / C + sd + vec2(0.6, 0.35) * t * 0.012;
+                return 0.62 * vnoise(q) + 0.26 * vnoise(q * 2.3 + sd.yx) + 0.12 * vnoise(q * 5.1 + sd);
+            }
+            // The warp: two octaves drifting their own ways, so no two neighbours share a size or spacing.
+            vec2 warpAt(vec2 m, float t, vec2 dn) {
+                vec2 dp = vec2(-dn.y, dn.x);
+                vec2 q1 = m / \(f(26 * size)) + dp * t * 0.004;
+                vec2 q2 = vec2(m.x * 0.8 - m.y * 0.6, m.x * 0.6 + m.y * 0.8) / \(f(8.5 * size)) - dp * t * 0.01;
+                return vec2(vnoise(q1) - 0.5, vnoise(q1 + vec2(7.3, 2.1)) - 0.5) * 2.0 * \(f(w0))
+                     + vec2(vnoise(q2 + vec2(3.1, 9.7)) - 0.5, vnoise(q2 + vec2(1.7, 4.4)) - 0.5) * \(f(w0 * 0.35));
+            }
+            #define CUT(F, T) smoothstep((T) - max(fwidth(F), 1e-5) * s, (T) + max(fwidth(F), 1e-5) * s, F)
+            void main() {
+                vec2 w = u_rect.xy + v_tex_coord * u_rect.zw;
+                vec2 m = w / 8.0;
+                float t = u_clock;
+                vec2 dn = u_down;
+                vec2 guv = clamp((w - u_gust_origin) / u_gust_size, 0.0, 1.0);
+                float gu = texture2D(u_gust, guv).r * 2.0 - 1.0;
+                float puff = smoothstep(0.0, 0.8, gu) * \(f(puff)), lull = smoothstep(0.0, 0.8, -gu) * \(f(puff));
+                float z = max(log2(max(u_scale, 1e-3) / \(f(ref))), 0.0);
+                // The water drifts downwind, all layers together, so the islands persist.
+                vec2 pd = m - dn * t * \(f(drift));
+                vec2 p = pd + warpAt(pd, t, dn);
+                // A slow field sets the layers' cuts apart: here more large islands, there more flecks.
+                float lo = vnoise(pd / \(f(55 * size)) + vec2(5.2, 1.3)) - 0.5;
+                float zc = \(f(calm)) * z;
+                float tA = \(f(tA)) + zc - 0.10 * lo + 0.05 * puff - 0.012 * lull;
+                float tB = \(f(tB)) + zc + 0.04 * lo + 0.05 * puff - 0.008 * lull + 0.5 * smoothstep(1.3, 2.3, z);
+                float tC = \(f(tC)) + zc + 0.03 * lo + 0.04 * puff + 0.05 * lull + 0.5 * smoothstep(0.5, 1.2, z);
+                float rim = \(f(rim)) * (1.0 + 0.6 * puff - 0.6 * lull);
+                float shd = \(f(shadow)) * (1.0 + 0.7 * puff - 0.9 * lull);
+                // The far side, in world metres (screen-up under the camera's turn).
+                vec2 up = vec2(-u_cam.y, u_cam.x);
+                vec2 rA = vec2(0.94, 0.34), rB = vec2(0.5, -0.87), rC = vec2(-0.77, 0.64);
+                vec2 sA = vec2(1.7, 9.2), sB = vec2(6.1, 3.3), sC = vec2(2.9, 7.7);
+                float FA = isl(p, \(f(cA)), rA, sA, t, dn);
+                float FB = isl(p, \(f(cB)), rB, sB, t, dn);
+                float FC = isl(p, \(f(cC)), rC, sC, t, dn);
+                float GA = isl(p - up * \(f(cA * off)), \(f(cA)), rA, sA, t, dn);
+                float HA = isl(p - up * \(f(cA * off * 0.5)), \(f(cA)), rA, sA, t, dn);
+                float HB = isl(p - up * \(f(cB * off * 0.5)), \(f(cB)), rB, sB, t, dn);
+                float GB = isl(p - up * \(f(cB * off)), \(f(cB)), rB, sB, t, dn);
+                float GC = isl(p - up * \(f(cC * off)), \(f(cC)), rC, sC, t, dn);
+                float s = \(f(soft)) * 0.5;
+                float pA = max(max(CUT(FA, tA), CUT(FB, tB)), CUT(FC, tC));
+                // The fringe: the island swept a little to its far side (two steps), barely grown, so a deep shape
+                // only exists where a pale island sits right next to it.
+                float dA = max(max(max(CUT(FA, tA - rim), max(CUT(GA, tA - shd), CUT(HA, tA - shd))),
+                                   max(CUT(FB, tB - rim), max(CUT(GB, tB - shd), CUT(HB, tB - shd)))),
+                               max(CUT(FC, tC - rim), CUT(GC, tC - shd)));
+                // Depth: a touch of the shallows' teal in every tone.
+                vec2 rel = m - u_dmap0.xy;
+                vec2 ax = u_dmap0.zw;
+                vec2 cr = vec2(dot(rel, ax), dot(rel, vec2(-ax.y, ax.x))) / u_dmap1.x;
+                vec2 duv = (cr + 0.5) / u_dmap1.yz;
+                vec4 dep = u_dmap1.w > 0.5 ? texture2D(u_depth, clamp(duv, 0.0, 1.0)) : vec4(0.0, 1.0, 0.0, 1.0);
+                vec3 deepC = \(v3(deep));
+                vec3 midC = \(v3(mid));
+                vec3 paleC = \(v3(pale));
+                vec3 tealC = vec3(0.16, 0.44, 0.46);
+                midC = mix(midC, deepC, 0.5 * puff);
+                deepC = mix(deepC, deepC * 0.85, puff);
+                midC = mix(midC, paleC, 0.16 * lull);
+                midC = mix(midC, tealC, 0.35 * dep.r);
+                deepC = mix(deepC, tealC, 0.25 * dep.r);
+                vec3 col = mix(midC, deepC, dA);
+                col = mix(col, paleC, pA);
+                // Foam flecks: flat, few, in the puffs above ~12 kn.
+                vec2 fm = pd / 1.6;
+                float fl = vnoise(fm) * vnoise(fm * 0.37 + vec2(4.1, 8.3));
+                float ft = 0.80 - 0.06 * smoothstep(0.2, 0.8, u_wind.y);
+                float foamA = CUT(fl, ft) * smoothstep(0.15, 0.35, u_wind.y) * smoothstep(0.25, 0.6, puff);
+                col = mix(col, vec3(0.90, 0.95, 0.97), foamA);
+                // Stars: a candidate a cell (world-fixed, stepping by octaves with the zoom), its own cycle, only well
+                // inside the medium and large islands.
+                float cellM = \(f(cell)) * \(f(ref)) / 8.0 * exp2(floor(z));
+                vec2 pm = m - dn * t * \(f(drift));
+                vec2 ci = floor(pm / cellM);
+                float per = 1.4 + h21(ci + vec2(3.3, 7.7));
+                float phase = t / per + h21(ci + vec2(9.1, 1.9));
+                float cyc = floor(phase); float life = fract(phase);
+                vec2 rnd = vec2(h21(ci + vec2(cyc, 5.5)), h21(ci + vec2(2.2, cyc)));
+                vec2 sm = (ci + 0.3 + 0.4 * rnd) * cellM;
+                vec2 lc = pm / cellM - ci;
+                float edge = min(min(lc.x, 1.0 - lc.x), min(lc.y, 1.0 - lc.y)) * cellM * 8.0 / u_scale;
+                float on = step(h21(ci + vec2(cyc * 1.7, 11.0)), \(f(sparks)));
+                vec2 sw0 = sm + dn * t * \(f(drift));
+                if (on > 0.0) {
+                    vec2 sp = sm + warpAt(sm, t, dn);
+                    float inA = isl(sp, \(f(cA)), rA, sA, t, dn) - tA;
+                    float inB = isl(sp, \(f(cB)), rB, sB, t, dn) - tB;
+                    on *= smoothstep(0.01, 0.05, max(inA, inB));
+                }
+                vec2 dw = (sw0 - m) * 8.0 / u_scale;
+                vec2 ds = vec2(dw.x * u_cam.x + dw.y * u_cam.y, -dw.x * u_cam.y + dw.y * u_cam.x);
+                ds.y *= u_view.z;
+                float fade = sin(3.14159 * life); fade *= fade;
+                float core = exp(-(ds.x * ds.x * 0.12 + ds.y * ds.y) / 5.0);
+                float glow = exp(-(ds.x * ds.x * 0.15 + ds.y * ds.y) / 25.0) * 0.4;
+                float armX = exp(-abs(ds.x) / 9.0) * exp(-ds.y * ds.y / 0.9);
+                float armY = exp(-abs(ds.y) / 4.5) * exp(-ds.x * ds.x / 0.8);
+                float star = clamp((core * 1.6 + glow + armX + 0.7 * armY) * fade * on * smoothstep(0.0, 7.0, edge), 0.0, 1.0);
                 col = mix(col, vec3(1.0, 0.99, 0.95), star);
                 gl_FragColor = vec4(col, 1.0);
             }

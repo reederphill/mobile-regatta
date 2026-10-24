@@ -48,14 +48,14 @@ extension WaterWorld {
 /// on the ripple, a depth gradient under the shallows); B cat's paws (the ripple follows the wind it lies in);
 /// C swell (long low crests rolling downwind under the ripple, foam along them). PROBE: never merged.
 nonisolated enum WaterLook: String {
-    case none, a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, o2
+    case none, a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, o2, o6
     /// Round 4's lit water: J a physically based plane in the standing fleet's SceneKit scene, K the same light as a
     /// SpriteKit shader. The ripple streaks go (the light draws the surface).
     var isLit: Bool { self == .j || usesLitSprite }
     /// K and round 5's cel-shaded K: L three tones, M two, N four with a crest rim.
     var usesLitSprite: Bool { self == .k || isCel || isToon }
-    /// Round 6's toon ocean: O, and O2 with its shapes twice the size.
-    var isToon: Bool { self == .o || self == .o2 }
+    /// The toon ocean: O (round 7), O2 with its shapes twice the size, O6 round 6 as it was.
+    var isToon: Bool { self == .o || self == .o2 || self == .o6 }
     var isCel: Bool { self == .l || self == .m || self == .n }
     /// Round 3's surface textures: G wavelets, H micro ripples, I caustic shimmer. Under today's water, which stays.
     var isTexture: Bool { self == .g || self == .h || self == .i }
@@ -417,7 +417,7 @@ final class WaterNode: SKNode {
                     // Whitecaps bias toward the puffs and leave the lulls.
                     tileShare = min(share * (1 + 2.5 * gust), 0.9)
                     if share == 0, puff > 0.6 { tileShare = 0.15 * (puff - 0.6) / 0.4 }
-                case .none, .c, .d, .e, .f, .g, .h, .i, .j, .k, .l, .m, .n, .o, .o2:
+                case .none, .c, .d, .e, .f, .g, .h, .i, .j, .k, .l, .m, .n, .o, .o2, .o6:
                     break
                 }
                 updateWhitecap(tile, at: index, share: max(tileShare, 0), time: world.time, period: period)
@@ -520,7 +520,7 @@ final class WaterNode: SKNode {
 
     private static let lookShader: SKShader = {
         switch WaterLook.current {
-        case .none, .c, .d, .e, .f, .g, .h, .i, .j, .k, .l, .m, .n, .o, .o2: return waveShader
+        case .none, .c, .d, .e, .f, .g, .h, .i, .j, .k, .l, .m, .n, .o, .o2, .o6: return waveShader
         case .a: return glitterShader
         case .b: return catspawShader
         }
