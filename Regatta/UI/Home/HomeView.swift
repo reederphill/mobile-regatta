@@ -73,7 +73,7 @@ struct HomeView: View {
                     tuning
                     #endif
                     if let lastRace {
-                        LastRaceRow(lastRace: lastRace) { model.sheet = .lastRace }
+                        LastRaceRow(lastRace: lastRace, showsRaceID: model.launchOptions.uiTesting) { model.sheet = .lastRace }
                     }
                 }
                 LobbyView(state: lobbyState, model: lobby, leaderboardTop: onlineStatus?.leaderboardTop,
@@ -466,6 +466,9 @@ struct NoticeRow: View {
 /// The last race's entry on the home screen (#24): your place, and a tap reopens the results (#132).
 private struct LastRaceRow: View {
     let lastRace: RaceResultViewModel
+    /// UI tests only (#163, T6): the row's value is its online race's id, so a test tells one race from the next.
+    /// Nothing VoiceOver reads outside them.
+    var showsRaceID = false
     var open: () -> Void
 
     var body: some View {
@@ -494,6 +497,7 @@ private struct LastRaceRow: View {
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
+        .accessibilityValue(showsRaceID ? lastRace.online?.raceID ?? "" : "")
         .accessibilityIdentifier("last-race")
     }
 }

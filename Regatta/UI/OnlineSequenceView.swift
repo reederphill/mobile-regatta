@@ -145,12 +145,15 @@ struct ReconnectingLine: View {
 
 extension RaceResultViewModel {
     /// The results of a race as the service remembers it (#141): one that closed while she was away. Its rating is
-    /// pending until it is pushed, unless the race was unrated. She wears `livery`; the wire carries no other yet.
-    init(lastRace: LastRace, livery: Livery) {
+    /// pending until it is pushed, unless the race was unrated. Every seat wears `fleet`'s livery, the briefing's
+    /// (#163), when it has one for each; else she wears `livery` and every other seat `FleetLiveries.yours`, since
+    /// the wire's report carries none.
+    init(lastRace: LastRace, livery: Livery, fleet: [Livery]? = nil) {
         let report = lastRace.report
+        let briefed = fleet.flatMap { $0.count == report.roster.count ? $0 : nil }
         let entrants = report.roster.indices.map { seat in
             Entrant(name: seat == report.seat ? "You" : report.roster[seat].name, isBot: report.roster[seat].isBot,
-                    livery: seat == report.seat ? livery : FleetLiveries.yours)
+                    livery: briefed?[seat] ?? (seat == report.seat ? livery : FleetLiveries.yours))
         }
         let cell: RatingCell = lastRace.rating.map { .init($0.outcome) }
             ?? (report.results.rated ? .pending : .unrated(.noOtherHumans))

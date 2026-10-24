@@ -49,7 +49,7 @@ import RegattaProtocol
     init(seed: UInt64 = 3, seats: Int = 10, startSequenceTicks: Int = 300, joiningAfter: UInt64 = 0,
          collisionCourse: Bool = false, markRoomAt: Int? = nil,
          rulesConfiguration: FileRef = RaceFiles.defaults.rulesConfiguration.ref, uplink: LinkFaults = .none,
-         downlink: LinkFaults = .none) throws {
+         downlink: LinkFaults = .none, liveries: [Livery]? = nil) throws {
         let clock = VirtualClock(now: 1_000_000)
         let link = FaultInjectingLink(clock: clock, uplink: uplink, downlink: downlink, seed: 1)
         let server = try FakeRaceServer(seats: seats, seed: seed, startSequenceTicks: startSequenceTicks,
@@ -73,7 +73,8 @@ import RegattaProtocol
         // As `OnlineLaunch` reads it: a `RaceStart` from past the setup's first tick is a race under way.
         let underway = (join.joinedTick ?? Int.min) > -start.setup.startSequenceTicks
         driver = OnlineDriver(start: start, transport: transport, token: Self.token, clientBuild: "test",
-                              now: { clock.now }, connect: { network.connect() }, joiningUnderway: underway)
+                              now: { clock.now }, connect: { network.connect() }, joiningUnderway: underway,
+                              liveries: liveries)
         session = GameSession(online: driver)
     }
 
@@ -273,6 +274,19 @@ import RegattaProtocol
     }
 
     /// The server's close ends the race for the player: the results, no more ticks, no rejoin.
+    /// #163: the driver's seats wear the briefing's liveries, so the results do; a fleet of the wrong size is
+    /// another race's, and the seeded fleet stands.
+    @Test func theDriverWearsTheBriefingsFleet() throws {
+        let briefing = (0..<10).map {
+            Livery(design: FleetLiveries.yours.design, colours: FleetLiveries.yours.colours, sailNumber: 7400 + $0)
+        }
+        let rig = try OnlineRig(liveries: briefing)
+        #expect(rig.driver.liveries.liveries == briefing)
+        let wrong = try OnlineRig(liveries: Array(briefing.prefix(6)))
+        let setup = wrong.driver.client.predicted.race.setup
+        #expect(wrong.driver.liveries == FleetLiveries(setup: setup, mySeat: wrong.driver.myBoatIndex))
+    }
+
     @Test func theServersCloseEndsTheRace() throws {
         let rig = try OnlineRig()
         rig.run(for: 2_000_000)

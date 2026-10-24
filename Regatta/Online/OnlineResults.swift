@@ -17,9 +17,12 @@ final class OnlineResults {
     /// Online races you had completed before this one: what its earned line counts from.
     let completedBefore: Int
     /// Told once when the race closes with a result of yours that counts as completed (G6): the device's count goes up
-    /// by one (`CompletedRacesStore`), so Try it lands on an unlocked design, until the server's count replaces it
-    /// (`AppModel.adoptServerCount`, #139).
+    /// by one (`CompletedRacesStore`), so Try it lands on an unlocked design at once. The server's count replaces it
+    /// within a round trip of the close (`onClosed`, #163).
     @ObservationIgnored var onCompleted: ((RaceID) -> Void)?
+    /// Told once when the closed report arrives, counted or not (#163, T5): the server has the close, and its count of
+    /// her completed races with it, so the app reads that count (`AppModel.onlineRaceClosed`).
+    @ObservationIgnored var onClosed: ((RaceID) -> Void)?
     /// Told on every change, so a session rebuilds its sheet even when the race clock has stopped.
     @ObservationIgnored var onChange: (() -> Void)?
 
@@ -28,6 +31,7 @@ final class OnlineResults {
     /// Changes pushed before the report that names the race, by race.
     @ObservationIgnored private var unmatched: [RaceID: RatingOutcome] = [:]
     @ObservationIgnored private var toldCompleted = false
+    @ObservationIgnored private var toldClosed = false
     @ObservationIgnored private let service: any RaceSessionService
     @ObservationIgnored private var tasks: [Task<Void, Never>] = []
 
@@ -70,6 +74,10 @@ final class OnlineResults {
             if report.isClosed, !toldCompleted, let code = report.results.row(of: report.seat)?.code, EarnedUnlock.counts(code) {
                 toldCompleted = true
                 onCompleted?(report.raceID)
+            }
+            if report.isClosed, !toldClosed {
+                toldClosed = true
+                onClosed?(report.raceID)
             }
         case .cancelled:
             isCancelled = true
