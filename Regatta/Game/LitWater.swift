@@ -65,7 +65,7 @@ enum LitWater {
     /// 0 leaves them to the roughness alone).
     static let puffAlpha: CGFloat = {
         if let v = ProcessInfo.processInfo.environment["REGATTA_LIT_PUFFS"], let x = Double(v) { return CGFloat(x) }
-        return WaterLook.current.isCel ? 0 : 0.5
+        return WaterLook.current.isCel || WaterLook.current.isToon ? 0 : 0.5
     }()
 
     /// The sun, a unit vector in the screen's frame (x right, y up the screen, z up off the water): its bearing
@@ -290,7 +290,7 @@ enum LitWater {
     }
 
     static let kShader: SKShader = SKShader(
-        source: kSource,
+        source: WaterLook.current.isToon ? Toon.current.source : kSource,
         uniforms: [WaterNode.litClock, kRect, kDown, kCam, kView, kSun, kScale, kWind, kDepth, kMap0, kMap1,
                    WaterNode.litGust, WaterNode.litGustOrigin, WaterNode.litGustSize])
 
@@ -512,5 +512,179 @@ final class LitWaterPlane {
         let r = f.gustRect
         material.setValue(SCNVector4(Float(r.minX), Float(r.minY), Float(r.width), Float(r.height)), forKey: "u_gustRect")
         if let gust = f.gust { gustProperty.contents = gust }
+    }
+}
+
+/// #604 round 6: O, the toon ocean after the owner's reference ("Toon Ocean Animation"): a calm sea in three flat
+/// tones with large smooth pale islands and sparse four-point stars. The surface is a long swell only (three
+/// components, 13–34 m, periods 5–8 s) under a slow noise warp, so the tones' regions are organic islands, not
+/// stripes. Two scalars from the swell's slope (screen frame) and height: `pale` the sky term (faces tilted toward the
+/// viewer, and the crests), `deep` the sun-shadow term (faces turned from the sun, and the troughs); each cut at a
+/// threshold, the edge `soft` screen pixels wide. The shapes keep their screen size: the swell's scale steps by
+/// octaves with the camera (blended before the cut). The local wind moves the thresholds: puffs grow the deep tone and
+/// shrink the islands (and above ~12 kn add flat foam flecks), lulls the opposite. Stars: one candidate a cell of
+/// about `cell` screen points, on a cycle of its own (1.4–2.4 s, fading in and out), shown when its spot is well
+/// inside a pale island. Knobs (env): `REGATTA_TOON_DEEP|MID|PALE` hex tones, `REGATTA_TOON_SCALE` (O2 2),
+/// `REGATTA_TOON_SOFT` px, `REGATTA_TOON_SPARKS` share of cells, `REGATTA_TOON_TP|TD` thresholds,
+/// `REGATTA_TOON_PUFF` the wind's threshold shift, `REGATTA_TOON_WARP` metres, `REGATTA_TOON_REF` the camera scale
+/// the shapes are sized at, `REGATTA_TOON_CELL` star cell (screen points). PROBE: never merged.
+extension LitWater {
+    struct Toon {
+        var deep = SIMD3<Double>(0x0C, 0x32, 0x57) / 255
+        var mid = SIMD3<Double>(0x17, 0x4D, 0x70) / 255
+        var pale = SIMD3<Double>(0x7D, 0xB6, 0xC2) / 255
+        var scale = 0.4
+        var soft = 2.5
+        var sparks = 0.9
+        var tPale = 0.9
+        var tDeep = 0.55
+        var puff = 0.9
+        var warp = 7.0
+        var ref = 1.0
+        var cell = 36.0
+
+        static let current: Toon = {
+            var t = Toon()
+            if WaterLook.current == .o2 { t.scale *= 2 }
+            let env = ProcessInfo.processInfo.environment
+            func hex(_ key: String) -> SIMD3<Double>? {
+                guard let v = env[key], let n = Int(v.replacingOccurrences(of: "#", with: ""), radix: 16) else { return nil }
+                return SIMD3(Double((n >> 16) & 255), Double((n >> 8) & 255), Double(n & 255)) / 255
+            }
+            func num(_ key: String) -> Double? { env[key].flatMap(Double.init) }
+            if let c = hex("REGATTA_TOON_DEEP") { t.deep = c }
+            if let c = hex("REGATTA_TOON_MID") { t.mid = c }
+            if let c = hex("REGATTA_TOON_PALE") { t.pale = c }
+            if let v = num("REGATTA_TOON_SCALE") { t.scale = v }
+            if let v = num("REGATTA_TOON_SOFT") { t.soft = v }
+            if let v = num("REGATTA_TOON_SPARKS") { t.sparks = v }
+            if let v = num("REGATTA_TOON_TP") { t.tPale = v }
+            if let v = num("REGATTA_TOON_TD") { t.tDeep = v }
+            if let v = num("REGATTA_TOON_PUFF") { t.puff = v }
+            if let v = num("REGATTA_TOON_WARP") { t.warp = v }
+            if let v = num("REGATTA_TOON_REF") { t.ref = v }
+            if let v = num("REGATTA_TOON_CELL") { t.cell = v }
+            print("#604 toon \(WaterLook.current): \(t)")
+            return t
+        }()
+
+        var source: String {
+            func f(_ x: Double) -> String { String(format: "%.4f", x) }
+            func v3(_ c: SIMD3<Double>) -> String { "vec3(\(f(c.x)), \(f(c.y)), \(f(c.z)))" }
+            return """
+            float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+            float vnoise(vec2 p) {
+                vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+                float a = h21(i), b = h21(i + vec2(1.0, 0.0)), c = h21(i + vec2(0.0, 1.0)), d = h21(i + vec2(1.0, 1.0));
+                return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+            }
+            // The swell at `m` (metres) for octave scale `S`: x, y its slope in the screen frame, z its height (unit-ish).
+            vec3 swell(vec2 m, float S, float t, vec2 dn, vec2 cam) {
+                vec2 dp = vec2(-dn.y, dn.x);
+                vec2 mm = m / S;
+                // The slow warp: two value-noise octaves, rotated apart, drifting downwind.
+                vec2 q1 = mm / 31.0 - dn * t * 0.010;
+                vec2 q2 = vec2(mm.x * 0.8 - mm.y * 0.6, mm.x * 0.6 + mm.y * 0.8) / 13.0 + dp * t * 0.012;
+                vec2 wv = vec2(vnoise(q1) - 0.5, vnoise(q1 + vec2(7.3, 2.1)) - 0.5) * 2.0
+                        + vec2(vnoise(q2 + vec2(3.1, 9.7)) - 0.5, vnoise(q2 + vec2(1.7, 4.4)) - 0.5) * 0.9;
+                // A finer octave crinkles the islands' outlines (bays and capes), still smooth at the edge.
+                vec2 q3 = vec2(mm.x * 0.5 + mm.y * 0.87, -mm.x * 0.87 + mm.y * 0.5) / 4.6 - dn * t * 0.02;
+                wv += vec2(vnoise(q3) - 0.5, vnoise(q3 + vec2(6.6, 3.9)) - 0.5) * 0.45;
+                vec2 q4 = vec2(mm.x * 0.94 - mm.y * 0.34, mm.x * 0.34 + mm.y * 0.94) / 1.9 + dp * t * 0.03;
+                wv += vec2(vnoise(q4 + vec2(2.8, 0.4)) - 0.5, vnoise(q4 + vec2(8.1, 5.2)) - 0.5) * 0.16;
+                vec2 p = mm + wv * \(f(warp));
+                vec2 g = vec2(0.0); float h = 0.0;
+                for (int i = 0; i < 3; i++) {
+                    float fi = float(i);
+                    float lambda = i == 0 ? 34.0 : (i == 1 ? 21.0 : 13.0);
+                    float period = i == 0 ? 8.0 : (i == 1 ? 6.5 : 5.0);
+                    float ang = i == 0 ? 0.0 : (i == 1 ? 0.36 : -0.30);
+                    vec2 dir = dn * cos(ang) + dp * sin(ang);
+                    float k = 6.2831 / lambda;
+                    float ph = k * dot(dir, p) - 6.2831 * t / (period * sqrt(S)) + 6.2831 * h21(vec2(fi, 1.3));
+                    g += cos(ph) * dir;
+                    h += sin(ph);
+                }
+                vec2 gs = vec2(g.x * cam.x + g.y * cam.y, -g.x * cam.y + g.y * cam.x);
+                return vec3(gs, h) / 1.7;
+            }
+            void main() {
+                vec2 w = u_rect.xy + v_tex_coord * u_rect.zw;
+                vec2 m = w / 8.0;
+                float t = u_clock;
+                vec2 guv = clamp((w - u_gust_origin) / u_gust_size, 0.0, 1.0);
+                float gu = texture2D(u_gust, guv).r * 2.0 - 1.0;
+                float puff = smoothstep(0.0, 0.8, gu), lull = smoothstep(0.0, 0.8, -gu);
+                // The octave ladder: the shapes keep their screen size as the camera zooms.
+                float z = log2(max(u_scale / \(f(ref)), 1.0));
+                float zl = floor(z); float zf = fract(z);
+                float S0 = \(f(scale)) * exp2(zl);
+                vec3 a = swell(m, S0, t, u_down, u_cam);
+                vec3 b = swell(m, S0 * 2.0, t, u_down, u_cam);
+                vec3 sw = mix(a, b, smoothstep(0.0, 1.0, zf));
+                // The shadow side from the swell further along (decorrelated, so the deep shapes are their own,
+                // not a drop shadow under each island).
+                vec2 mo = m + vec2(57.0, -31.0) * S0;
+                vec3 sd = mix(swell(mo, S0, t, u_down, u_cam), swell(mo, S0 * 2.0, t, u_down, u_cam), smoothstep(0.0, 1.0, zf));
+                vec2 sunD = normalize(u_sun.xy + vec2(1e-4, 0.0));
+                float pale = sw.y * 0.8 + sw.z * 0.6;
+                float deep = dot(sd.xy, sunD) * 0.8 - sd.z * 0.55;
+                float tp = \(f(tPale)) + \(f(puff)) * puff - \(f(puff)) * 0.8 * lull;
+                float td = \(f(tDeep)) - \(f(puff)) * puff + \(f(puff)) * 0.8 * lull;
+                float ep = max(fwidth(pale), 1e-5) * \(f(soft)) * 0.5;
+                float ed = max(fwidth(deep), 1e-5) * \(f(soft)) * 0.5;
+                float pA = smoothstep(tp - ep, tp + ep, pale);
+                float dA = smoothstep(td - ed, td + ed, deep);
+                // Depth: a touch of the shallows' teal in every tone.
+                vec2 rel = m - u_dmap0.xy;
+                vec2 ax = u_dmap0.zw;
+                vec2 cr = vec2(dot(rel, ax), dot(rel, vec2(-ax.y, ax.x))) / u_dmap1.x;
+                vec2 duv = (cr + 0.5) / u_dmap1.yz;
+                vec4 dep = u_dmap1.w > 0.5 ? texture2D(u_depth, clamp(duv, 0.0, 1.0)) : vec4(0.0, 1.0, 0.0, 1.0);
+                vec3 deepC = \(v3(deep));
+                vec3 midC = \(v3(mid));
+                vec3 paleC = \(v3(pale));
+                vec3 tealC = vec3(0.09, 0.36, 0.40);
+                midC = mix(midC, deepC, 0.25 * puff);
+                midC = mix(midC, tealC, 0.35 * dep.r);
+                deepC = mix(deepC, tealC, 0.25 * dep.r);
+                vec3 col = mix(midC, deepC, dA);
+                col = mix(col, paleC, pA);
+                // Foam flecks: flat, few, in the puffs above ~12 kn.
+                vec2 fm = m / (0.9 * S0) - u_down * t * 0.25;
+                float fl = vnoise(fm) * vnoise(fm * 0.37 + vec2(4.1, 8.3));
+                float ft = 0.80 - 0.06 * smoothstep(0.2, 0.8, u_wind.y);
+                float fe = max(fwidth(fl), 1e-5) * \(f(soft)) * 0.5;
+                float foamA = smoothstep(ft - fe, ft + fe, fl) * smoothstep(0.15, 0.35, u_wind.y) * smoothstep(0.25, 0.6, puff);
+                col = mix(col, vec3(0.90, 0.95, 0.97), foamA);
+                // Stars: a candidate a cell (world-fixed, drifting downwind), its own cycle, inside the pale islands.
+                float Sr = \(f(scale)) * exp2(zl + (zf > 0.5 ? 1.0 : 0.0));
+                float cellM = \(f(cell)) * \(f(ref)) / 8.0 * Sr / \(f(scale));
+                vec2 pm = m - u_down * t * 0.35;
+                vec2 ci = floor(pm / cellM);
+                float per = 1.4 + h21(ci + vec2(3.3, 7.7));
+                float phase = t / per + h21(ci + vec2(9.1, 1.9));
+                float cyc = floor(phase); float life = fract(phase);
+                vec2 rnd = vec2(h21(ci + vec2(cyc, 5.5)), h21(ci + vec2(2.2, cyc)));
+                vec2 sm = (ci + 0.22 + 0.56 * rnd) * cellM;
+                float on = step(h21(ci + vec2(cyc * 1.7, 11.0)), \(f(sparks)));
+                vec2 sw0 = sm + u_down * t * 0.35;
+                vec3 ss = mix(swell(sw0, S0, t, u_down, u_cam), swell(sw0, S0 * 2.0, t, u_down, u_cam), smoothstep(0.0, 1.0, zf));
+                float sPale = ss.y * 0.8 + ss.z * 0.6;
+                on *= smoothstep(tp + 0.02, tp + 0.25, sPale);
+                vec2 dw = (sw0 - m) * 8.0 / u_scale;
+                vec2 ds = vec2(dw.x * u_cam.x + dw.y * u_cam.y, -dw.x * u_cam.y + dw.y * u_cam.x);
+                ds.y *= u_view.z;
+                float fade = sin(3.14159 * life); fade *= fade;
+                float core = exp(-(ds.x * ds.x * 0.35 + ds.y * ds.y) / 4.0);
+                float glow = exp(-(ds.x * ds.x * 0.3 + ds.y * ds.y) / 30.0) * 0.4;
+                float armX = exp(-abs(ds.x) / 8.0) * exp(-ds.y * ds.y / 0.7);
+                float armY = exp(-abs(ds.y) / 3.8) * exp(-ds.x * ds.x / 0.7);
+                float star = clamp((core * 1.6 + glow + armX + 0.8 * armY) * fade * on, 0.0, 1.0);
+                col = mix(col, vec3(1.0, 0.99, 0.95), star);
+                gl_FragColor = vec4(col, 1.0);
+            }
+            """
+        }
     }
 }
