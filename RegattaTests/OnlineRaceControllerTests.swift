@@ -316,6 +316,42 @@ nonisolated final class CountingQueue: QueueService, @unchecked Sendable {
         #expect(!rig.race.isFollowing)
     }
 
+    /// Disqualified in the sequence, Home just past the gun (e2e run 40049197023: idle on the line, "Rule 12 against
+    /// you, DSQ" at -0:25, so the race menu has no Leave and the results' Home is her way out): she was at the gun, so
+    /// the race is followed, and its rated close lands on Home's Last race with her DSQ row and the loss.
+    @Test func dsqInTheSequenceThenHomePastTheGunGetsTheRatedClose() async throws {
+        let rig = SequenceRig()
+        await rig.sail(to: -25 * Race.tickRate)
+        var open = SequenceRig.openReport
+        open.results.rows.removeAll { $0.seat == open.seat }
+        open.sailing.removeAll { $0 == open.seat }
+        rig.link.kept = SequenceRig.sheet(open)
+        rig.link.isPlayerDone = true
+        rig.race.tick()
+        #expect(rig.race.isBeforeGun)
+        rig.link.tick = 2 * Race.tickRate
+        rig.race.tick()
+        #expect(!rig.race.isBeforeGun)
+        rig.race.home()
+        await rig.race.leaving?.value
+        await rig.settle()
+        #expect(rig.race.isFollowing, "a race she was at the gun of isn't followed to its close")
+
+        var closed = SequenceRig.closedReport
+        closed.results.rows = closed.results.rows.map { row in
+            var row = row
+            if row.seat == closed.seat { row.code = .dsq; row.finishTick = nil }
+            return row
+        }
+        rig.session.last = LastRace(report: closed, rating: SequenceRig.rated(-12))
+        rig.session.push(SequenceRig.rated(-12))
+        await rig.settle()
+        let kept = try #require(rig.model.lastRace)
+        #expect(kept.myRow?.result == .dsq && kept.isFinal)
+        #expect(kept.ratingBadge?.spoken == "Rating minus 12")
+        #expect(!rig.race.isFollowing)
+    }
+
     /// A leave before the gun gives the race away: nothing follows it, and its push changes nothing.
     @Test func briefingLeaveFollowsNothing() async {
         let rig = SequenceRig()

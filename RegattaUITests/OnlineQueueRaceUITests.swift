@@ -347,19 +347,12 @@ final class OnlineQueueRaceUITests: XCTestCase {
         XCTAssertFalse(mine?.contains("Bot") ?? false, "her own boat is listed as a bot: \(mine ?? "")")
         XCTAssertTrue(app.staticTexts["race-clock"].waitForExistence(timeout: 60), "no race clock on the water")
 
-        // #163, the ticket's "rating push arrives while queued": past the gun she leaves the race (RET, rated: two
-        // humans were at the gun), and queues again. The close, 30 s after the gun, pushes her rating change, and
+        // #163, the ticket's "rating push arrives while queued": past the gun she leaves the race (RET; or, a bot having
+        // got her disqualified in the sequence, the results' Home: rated either way, two humans were at the gun), and
+        // queues again. The close, 30 s after the gun, pushes her rating change, and
         // Home's Last race shows it while the queue bar is up.
         try await waitForTheGun(app)
-        let menu = app.buttons["race-pause"]
-        XCTAssertTrue(menu.waitForExistence(timeout: 10), "no menu button on the race")
-        menu.tap()
-        let leave = app.buttons["pause-leave"]
-        XCTAssertTrue(leave.waitForExistence(timeout: 10), "no Leave race in the race menu")
-        leave.tap()
-        let confirm = app.buttons["race-leave-confirm-leave"]
-        XCTAssertTrue(confirm.waitForExistence(timeout: 10), "Leave race didn't ask")
-        confirm.tap()
+        leaveAfterTheGun(app)
         XCTAssertTrue(app.otherElements["race-viewport"].waitForNonExistence(timeout: 15), "Leave left the race up")
         waitForRaceOnlineOpen(app, "after leaving after the gun")
         joinTheQueue(app)
@@ -369,8 +362,33 @@ final class OnlineQueueRaceUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter().wait(for: [rated], timeout: 60), .completed,
                        "no rating badge on the Last race row while queued: \(row.exists ? row.label : "no row")")
         XCTAssertTrue(element(app, "queue-bar").exists, "the badge landed after the queue bar went")
-        // Retired against Dev 7001, who sailed on: she lost rating.
+        // Retired (or disqualified) against Dev 7001, who sailed on: she lost rating.
         XCTAssertTrue(row.label.contains("Rating minus"), "the retired race's badge isn't a loss: \(row.label)")
+    }
+
+    /// Her way off the water past the gun. Sitting still through the sequence she can be fouled by a bot and, owing a
+    /// turn she never sails, disqualified before the gun (CI 40049197023: "Rule 12 against you, DSQ" at -0:25): then
+    /// her race is done, the results are up over it, and the race menu has no Leave (`RaceView` shows no online menu
+    /// once she is done). Their Home is her way out, the one the app gives her. Past the gun either way she was at it,
+    /// so the race is rated, and she placed behind Dev 7001, who sails on: RET by the menu's Leave, DSQ by Home.
+    @MainActor private func leaveAfterTheGun(_ app: XCUIApplication) {
+        let home = app.buttons["results-menu"]
+        if !home.exists {
+            let menu = app.buttons["race-pause"]
+            XCTAssertTrue(menu.waitForExistence(timeout: 10), "no menu button on the race")
+            menu.tap()
+            // A DSQ near the gun brings the results a few seconds later, and takes the menu down.
+            let either = app.buttons.matching(NSPredicate(format: "identifier IN %@", ["pause-leave", "results-menu"])).firstMatch
+            XCTAssertTrue(either.waitForExistence(timeout: 10), "neither Leave race in the race menu nor her results")
+        }
+        if home.exists {
+            home.tap()
+            return
+        }
+        app.buttons["pause-leave"].tap()
+        let confirm = app.buttons["race-leave-confirm-leave"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 10), "Leave race didn't ask")
+        confirm.tap()
     }
 
     /// The race clock (its value is the race tick) 2 s past the gun or more: a leave now is a retirement.
