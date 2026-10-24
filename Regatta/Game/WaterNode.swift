@@ -17,6 +17,16 @@ struct WaterWorld {
     /// The tick's wind, for the pressure (#289): `WindSampler.pressureFactor(at:)`, and the pressure field's
     /// state for the tuning overlay. Nil where the race doesn't hold the key yet, or in a test drawing none.
     var sampler: WindSampler? = nil
+    /// #604 probe look F: the hulls, for the wave curls round them and along their wakes.
+    var hulls: [WaterHull] = []
+}
+
+/// #604 probe: a hull as the water sees it (metres, compass radians, m/s).
+struct WaterHull {
+    var position: Vec2
+    var heading: Double
+    var speed: Double
+    var length: Double
 }
 
 extension WaterWorld {
@@ -27,6 +37,10 @@ extension WaterWorld {
         let sampler = world.windSampler
         self.init(wind: { sampler?.sample($0) }, courseWind: world.courseWind, puffs: world.puffs,
                   conditions: world.conditions, time: world.time, sampler: sampler)
+        if WaterLook.current == .f {
+            let length = world.boatClass.hull.length
+            hulls = world.boats.map { WaterHull(position: $0.position, heading: $0.heading, speed: $0.speed, length: length) }
+        }
     }
 }
 
@@ -34,7 +48,9 @@ extension WaterWorld {
 /// on the ripple, a depth gradient under the shallows); B cat's paws (the ripple follows the wind it lies in);
 /// C swell (long low crests rolling downwind under the ripple, foam along them). PROBE: never merged.
 nonisolated enum WaterLook: String {
-    case none, a, b, c
+    case none, a, b, c, d, e, f
+    /// Round 2's stylized looks: D toon crests, E painterly bands, F wave curls. They replace the ripple.
+    var isStylized: Bool { self == .d || self == .e || self == .f }
     static let current: WaterLook = {
         #if DEBUG
         // `LaunchOptions` validates `-water`; read here off the arguments, as the look is wanted off the main actor.
@@ -135,6 +151,11 @@ final class WaterNode: SKNode {
     /// Look B: each lattice tile's streak scroll, tile heights, so a streak in a puff runs ahead of the lattice.
     private var scrolls: [RippleLattice.Index: Double] = [:]
     private var tileNodes: [Tile] = []
+    /// Looks D, E, F: one sprite over the view, its shader drawing the look in world coordinates.
+    private let styledSprite = SKSpriteNode()
+    /// Look F: the curls round the hulls and along the wakes.
+    private let wakeLayer = SKNode()
+    private var wakeNodes: [SKSpriteNode] = []
 
     /// The size a streak tile's texture is drawn for: `style.rippleSpacing` scales it from here.
     private static let tileSize = 96.0
@@ -171,6 +192,15 @@ final class WaterNode: SKNode {
             swellSprite.color = .white
             addChild(swellSprite)
         }
+        if WaterLook.current.isStylized {
+            // E's bands lie under the puffs; D's crests and F's curls over them.
+            styledSprite.zPosition = WaterLook.current == .e ? -0.5 : 0.5
+            styledSprite.shader = Self.styledShader
+            styledSprite.color = .white
+            addChild(styledSprite)
+            wakeLayer.zPosition = 0.7
+            addChild(wakeLayer)
+        }
         addChild(puffLayer)
         addChild(rippleLayer)
         addChild(overlayLines)
@@ -186,6 +216,8 @@ final class WaterNode: SKNode {
         updateRipple(world, view: view, dt: dt)
         updatePuffs(world.puffs)
         updateSwell(world, view: view)
+        updateStyled(world, view: view)
+        updateWake(world, view: view)
         updateOverlay(world, view: view)
     }
 
@@ -280,6 +312,16 @@ final class WaterNode: SKNode {
             drift = CGPoint(x: drift.x + downwind.x, y: drift.y + downwind.y)
         }
 
+        if WaterLook.current.isStylized {
+            // The stylized looks draw their own ripple and foam.
+            streaks.removeAll(keepingCapacity: true)
+            whitecaps.removeAll(keepingCapacity: true)
+            for tile in tileNodes where !tile.streak.isHidden || !tile.cap.isHidden {
+                tile.streak.isHidden = true
+                tile.cap.isHidden = true
+            }
+            return
+        }
         let (lattice, tileScale) = RippleLattice.forView(style: style, cameraScale: view.spreadScale)
         let (columns, rows) = lattice.indices(covering: view.rect, drift: drift)
         let count = columns.count * rows.count
@@ -343,7 +385,7 @@ final class WaterNode: SKNode {
                     // Whitecaps bias toward the puffs and leave the lulls.
                     tileShare = min(share * (1 + 2.5 * gust), 0.9)
                     if share == 0, puff > 0.6 { tileShare = 0.15 * (puff - 0.6) / 0.4 }
-                case .none, .c:
+                case .none, .c, .d, .e, .f:
                     break
                 }
                 updateWhitecap(tile, at: index, share: max(tileShare, 0), time: world.time, period: period)
@@ -444,7 +486,7 @@ final class WaterNode: SKNode {
 
     private static let lookShader: SKShader = {
         switch WaterLook.current {
-        case .none, .c: return waveShader
+        case .none, .c, .d, .e, .f: return waveShader
         case .a: return glitterShader
         case .b: return catspawShader
         }
@@ -570,6 +612,388 @@ final class WaterNode: SKNode {
         Self.swellFoam.floatValue = Float(((knots - 6) / 12).clamped(to: 0...1))
     }
 
+    // MARK: - #604 round 2: stylized looks (D toon crests, E painterly bands, F wave curls)
+
+    /// The styled sprite's frame (as the swell's): its centre in its own downwind-up axes, its size, its turn as
+    /// (cos, sin); world points per screen point, so the look keeps its size on screen; the roll downwind, world
+    /// points a second; the conditions' foam, 0…1.
+    private static let styledOrigin = SKUniform(name: "u_origin", vectorFloat2: .zero)
+    private static let styledSize = SKUniform(name: "u_size", vectorFloat2: .zero)
+    private static let styledRot = SKUniform(name: "u_rot", vectorFloat2: SIMD2(1, 0))
+    private static let styledScale = SKUniform(name: "u_scale", float: 1)
+    private static let styledRoll = SKUniform(name: "u_roll", float: 0)
+    private static let styledFoam = SKUniform(name: "u_foam", float: 0)
+    /// The gust map: how much more (lighter) or less wind than the course wind lies under the view, a texel a
+    /// sample, 0.5 at the course wind; its world rect as origin and size.
+    private static let gustMap = SKUniform(name: "u_gust", texture: WaterNode.flatGustTexture)
+    private static let gustOrigin = SKUniform(name: "u_gust_origin", vectorFloat2: .zero)
+    private static let gustSize = SKUniform(name: "u_gust_size", vectorFloat2: SIMD2(1, 1))
+    private static let gustColumns = 40
+    private static let flatGustTexture: SKTexture = {
+        let bytes = [UInt8](repeating: 128, count: 4 * 4)
+        return gustTexture(bytes: bytes, side: 2)
+    }()
+
+    /// Rows top first, as `texture(pixels:count:alpha:)` makes them.
+    private static func gustTexture(bytes: [UInt8], side: Int) -> SKTexture {
+        let provider = CGDataProvider(data: Data(bytes) as CFData)
+        let space = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+        guard let provider, let image = CGImage(
+            width: side, height: side, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: side * 4, space: space,
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue), provider: provider,
+            decode: nil, shouldInterpolate: true, intent: .defaultIntent
+        ) else { preconditionFailure("couldn't make the gust map") }
+        let texture = SKTexture(cgImage: image)
+        texture.filteringMode = .linear
+        return texture
+    }
+
+    /// Shared by D, E and F: hashes, noise, the gust map, the octaves that keep a pattern its size on screen, and
+    /// a premultiplied "over".
+    private static let styledPrelude = """
+    float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    float vnoise(vec2 p) {
+        vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+        float a = h21(i), b = h21(i + vec2(1.0, 0.0)), c = h21(i + vec2(0.0, 1.0)), d = h21(i + vec2(1.0, 1.0));
+        return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+    }
+    float cover(float d, float w) { return clamp(w - d + 0.5, 0.0, 1.0); }
+    vec4 over(vec4 under, vec3 rgb, float a) { return vec4(rgb * a, a) + under * (1.0 - a); }
+    float capsule(vec2 d, float halfLength, float halfWidth) {
+        return cover(length(vec2(max(abs(d.x) - halfLength, 0.0), d.y)), halfWidth);
+    }
+    """
+
+    private static func styledMain(_ look: String) -> String {
+        """
+        void main() {
+            vec2 q = (v_tex_coord - 0.5) * u_size;
+            vec2 p = u_origin + q;
+            vec2 w = vec2(p.x * u_rot.x - p.y * u_rot.y, p.x * u_rot.y + p.y * u_rot.x);
+            vec2 guv = clamp((w - u_gust_origin) / u_gust_size, 0.0, 1.0);
+            float g = texture2D(u_gust, guv).r * 2.0 - 1.0;
+            float lev = log2(max(u_scale, 0.001));
+            float k = floor(lev);
+            float f = smoothstep(0.35, 0.65, lev - k);
+            float s0 = exp2(k);
+            vec3 U = vec3(u_clock, u_roll, u_foam);
+            vec4 c0 = \(look)(p / s0, s0, g, U);
+            vec4 c1 = \(look)(p / (2.0 * s0), 2.0 * s0, g, U);
+            gl_FragColor = mix(c0, c1, f);
+        }
+        """
+    }
+
+    /// D, toon crests: hard-edged crescent crest strokes (a light crest over a darker trough), broken ends,
+    /// rolling downwind; more, longer and bolder in puffs, few and thin in lulls; foam as short bold dashes
+    /// across the wind. Units: screen points at the octave.
+    private static let toonSource = """
+    vec4 toon(vec2 pp, float s, float g, vec3 U) {
+        float puff = max(g, 0.0);
+        float lull = max(-g, 0.0);
+        vec4 col = vec4(0.0);
+        vec2 m = pp - vec2(0.0, U.x * U.y / s);
+        float lam = 78.0;
+        float rowRaw = floor(m.y / lam);
+        float y = m.y + 12.0 * sin(m.x / 95.0 + rowRaw * 1.7);
+        float row = floor(y / lam);
+        float ly = y - row * lam;
+        float segL = 150.0 + 90.0 * h21(vec2(row, 1.0));
+        float xs = m.x + h21(vec2(row, 3.0)) * segL;
+        float cell = floor(xs / segL);
+        float t = xs / segL - cell;
+        float hc = h21(vec2(cell, row));
+        float present = step(hc, 0.42 + 0.45 * puff - 0.32 * lull);
+        float a0 = 0.04 + 0.22 * h21(vec2(cell, row + 7.0));
+        float a1 = 0.70 + 0.26 * h21(vec2(cell, row + 11.0));
+        float u = (t - a0) / (a1 - a0);
+        float inside = step(0.0, u) * step(u, 1.0);
+        float gap = 1.0 - step(0.74, u) * step(u, 0.80) - step(0.12, u) * step(u, 0.15) * step(0.5, hc * 2.0);
+        float taper = pow(clamp(sin(3.14159 * clamp(u, 0.0, 1.0)), 0.0, 1.0), 0.7);
+        float bend = 34.0 * (u - 0.5) * (u - 0.5) - 4.0;
+        float dy = ly - (lam * 0.5 - bend);
+        float wl = (2.4 + 2.2 * puff - 1.0 * lull) * taper;
+        float wd = (3.2 + 2.5 * puff - 1.5 * lull) * taper;
+        float on = present * inside * gap;
+        float dark = on * cover(abs(dy + wl + wd + 0.5), wd);
+        float light = on * cover(abs(dy), wl);
+        col = over(col, vec3(0.0, 0.14, 0.26), 0.55 * dark);
+        col = over(col, vec3(0.66, 0.84, 0.93), 0.85 * light);
+        float fc = 44.0;
+        vec2 fcp = m / fc;
+        vec2 fcell = floor(fcp);
+        float ph = U.x / 2.6 + h21(fcell + 5.0);
+        float cyc = floor(ph);
+        float age = ph - cyc;
+        float hf = h21(fcell + cyc * 17.0);
+        float share = clamp(0.03 + 0.15 * U.z + 0.45 * puff - 0.4 * lull, 0.0, 0.6);
+        vec2 at = (0.25 + 0.5 * vec2(h21(fcell + cyc + 3.1), h21(fcell + cyc + 7.7))) * fc;
+        vec2 d = (fcp - fcell) * fc - at;
+        float fl = 8.0 + 4.0 * puff;
+        vec2 fd = d + vec2(0.0, 3.0 * age);
+        fd.y -= 0.05 * fd.x * fd.x;
+        float ft = clamp(1.0 - pow(abs(fd.x) / (fl + 2.0), 2.0), 0.0, 1.0);
+        float dash = step(hf, share) * step(abs(fd.x), fl + 2.0) * cover(abs(fd.y), 2.6 * ft * (1.0 - 0.4 * age));
+        col = over(col, vec3(0.93, 0.97, 1.0), 0.95 * dash * (1.0 - age * age));
+        return col;
+    }
+    """
+
+    /// E, painterly bands: the water posterised into four flat bands (OKLab steps round the water) that undulate
+    /// and drift, each edge a crisp light line; the ripple as short bold ticks along the wind, darker and denser
+    /// in puffs, few and pale in lulls.
+    private static let bandsSource = """
+    vec4 bands(vec2 pp, float s, float g, vec3 U) {
+        float puff = max(g, 0.0);
+        float lull = max(-g, 0.0);
+        vec4 col = vec4(0.0);
+        vec2 b = pp / 300.0;
+        float n = 0.65 * vnoise(b + vec2(0.0, -U.x * 0.015)) + 0.35 * vnoise(b * 2.3 + vec2(U.x * 0.012, 3.0));
+        n += 0.035 * sin(pp.y / 46.0 + pp.x / 140.0 + U.x * 0.6);
+        n = clamp((n - 0.5) * 2.2 + 0.5, 0.0, 0.999);
+        float lvl = floor(n * 4.0);
+        float edge = abs(n * 4.0 - floor(n * 4.0 + 0.5));
+        vec3 c0 = vec3(0.26, 0.52, 0.64);
+        vec3 c1 = vec3(0.17, 0.41, 0.55);
+        vec3 c3 = vec3(0.05, 0.26, 0.42);
+        if (lvl < 0.5) { col = over(col, c0, 0.40); }
+        else if (lvl < 1.5) { col = over(col, c1, 0.36); }
+        else if (lvl > 2.5) { col = over(col, c3, 0.30); }
+        float line = (1.0 - smoothstep(0.022, 0.04, edge)) * step(0.02, n) * step(n, 0.98);
+        col = over(col, vec3(0.30, 0.55, 0.68), 0.25 * line);
+        float tc = 40.0;
+        vec2 m = pp - vec2(0.0, U.x * U.y / s);
+        vec2 tcp = m / tc;
+        vec2 cell = floor(tcp);
+        float h = h21(cell);
+        float present = step(h, 0.28 + 0.55 * puff - 0.4 * lull);
+        vec2 at = (0.2 + 0.6 * vec2(h21(cell + 3.1), h21(cell + 7.7))) * tc;
+        vec2 d = (tcp - cell) * tc - at;
+        float ta = (h21(cell + 5.3) - 0.5) * 0.6;
+        d = vec2(d.x * cos(ta) - d.y * sin(ta), d.x * sin(ta) + d.y * cos(ta));
+        float tl = 6.0 + 4.0 * puff;
+        float tt = clamp(0.5 - 0.5 * d.y / tl, 0.0, 1.0);
+        float tick = present * step(abs(d.y), tl) * cover(abs(d.x + 0.04 * d.y * d.y), (0.6 + 2.6 * tt) * (1.0 + 0.3 * puff));
+        vec3 tint = mix(vec3(0.36, 0.60, 0.74), vec3(0.0, 0.14, 0.27), smoothstep(0.05, 0.4, puff));
+        col = over(col, tint, (0.55 + 0.3 * puff) * tick);
+        return col;
+    }
+    """
+
+    /// F, wave curls: bold white curls (a tapered tail and a spiral), scattered by a world hash, drifting
+    /// downwind, each drawn on, held and faded on its own cycle; more and bigger in puffs, rare in lulls; sun
+    /// patches anchored to the water, flat and crisp, with twinkling stars.
+    private static let curlsSource = """
+    float curl(vec2 d, float r, float reveal) {
+        float tailL = 2.4 * r;
+        float hw = 0.24 * r;
+        float tx = clamp(-d.x / tailL, 0.0, 1.0);
+        float tail = step(-tailL, d.x) * step(d.x, 0.0) * cover(abs(d.y + r), hw * pow(1.0 - tx, 0.6) + 0.3);
+        float a = atan(d.y, d.x);
+        float phi = mod(a + 1.5707963, 6.2831853);
+        float phiMax = 5.0 * reveal;
+        float rs = r * (1.0 - 0.42 * phi / 6.2831853);
+        float spiral = step(phi, phiMax) * cover(abs(length(d) - rs), hw * (1.0 - 0.6 * phi / 5.0) + 0.3);
+        return max(tail, spiral);
+    }
+    vec4 curls(vec2 pp, float s, float g, vec3 U) {
+        float puff = max(g, 0.0);
+        float lull = max(-g, 0.0);
+        vec4 col = vec4(0.0);
+        float sc = 560.0;
+        vec2 scp = pp / sc;
+        vec2 scell = floor(scp);
+        float hs = h21(scell + 41.0);
+        vec2 sat = (0.3 + 0.4 * vec2(h21(scell + 2.3), h21(scell + 5.9))) * sc;
+        vec2 sd = (scp - scell) * sc - sat;
+        float sr = length(sd / vec2(170.0, 110.0)) + 0.18 * vnoise(sd / 40.0 + 9.0);
+        float patch = step(hs, 0.45);
+        col = over(col, vec3(0.42, 0.66, 0.80), patch * 0.30 * cover(sr * 120.0, 120.0));
+        col = over(col, vec3(0.62, 0.82, 0.92), patch * 0.30 * cover(sr * 120.0, 70.0));
+        vec2 stp = pp / 26.0;
+        vec2 stc = floor(stp);
+        float hst = h21(stc + 13.0);
+        float tw = pow(0.5 + 0.5 * sin(U.x * (2.0 + 3.0 * hst) + hst * 40.0), 3.0);
+        vec2 sv = (stp - stc - 0.5) * 26.0;
+        float size = 7.0 * tw;
+        float star = max(cover(abs(sv.x) + 5.0 * abs(sv.y), size), cover(abs(sv.y) + 5.0 * abs(sv.x), size));
+        col = over(col, vec3(1.0), patch * step(hst, 0.35) * step(sr, 0.85) * star);
+        vec2 m = pp - vec2(0.0, U.x * U.y / s);
+        float cc = 110.0;
+        vec2 ccp = m / cc;
+        vec2 cell = floor(ccp);
+        float ph = U.x / 5.0 + h21(cell + 1.7);
+        float cyc = floor(ph);
+        float age = ph - cyc;
+        float h = h21(cell + cyc * 19.0);
+        float share = clamp(0.2 + 0.6 * puff - 0.18 * lull, 0.0, 0.9);
+        float r = (10.0 + 6.0 * h21(cell + cyc + 4.4)) * (1.0 + 0.7 * puff);
+        vec2 at = (0.3 + 0.4 * vec2(h21(cell + cyc + 3.1), h21(cell + cyc + 7.7))) * cc;
+        vec2 d = (ccp - cell) * cc - at;
+        float ang = (h21(cell + cyc + 9.2) - 0.5) * 0.7;
+        d = vec2(d.x * cos(ang) - d.y * sin(ang), d.x * sin(ang) + d.y * cos(ang));
+        if (h21(cell + cyc + 6.1) < 0.5) { d.x = -d.x; }
+        float c = step(h, share) * curl(d, r, smoothstep(0.0, 0.3, age));
+        col = over(col, vec3(0.97, 0.99, 1.0), c * (1.0 - smoothstep(0.8, 1.0, age)));
+        return col;
+    }
+    """
+
+    private static let styledShader: SKShader = {
+        let (body, name): (String, String) = switch WaterLook.current {
+        case .d: (toonSource, "toon")
+        case .e: (bandsSource, "bands")
+        default: (curlsSource, "curls")
+        }
+        return SKShader(source: styledPrelude + body + styledMain(name),
+                        uniforms: [waveClock, styledOrigin, styledSize, styledRot, styledScale, styledRoll, styledFoam,
+                                   gustMap, gustOrigin, gustSize])
+    }()
+
+    /// D, E, F's puffs and lulls: posterised to two flat tones with a crisp, stronger rim, a cel version of
+    /// today's gradient. `v_color_mix` comes premultiplied by the sprite's alpha.
+    private static let flatPuffShader = SKShader(source: """
+    void main() {
+        float t = texture2D(u_texture, v_tex_coord).a;
+        float outer = smoothstep(0.16, 0.19, t);
+        float inner = smoothstep(0.52, 0.55, t);
+        float rim = outer * (1.0 - smoothstep(0.215, 0.235, t));
+        float k = min(0.75 * outer + 0.45 * inner + 0.6 * rim, 1.4);
+        gl_FragColor = min(v_color_mix * k, vec4(1.0));
+    }
+    """)
+
+    /// Looks D, E, F: the styled sprite covers the view, turned so its up is the course wind's downwind; the gust
+    /// map is sampled over the view each frame.
+    private func updateStyled(_ world: WaterWorld, view: WaterView) {
+        guard WaterLook.current.isStylized else { return }
+        guard let course = world.courseWind else {
+            styledSprite.isHidden = true
+            return
+        }
+        styledSprite.isHidden = false
+        let rect = view.rect
+        let side = hypot(rect.width, rect.height) * 1.2
+        let rotation = CGFloat(-(course.direction + .pi))
+        styledSprite.size = CGSize(width: side, height: side)
+        styledSprite.position = CGPoint(x: rect.midX, y: rect.midY)
+        styledSprite.zRotation = rotation
+        let c = cos(-rotation), s = sin(-rotation)
+        Self.styledOrigin.vectorFloat2Value = SIMD2(Float(rect.midX * c - rect.midY * s), Float(rect.midX * s + rect.midY * c))
+        Self.styledSize.vectorFloat2Value = SIMD2(Float(side), Float(side))
+        Self.styledRot.vectorFloat2Value = SIMD2(Float(cos(rotation)), Float(sin(rotation)))
+        Self.styledScale.floatValue = Float(view.scale)
+        let mean = Whitecaps.meanWind(of: world.conditions)
+        Self.styledRoll.floatValue = Float(0.25 * mean * pointsPerMeter)
+        let knots = RegattaCore.knots(metresPerSecond: mean)
+        Self.styledFoam.floatValue = Float(((knots - 6) / 12).clamped(to: 0...1))
+
+        // The gust map over the view's rect, its first row the top.
+        let n = Self.gustColumns
+        var bytes = [UInt8](repeating: 128, count: n * n * 4)
+        for row in 0..<n {
+            let y = Double(rect.maxY) - (Double(row) + 0.5) / Double(n) * Double(rect.height)
+            for column in 0..<n {
+                let x = Double(rect.minX) + (Double(column) + 0.5) / Double(n) * Double(rect.width)
+                let wind = world.wind(Vec2(x, y) / pointsPerMeter)
+                let g = Self.gust(local: wind, course: course)
+                let v = UInt8(((g * 0.5 + 0.5) * 255).rounded().clamped(to: 0...255))
+                let k = (row * n + column) * 4
+                bytes[k] = v
+                bytes[k + 1] = v
+                bytes[k + 2] = v
+                bytes[k + 3] = 255
+            }
+        }
+        Self.gustMap.textureValue = Self.gustTexture(bytes: bytes, side: n)
+        Self.gustOrigin.vectorFloat2Value = SIMD2(Float(rect.minX), Float(rect.minY))
+        Self.gustSize.vectorFloat2Value = SIMD2(Float(rect.width), Float(rect.height))
+    }
+
+    /// Look F: curls along each hull's wake, both sides, opening out and fading as they fall astern, and a pair
+    /// at the bow; sized with the hull, never under a few screen points.
+    private func updateWake(_ world: WaterWorld, view: WaterView) {
+        guard WaterLook.current == .f else { return }
+        var n = 0
+        func next() -> SKSpriteNode {
+            if n == wakeNodes.count {
+                let node = SKSpriteNode(texture: Self.curlTexture)
+                node.zPosition = DrawOrder.z(wakeNodes.count)
+                wakeLayer.addChild(node)
+                wakeNodes.append(node)
+            }
+            let node = wakeNodes[n]
+            n += 1
+            node.isHidden = false
+            return node
+        }
+        let rect = view.rect.insetBy(dx: -200, dy: -200)
+        let minSize = 22 * view.scale
+        for hull in world.hulls where hull.speed > 0.4 {
+            let centre = CGPoint(x: hull.position.x * pointsPerMeter, y: hull.position.y * pointsPerMeter)
+            guard rect.contains(centre) else { continue }
+            let forward = Vec2.heading(hull.heading)
+            let right = Vec2(forward.y, -forward.x)
+            let stern = hull.position - forward * (hull.length / 2)
+            let spacing = hull.length * 0.8
+            let phase = (world.time * hull.speed).truncatingRemainder(dividingBy: spacing)
+            let life = 3.0
+            let boost = min(hull.speed / 4, 1.5)
+            for k in 0..<4 {
+                let along = Double(k) * spacing + phase
+                let age = along / hull.speed
+                guard age < life else { break }
+                for side in [-1.0, 1.0] {
+                    let across = side * (hull.length * 0.2 + 0.5 * age * boost)
+                    let at = stern - forward * along + right * across
+                    let node = next()
+                    node.position = CGPoint(x: at.x * pointsPerMeter, y: at.y * pointsPerMeter)
+                    let size = max(CGFloat(hull.length * (0.7 + 0.25 * age) * pointsPerMeter), minSize)
+                    node.size = CGSize(width: size, height: size)
+                    node.xScale = CGFloat(side)
+                    node.zRotation = CGFloat(-hull.heading)
+                    node.alpha = CGFloat(0.95 * (1 - age / life) * min(boost * 1.5, 1))
+                }
+            }
+            for side in [-1.0, 1.0] where hull.speed > 3.5 {
+                let at = hull.position + forward * (hull.length * 0.35) + right * (side * hull.length * 0.22)
+                let node = next()
+                node.position = CGPoint(x: at.x * pointsPerMeter, y: at.y * pointsPerMeter)
+                let size = max(CGFloat(hull.length * 0.55 * pointsPerMeter), minSize * 0.8)
+                node.size = CGSize(width: size, height: size)
+                node.xScale = CGFloat(side)
+                node.zRotation = CGFloat(-hull.heading)
+                node.alpha = CGFloat(0.9 * min(boost, 1))
+            }
+        }
+        for node in wakeNodes[n...] where !node.isHidden { node.isHidden = true }
+    }
+
+    /// A wave curl for the wakes: its tail runs aft (down the texture) into a spiral that curls outboard (+x)
+    /// over the top and in.
+    private static let curlTexture: SKTexture = {
+        texture(pixels: 96) { u, v in
+            let x = u, y = -v
+            let cx = 0.32, cy = 0.5, r = 0.34, hw = 0.09
+            func cover(_ d: Double, _ w: Double) -> Double { ((w - d) / 0.03 + 0.5).clamped(to: 0...1) }
+            var a = 0.0
+            let tailX = cx - r
+            if y < cy, y > -0.95 {
+                let t = (cy - y) / (cy + 0.95)
+                a = cover(abs(x - (tailX - 0.25 * t * t)), hw * pow(1 - t, 0.7))
+            }
+            let dx = x - cx, dy = y - cy
+            var q = (.pi - atan2(dy, dx)).truncatingRemainder(dividingBy: 2 * .pi)
+            if q < 0 { q += 2 * .pi }
+            if q < 4.2 {
+                let rs = r * (1 - 0.4 * q / (2 * .pi))
+                a = max(a, cover(abs((dx * dx + dy * dy).squareRoot() - rs), hw * (1 - 0.6 * q / 4.2)))
+            }
+            return a
+        }
+    }()
+
+
     private func makeTile() -> Tile {
         // A z each, from its slot (`DrawOrder`; a view takes a few hundred): a frame gives the slots out in
         // lattice order, so the same view draws its tiles in the same order whatever the pool held before. The
@@ -596,6 +1020,7 @@ final class WaterNode: SKNode {
         while puffNodes.count < puffs.count {
             let node = SKSpriteNode(texture: puffTexture)
             node.colorBlendFactor = 1
+            if WaterLook.current.isStylized { node.shader = Self.flatPuffShader }
             // A z each keeps overlapping puffs and lulls in one order (`DrawOrder`).
             node.zPosition = DrawOrder.z(puffNodes.count)
             puffLayer.addChild(node)
