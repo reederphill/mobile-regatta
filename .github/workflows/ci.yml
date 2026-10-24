@@ -182,6 +182,8 @@ jobs:
               - "RegattaUITests/OnlineAccountUITests.swift"
               # The real queue and the race it leads to (#162).
               - "RegattaUITests/OnlineQueueRaceUITests.swift"
+              # Delete my online data (#166).
+              - "RegattaUITests/OnlineDeletionUITests.swift"
               - "scripts/e2e.sh"
             # What shapes the race view in the window (G5): the iPad's letterbox test runs only for these.
             viewport:
@@ -514,7 +516,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.online == 'true'
     runs-on: macos-26
-    timeout-minutes: 55
+    # 41 minutes on main before #166's delete phase (a queue race, a deletion and a relaunch, about 5 more).
+    timeout-minutes: 65
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
       TEST_RUNNER_CI: "true"
@@ -527,7 +530,7 @@ jobs:
       # The server's accounts live in Postgres (#161); macOS runners have no Docker, so Homebrew's.
       - name: Install Postgres
         run: brew list postgresql@17 > /dev/null 2>&1 || HOMEBREW_NO_AUTO_UPDATE=1 brew install postgresql@17
-      - name: scripts/e2e.sh (an instant race; the account and a terms bump; the queue to the close, rejoin, a second person, a killed server)
+      - name: scripts/e2e.sh (an instant race; the account and a terms bump; the queue to the close, rejoin, a second person, a killed server; Delete my online data)
         run: |
           scripts/e2e.sh -retry-tests-on-failure -test-iterations 2 \
             -derivedDataPath DerivedData -resultBundlePath E2E.xcresult
@@ -542,4 +545,5 @@ jobs:
             E2E-race.xcresult
             E2E-pair.xcresult
             E2E-kill.xcresult
+            E2E-delete.xcresult
           if-no-files-found: ignore

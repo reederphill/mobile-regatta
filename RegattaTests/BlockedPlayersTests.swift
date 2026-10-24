@@ -42,9 +42,9 @@ import Testing
         #expect(list.players.isEmpty && list.state != .loaded([]))
     }
 
-    /// Delete my online data's seam (#166) leaves today's notice until the deletion service fills it.
-    @Test func deletionSeamDefaultsToTheNotice() async {
-        #expect(await SettingsView.deletionArrivesLater() == "Deleting online data arrives with online accounts.")
+    /// Delete my online data with no services (#166): a signed-out player's answer, and no dialog.
+    @Test func deletionWithNoServicesAsksForASignIn() async {
+        #expect(await OnlineDataDeleter.unconnected.prepare() == .notice(OnlineDataDeleter.Notice.notSignedIn))
     }
 }
 

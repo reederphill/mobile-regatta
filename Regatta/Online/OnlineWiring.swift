@@ -15,14 +15,17 @@ extension OnlineEndpoint {
 }
 
 extension ServiceSet {
-    /// The services the online session carries (#161, #162) in place of this set's: identity, the terms, the queue, the
-    /// race session and the profile. The rest stay as they are until their tickets (#163-#166).
+    /// The services the online session carries (#161, #162, #166) in place of this set's: identity, the terms, the
+    /// queue, the race session, the profile, usage analytics and Delete my online data. The rest stay as they are
+    /// until their tickets.
     nonisolated mutating func adopt(_ session: OnlineSession) {
         identity = session.identity
         terms = session.terms
         queue = session.queue
         raceSession = session.raceSession
         profile = session.profile
+        analytics = session.analytics
+        deletion = session.deletion
     }
 }
 

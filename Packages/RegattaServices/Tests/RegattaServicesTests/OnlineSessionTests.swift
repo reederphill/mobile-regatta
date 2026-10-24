@@ -485,6 +485,45 @@ extension OnlineSessionTests {
         #expect(TermsPrompt(status: nil, bundled: bundled) == .none)
     }
 
+    /// #166 (O1, T3): once her online data is deleted she is held: no session opens for her through the foreground, the
+    /// path or a relaunch (a new session over the same hold store) until she signs in herself. The link closed with no
+    /// sign-out (the server's session is gone) and her token went. Another player on the device isn't held.
+    @Test func aDeletedPlayerIsHeldIdleUntilSheSignsIn() async {
+        let rig = SessionRig()
+        await rig.opened()
+        await rig.session.deleted()
+        #expect(await rig.session.phase == .idle)
+        #expect(await rig.session.isHeld)
+        #expect(rig.held.all == ["T:wren"])
+        #expect(rig.tokens.all == [:])
+        #expect(rig.server.events.items.contains(.closed(link: 1)))
+        #expect(rig.server.count { if case .signOut = $0 { true } else { false } } == 0)
+        #expect(rig.logs.items.last == .deleted)
+        await rig.session.setActive(false)
+        await rig.session.setActive(true)
+        await rig.session.setOnline(false)
+        await rig.session.setOnline(true)
+        #expect(await rig.session.open() == .idle)
+        #expect(rig.server.connects == 1)
+
+        // A relaunch over the same stores: nothing.
+        let relaunch = SessionRig(held: rig.held, tokenStore: rig.tokens)
+        await relaunch.session.deviceChanged(SessionRig.wren)
+        #expect(await relaunch.session.open() == .idle)
+        #expect(relaunch.server.connects == 0)
+
+        // Her own Sign in ends the hold: one connect, a fresh sign-in.
+        #expect(await relaunch.session.identity.signIn() == .signedIn(SessionRig.wren.player))
+        #expect(relaunch.server.connects == 1)
+        #expect(relaunch.server.count { $0 == .signIn(team: "T:wren") } == 1)
+        #expect(relaunch.held.all == [])
+
+        // Another player on the same device isn't held.
+        let other = SessionRig(player: SessionRig.tern, held: InMemoryHeldPlayerStore(["T:wren"]))
+        await other.opened()
+        #expect(other.server.connects == 1)
+    }
+
     @Test func theServerDecidesTheTermsThroughTheSession() async throws {
         let rig = SessionRig()
         let terms = rig.session.terms

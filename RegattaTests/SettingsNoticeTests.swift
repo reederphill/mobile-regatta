@@ -6,10 +6,10 @@ import Testing
     @Test func aNoticeWaitsForTheDialogToGo() {
         var notice = SettingsNotice()
         notice.dialogIsUp = true
-        notice.arrive("Deleting online data arrives with online accounts.")
+        notice.arrive(OnlineDataDeleter.Notice.deleted)
         #expect(notice.shown == nil, "the alert is raised while the dialog is still up")
         notice.dialogIsUp = false
-        #expect(notice.shown == "Deleting online data arrives with online accounts.")
+        #expect(notice.shown == OnlineDataDeleter.Notice.deleted)
         notice.shown = nil
         notice.dialogIsUp = true
         notice.dialogIsUp = false

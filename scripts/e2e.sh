@@ -15,6 +15,10 @@
 #      app, when the test says the app is about to join: OnlineQueueRaceUITests/testTwoHumansShareOneFleet.
 #   5. kill: the server is killed (-9) while the app is in a race and started again on the same port and database:
 #      OnlineQueueRaceUITests/testServerKilledMidRaceCancelsToHome. No retry: a second try would find no kill.
+#   6. delete (#166): the race phase's queue and race. OnlineDeletionUITests races dev player 9166 to a close, deletes
+#      her online data from Settings and relaunches; then the script reads Postgres with psql: no text column names
+#      T:dev-9166 or G:dev-9166 but data_deletions.game_player_id, race_players has a deleted: seat, and the device's
+#      analytics events grew during the phase (the real transport got batches through the gate).
 #
 #   scripts/e2e.sh [extra xcodebuild arguments, e.g. -derivedDataPath DerivedData -resultBundlePath E2E.xcresult]
 #
@@ -158,6 +162,34 @@ run_tests() {
         ${phase_arguments[@]+"${phase_arguments[@]}"}
 }
 
+# Runs one SQL statement against the run's database; prints its rows, unaligned, fields split by |.
+query() {
+    "$postgres_bin/psql" "$database_url" --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 --command "$1"
+}
+
+# The delete phase's server-side acceptance (#166, T7); exits 1 on any miss. $1 is the device-event count before it.
+check_deletion() {
+    local before=$1 failed=0 table column count after
+    # The same scan as PlayerDataStoreTests.references: every text column of every table.
+    while IFS='|' read -r table column; do
+        [[ -z "$table" || "$table.$column" == data_deletions.game_player_id ]] && continue
+        count="$(query "SELECT count(*) FROM \"$table\" WHERE \"$column\" = ANY('{T:dev-9166,G:dev-9166}')")"
+        if (( count > 0 )); then
+            echo "e2e.sh: delete: $count rows of $table.$column still name dev player 9166" >&2
+            failed=1
+        fi
+    done < <(query "SELECT table_name, column_name FROM information_schema.columns
+                    WHERE table_schema = current_schema() AND data_type = 'text' ORDER BY 1, 2")
+    count="$(query "SELECT count(*) FROM race_players WHERE player_id LIKE 'deleted:%'")"
+    echo "== delete: race_players seats held by a deleted: id: $count"
+    (( count >= 1 )) || { echo "e2e.sh: delete: no race_players seat was anonymised" >&2; failed=1; }
+    after="$(query "SELECT count(*) FROM analytics_events WHERE source = 'device'")"
+    echo "== delete: device analytics events: $before before the phase, $after after"
+    (( after > before )) || { echo "e2e.sh: delete: no device analytics arrived during the phase" >&2; failed=1; }
+    (( failed == 0 )) || exit 1
+    echo "== delete: no row names T:dev-9166 or G:dev-9166 outside data_deletions.game_player_id"
+}
+
 # Waits (ten minutes at most) until the server on port $1 has a race: a test's word that it has got that far.
 wait_for_a_race() {
     local races
@@ -245,4 +277,13 @@ run_tests kill -only-testing:RegattaUITests/OnlineQueueRaceUITests/testServerKil
 pkill -P "$killer_pid" 2>/dev/null || true
 kill "$killer_pid" 2>/dev/null || true
 killer_pid=""
+
+# 6. delete (#166): dev player 9166's queue race to the close, Delete my online data, a relaunch; then the database.
+stop_server
+start_server free QUEUE_LOCK_SECONDS=4 QUEUE_RACE_SECONDS=12 CATCH_FINISHERS=off
+device_events_before="$(query "SELECT count(*) FROM analytics_events WHERE source = 'device'")"
+echo "== delete: OnlineDeletionUITests against 127.0.0.1:$port"
+arguments_for delete
+run_tests delete -only-testing:RegattaUITests/OnlineDeletionUITests
+check_deletion "$device_events_before"
 echo "e2e.sh: passed"

@@ -13,8 +13,9 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     /// out until the real services arrive. Tests and UI tests never touch Game Center.
     ///
     /// With a service endpoint (`OnlineEndpoint`) and a device identity (Game Center, or Debug's `-devIdentity`), the
-    /// identity, the terms, the queue, the race session and the profile are the online session's (#161, #162); the
-    /// rest stay on their fakes until their tickets (#163–#166). With no endpoint nothing changes.
+    /// identity, the terms, the queue, the race session, the profile, usage analytics and Delete my online data are
+    /// the online session's (#161, #162, #166); the rest stay on their fakes until their tickets. With no endpoint
+    /// nothing changes.
     let services: ServiceSet
     /// The online session and the device identity under it, when there is an endpoint.
     let online: OnlineStatus.Session?
@@ -45,8 +46,9 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         }
         super.init()
     }
-    /// Usage analytics (#128), one for the app over its one set of `analytics.` keys: every scene logs to it. Sent at
-    /// launch and on going to the background, never during a race.
+    /// Usage analytics (#128), one for the app over its one set of `analytics.` keys: every scene logs to it. Sent as
+    /// the session comes through the terms and on going to the background, never during a race (`OnlineStatus`, #166);
+    /// at launch too, which sends nothing until a session is open (the fakes take it).
     private(set) lazy var analytics = Analytics.app(transport: services.analytics)
     private var metricKit: MetricKitForwarder?
 
@@ -104,12 +106,14 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         keys.purgeOnFreshInstall(defaults: .standard)
         let tokens = KeychainSessionTokenStore()
         tokens.purgeOnFreshInstall(defaults: .standard)
+        // Kept in the app's own defaults even under UI tests, so a relaunch after a deletion still holds her (#166).
+        let held = DefaultsHeldPlayerStore(defaults: .standard)
         let attester = ConnectionAttester(attestor: DeviceAppAttestor(), store: keys, nonce: { DeviceAppAttestor.nonce() })
         let log = Logger(subsystem: "com.phillreeder.regatta", category: "session")
         return OnlineSession(OnlineSession.Dependencies(
             connect: { try await URLSessionServiceLink.connect(to: url) }, device: device, tokens: tokens,
             sleep: { try await Task.sleep(for: $0) }, jitter: { Double.random(in: -1...1) },
-            clientBuild: OnlineLaunch.clientBuild, attester: attester,
+            clientBuild: OnlineLaunch.clientBuild, attester: attester, held: held,
             // An event names no player and carries no token or signature; private all the same.
             log: { event in log.info("session: \(String(describing: event), privacy: .private)") }))
     }
