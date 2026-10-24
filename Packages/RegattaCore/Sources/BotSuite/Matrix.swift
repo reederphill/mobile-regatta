@@ -62,6 +62,8 @@ public enum ProfileMix: String, Codable, CaseIterable, Hashable, Sendable {
     /// `--profile-mix parity --fleet-size 2`: `BotSuiteReport.parity` reports its two-boat races. Sailed only when named,
     /// never in the bundled matrix; all-National fleets, as `handling`, out of the live tiers and the skill gap.
     case parity
+    /// Probe only (#591): every seat the executor, a perfect hand, so the keep-clear margin covers no wander of her own.
+    case executor
 
     /// The profile sailing `seat` in a race of `fleetSize` boats with race seed `seed`, or nil for a live bot. Only the
     /// hunters mix reads the fleet size, but every mix needs it: a seat of the fleet.
@@ -75,6 +77,7 @@ public enum ProfileMix: String, Codable, CaseIterable, Hashable, Sendable {
             ProfileMix.isHunterSeat(seat, seed: seed, fleetSize: fleetSize) ? .hunter : nil
         case .execution: (seat + Int(seed % 2)).isMultiple(of: 2) ? .executor : .tacticianClubExecution
         case .handling: ProfileMix.handlingProfiles[(seat + Int(seed % 4)) % 4]
+        case .executor: .executor
         case .parity:
             ProfileMix.parityProfiles[fleetSize == 2 ? ProfileMix.parityDeal(seed: seed)[seat] : (seat + Int(seed % 4)) % 4]
         }
@@ -144,7 +147,7 @@ public enum ProfileMix: String, Codable, CaseIterable, Hashable, Sendable {
     public var gatesLiveTiers: Bool {
         switch self {
         case .live, .skillGap, .funPass, .execution: true
-        case .hunters, .cautious, .rivals, .rankStability, .handling, .parity: false
+        case .hunters, .cautious, .rivals, .rankStability, .handling, .parity, .executor: false
         }
     }
 
@@ -155,7 +158,7 @@ public enum ProfileMix: String, Codable, CaseIterable, Hashable, Sendable {
     public var tierMix: TierMix? {
         switch self {
         case .live, .skillGap, .funPass, .hunters, .cautious: nil
-        case .execution, .handling, .parity: .national
+        case .execution, .handling, .parity, .executor: .national
         case .rivals, .rankStability: .mixed
         }
     }
@@ -171,7 +174,7 @@ public enum ProfileMix: String, Codable, CaseIterable, Hashable, Sendable {
     /// The fun pass's numbers (#221) are for an oscillating breeze: a matrix sails it in no other conditions.
     public var conditionsID: String? {
         switch self {
-        case .live, .skillGap, .hunters, .execution, .cautious, .rivals, .rankStability, .handling, .parity: nil
+        case .live, .skillGap, .hunters, .execution, .cautious, .rivals, .rankStability, .handling, .parity, .executor: nil
         case .funPass: "classic-oscillating"
         }
     }
