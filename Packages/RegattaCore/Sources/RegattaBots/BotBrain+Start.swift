@@ -104,9 +104,11 @@ extension BotBrain {
         return line.pin.position + (line.committee.position - line.pin.position) * spotOnLine
     }
 
-    /// Her spot on the start line as she reads it, 0 the pin … 1 the committee boat (`startPoint`): the tactician's
-    /// favoured-end spot, a live bot's late end read, or her style's moved by her misread.
+    /// Her spot on the start line as she reads it, 0 the pin … 1 the committee boat (`startPoint`): the hole her gap
+    /// planner chose (#584 stage 4, `plannedSpot`), the tactician's favoured-end spot, a live bot's late end read, or her
+    /// style's moved by her misread.
     var spotOnLine: Double {
+        if let plannedSpot { return plannedSpot }
         if let favouredEndSpot { return favouredEndSpot }
         if let lateEndSpot { return lateEndSpot }
         return styleSpotOnLine

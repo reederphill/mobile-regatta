@@ -161,6 +161,15 @@ struct BotBrain: Sendable {
     /// The tactician's spot on the start line as she reads its bias (#105, `Tactics.startsAtFavouredEnd`, `readLineBias`),
     /// 0 the pin … 1 the committee boat; nil until she has read it, or for any other bot.
     var favouredEndSpot: Double?
+    /// How deep she plans her start against the fleet (#584 stage 4, `planStart`): a live bot's from the Regional band;
+    /// nil, she keeps her strategy's spot.
+    let startPlanning: StartPlanDepth?
+    /// The hole her gap planner chose (#584 stage 4, `planStart`), 0 the pin … 1 the committee boat: her spot, ahead of
+    /// every other read of it; nil before she plans.
+    var plannedSpot: Double?
+    /// When she last planned her hole, by the race clock, and how many times she has (the planner's cost).
+    var lastStartPlanTime: Double?
+    var startPlans = 0
     /// A live bot's spot on the start line as she reads its favoured end late (#276, `readEndLate`), 0 the pin … 1 the
     /// committee boat; nil until she has read it, and for the tactician (`favouredEndSpot`) or any other bot.
     var lateEndSpot: Double?
@@ -349,6 +358,7 @@ struct BotBrain: Sendable {
         self.style = style
         self.tunables = tunables
         planning = profile == nil && caution == nil ? BotPlanner.depth(skill: style.skill, tunables: tunables) : nil
+        startPlanning = profile == nil && caution == nil ? Self.startPlanDepth(skill: style.skill) : nil
         self.caution = caution
         isLive = profile == nil && caution == nil
         self.weaknesses = weaknesses ?? profile?.weaknesses(skill: style.skill)

@@ -35,6 +35,7 @@ extension BotBrain {
     mutating func startAim(_ b: SeatView.OwnBoat, _ view: SeatView) -> Aim {
         guard isLive else { return starboardHoldAim(b, view) }
         readEndLate(b, view)
+        planStart(b, view)
         switch startStrategy?.plan {
         case .starboardHold, nil:
             return starboardHoldAim(b, view)
