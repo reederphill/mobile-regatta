@@ -3,11 +3,11 @@
 /// The seeds the UI tests launch, each the first in 1...400 meeting its test's condition.
 enum SeedTable {
     /// `ResultsUITests.testSheetAppearsAbout3sAfterFinishWhileSceneRenders`: the `-demo -laps 1 -startSeconds 10` race
-    /// on which your boat finishes at least 1680 ticks (14 s at `-timescale 4`) before the close. Probed: she
-    /// finishes at tick 7710, the race closes at 9609 (ticks from the gun).
-    static let resultsSheet: UInt64 = 8
+    /// on which your boat finishes at least 3600 ticks before the close: she wins. Probed: she
+    /// finishes at tick 6970, the race closes at 10570 (ticks from the gun).
+    static let resultsSheet: UInt64 = 28
     /// The tick, from the gun, your boat finishes at on `resultsSheet`: the test watches the race clock up to it.
-    static let resultsSheetFinishTick = 7710
+    static let resultsSheetFinishTick = 6970
     /// `RaceAssemblyUITests.testPracticeRaceOnTheNewCoreReachesTheGunAndAFirstRounding`: the `-demo` launch race on which
     /// your boat starts within 60 ticks of the gun and rounds the windward mark within 4200 ticks of it, with no rule
     /// call against her. Probed: she starts at tick 33 and rounds at tick 4080.
