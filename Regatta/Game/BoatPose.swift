@@ -36,6 +36,8 @@ nonisolated struct BoatPose: Equatable, Sendable {
     /// The sail's belly, 1 for its base shape: flatter pinched, fuller footed (#219). Footed, `sailTrim` is
     /// eased too.
     var sailFullness = 1.0
+    /// Her spinnaker (#311): hidden on a ghost and on a class without one.
+    var spinnaker = SpinnakerPose.hidden
 
     /// `boat`'s pose in `boatClass`. `ease` is her held ease; `isGhost` whether she has stopped racing, as the
     /// race shows it (`Race.isGhost(seat:)`); `autohelm` what her autohelm holds (`RenderWorld.autohelm(ofSeat:)`),
@@ -47,6 +49,7 @@ nonisolated struct BoatPose: Equatable, Sendable {
         sailSide = boat.boomSide
         leeSide = BoomSide.leeward(ofRelativeWind: boat.relativeWind)
         self.isGhost = isGhost
+        spinnaker = SpinnakerPose(boat, isGhost: isGhost, boatClass: boatClass, style: style)
         guard !isGhost else {
             // Limp, amidships: she isn't sailing any more.
             sailTrim = 0
@@ -88,6 +91,11 @@ nonisolated struct BoatPose: Equatable, Sendable {
         flutter = max(flutter, Self.starved(boat, style: style) * style.starvedFlutter)
 
         self.flutter = flutter.clamped(to: 0...1)
+        if spinnaker.phase != .hidden {
+            // Never sheeted harder than the main (#311 gate round 4): the kite stands at least a little outside it.
+            let outside = sailTrim + deg2rad(max(style.kiteOutsideMainDegrees, 0))
+            spinnaker.trim = max(spinnaker.trim, min(outside, .pi * 0.9))
+        }
 
         heel = ease || headToWind ? 0 : Self.heel(felt: Self.feltWind(boat), twa: twa, style: style)
     }
@@ -207,6 +215,38 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
     var starvedFullLoss = 0.35
     var starvedFlutter = 0.8
 
+    // MARK: Spinnaker (#311): debug sliders, every one
+
+    /// The kite's angle off the bow, aft and out to the boom side, for each radian of apparent wind off the bow, and
+    /// the least and most it is let out, degrees.
+    var kiteTrimPerApparentAngle = 0.4
+    var kiteMinTrimDegrees = 20.0
+    var kiteMaxTrimDegrees = 75.0
+    /// Never sheeted harder than the main (#311 gate round 4): its angle off the centreline is at least the main's
+    /// plus this, degrees.
+    var kiteOutsideMainDegrees = 6.0
+    /// Its depth (the belly), a share of the deepest the art is drawn: on the tightest reach the class flies it
+    /// (its `dropBelowTWA`) and on a dead run, eased between by the true wind angle, so it billows the further downwind she sails. No state draws it
+    /// shallower than the floor, the gybe's crossing included: it is never a sliver.
+    var kiteReachDepth = 0.62
+    var kiteRunDepth = 1.0
+    var kiteDepthFloor = 0.5
+    /// Its depth at its softest, a share of the full depth at her wind angle: on the edge of the plane and off it
+    /// (the soft kite).
+    var kiteSoftFill = 0.75
+    /// Collapsed by the lee: its depth, a share of the full depth at her wind angle, and how far its angle swings
+    /// forward of its trim, degrees: it stays on its own side, flagging forward off the pole's tip, clear of the
+    /// main.
+    var kiteCollapsedFill = 0.55
+    var kiteCollapseSwingDegrees = 55.0
+    /// A flogging kite's swing either side of its angle, degrees (it swings at `flutterSwingRate`, its belly pumps at
+    /// `flapBellyRate`).
+    var kiteFlutterDegrees = 8.0
+    /// How hard it flogs at the start of a hoist and the end of a drop, 0 to 1, less as it fills.
+    var kiteHoistFlog = 0.6
+    /// The pole (bowsprit) the kite flies from, run fully out past the drawn bow, metres. It runs out with the hoist
+    /// and in with the drop, and is not drawn while the kite is down.
+    var kitePoleMetres = 0.6
     // MARK: Your boat, ghosts
 
     /// Your boat's soft white glow (#15): its alpha. No ring, no halo circle.
@@ -388,6 +428,13 @@ nonisolated extension BoatStyle {
             (.flutterDegrees, \.flutterDegrees), (.byTheLeeFlutter, \.byTheLeeFlutter),
             (.starvedDeadband, \.starvedDeadband), (.starvedFullLoss, \.starvedFullLoss),
             (.starvedFlutter, \.starvedFlutter),
+            (.kiteTrimPerApparentAngle, \.kiteTrimPerApparentAngle), (.kiteMinTrimDegrees, \.kiteMinTrimDegrees),
+            (.kiteMaxTrimDegrees, \.kiteMaxTrimDegrees), (.kiteOutsideMainDegrees, \.kiteOutsideMainDegrees),
+            (.kiteReachDepth, \.kiteReachDepth), (.kiteRunDepth, \.kiteRunDepth), (.kiteDepthFloor, \.kiteDepthFloor),
+            (.kiteSoftFill, \.kiteSoftFill),
+            (.kiteCollapsedFill, \.kiteCollapsedFill), (.kiteCollapseSwingDegrees, \.kiteCollapseSwingDegrees),
+            (.kiteFlutterDegrees, \.kiteFlutterDegrees), (.kiteHoistFlog, \.kiteHoistFlog),
+            (.kitePoleMetres, \.kitePoleMetres),
             (.glowAlpha, \.glowAlpha), (.ghostAlpha, \.ghostAlpha),
             (.ghostSailBelly, \.ghostSailBelly), (.flapBellyLoss, \.flapBellyLoss),
             (.flutterSwingRate, \.flutterSwingRate), (.flapBellyRate, \.flapBellyRate),
