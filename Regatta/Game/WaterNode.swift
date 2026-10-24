@@ -48,7 +48,10 @@ extension WaterWorld {
 /// on the ripple, a depth gradient under the shallows); B cat's paws (the ripple follows the wind it lies in);
 /// C swell (long low crests rolling downwind under the ripple, foam along them). PROBE: never merged.
 nonisolated enum WaterLook: String {
-    case none, a, b, c, d, e, f, g, h, i
+    case none, a, b, c, d, e, f, g, h, i, j, k
+    /// Round 4's lit water: J a physically based plane in the standing fleet's SceneKit scene, K the same light as a
+    /// SpriteKit shader. The ripple streaks go (the light draws the surface).
+    var isLit: Bool { self == .j || self == .k }
     /// Round 3's surface textures: G wavelets, H micro ripples, I caustic shimmer. Under today's water, which stays.
     var isTexture: Bool { self == .g || self == .h || self == .i }
     /// Round 2's stylized looks: D toon crests, E painterly bands, F wave curls. They replace the ripple.
@@ -159,6 +162,8 @@ final class WaterNode: SKNode {
     private let wakeLayer = SKNode()
     private var wakeNodes: [SKSpriteNode] = []
     private var styledReferenceScale: CGFloat?
+    /// Look K: one sprite over the view's rect, the lit water drawn by its shader in world coordinates.
+    private let litSprite = SKSpriteNode()
     /// Looks G, H, I: one sprite over the view, under the puffs, its shader texturing the water in world coordinates.
     let textureSprite = SKSpriteNode()
     /// The first frame's camera scale (the default zoom the texture is sized at) and centre (H's turning point).
@@ -208,6 +213,13 @@ final class WaterNode: SKNode {
             wakeLayer.zPosition = 0.7
             addChild(wakeLayer)
         }
+        if WaterLook.current == .k {
+            // Under the pressure tone (−1) and the puffs: K is the water itself.
+            litSprite.zPosition = -1.5
+            litSprite.shader = LitWater.kShader
+            litSprite.color = .white
+            addChild(litSprite)
+        }
         if WaterLook.current.isTexture {
             textureSprite.zPosition = -0.5
             textureSprite.shader = Self.textureShader
@@ -232,6 +244,7 @@ final class WaterNode: SKNode {
         updateStyled(world, view: view)
         updateWake(world, view: view)
         updateTexture(world, view: view)
+        updateLit(world, view: view)
         updateOverlay(world, view: view)
     }
 
@@ -326,8 +339,8 @@ final class WaterNode: SKNode {
             drift = CGPoint(x: drift.x + downwind.x, y: drift.y + downwind.y)
         }
 
-        if WaterLook.current.isStylized {
-            // The stylized looks draw their own ripple and foam.
+        if WaterLook.current.isStylized || WaterLook.current == .k {
+            // The stylized looks draw their own ripple and foam; K its light and foam.
             streaks.removeAll(keepingCapacity: true)
             whitecaps.removeAll(keepingCapacity: true)
             for tile in tileNodes where !tile.streak.isHidden || !tile.cap.isHidden {
@@ -399,13 +412,15 @@ final class WaterNode: SKNode {
                     // Whitecaps bias toward the puffs and leave the lulls.
                     tileShare = min(share * (1 + 2.5 * gust), 0.9)
                     if share == 0, puff > 0.6 { tileShare = 0.15 * (puff - 0.6) / 0.4 }
-                case .none, .c, .d, .e, .f, .g, .h, .i:
+                case .none, .c, .d, .e, .f, .g, .h, .i, .j, .k:
                     break
                 }
                 updateWhitecap(tile, at: index, share: max(tileShare, 0), time: world.time, period: period)
             }
         }
         if look == .b { scrolls = nextScrolls }
+        // J: the light draws the surface; the whitecaps stay.
+        if look == .j { for tile in tileNodes where !tile.streak.isHidden { tile.streak.isHidden = true } }
         for tile in tileNodes[n...] where !tile.streak.isHidden {
             tile.streak.isHidden = true
             tile.cap.isHidden = true
@@ -500,7 +515,7 @@ final class WaterNode: SKNode {
 
     private static let lookShader: SKShader = {
         switch WaterLook.current {
-        case .none, .c, .d, .e, .f, .g, .h, .i: return waveShader
+        case .none, .c, .d, .e, .f, .g, .h, .i, .j, .k: return waveShader
         case .a: return glitterShader
         case .b: return catspawShader
         }
@@ -1054,7 +1069,7 @@ final class WaterNode: SKNode {
             let texture = puff.intensity >= 0 ? puffTexture : lullTexture
             if node.texture !== texture { node.texture = texture }
             node.color = overlay.token.uiColor
-            node.alpha = CGFloat(overlay.alpha)
+            node.alpha = CGFloat(overlay.alpha) * (WaterLook.current.isLit ? LitWater.puffAlpha : 1)
             node.position = CGPoint(x: puff.center.x * pointsPerMeter, y: puff.center.y * pointsPerMeter)
             let diameter = puff.radius * 2 * pointsPerMeter
             node.size = CGSize(width: diameter, height: diameter)
@@ -1413,5 +1428,67 @@ extension WaterNode {
         Self.gustMap.textureValue = Self.gustTexture(bytes: bytes, side: n)
         Self.gustOrigin.vectorFloat2Value = SIMD2(Float(rect.minX), Float(rect.minY))
         Self.gustSize.vectorFloat2Value = SIMD2(Float(rect.width), Float(rect.height))
+    }
+
+    // MARK: - #604 round 4: lit water (J, K)
+
+    static let litClock = SKUniform(name: "u_clock", float: 0)
+    static let litGust = SKUniform(name: "u_gust", texture: WaterNode.flatGustTexture)
+    static let litGustOrigin = SKUniform(name: "u_gust_origin", vectorFloat2: .zero)
+    static let litGustSize = SKUniform(name: "u_gust_size", vectorFloat2: SIMD2(1, 1))
+
+    /// J and K: the gust map over the view (`LitWater.Frame`), and K's sprite and uniforms.
+    private func updateLit(_ world: WaterWorld, view: WaterView) {
+        guard WaterLook.current.isLit else { return }
+        guard let course = world.courseWind else {
+            litSprite.isHidden = true
+            return
+        }
+        let rect = view.rect
+        let n = Self.gustColumns
+        var bytes = [UInt8](repeating: 128, count: n * n * 4)
+        for row in 0..<n {
+            let y = Double(rect.maxY) - (Double(row) + 0.5) / Double(n) * Double(rect.height)
+            for column in 0..<n {
+                let x = Double(rect.minX) + (Double(column) + 0.5) / Double(n) * Double(rect.width)
+                let g = Self.gust(local: world.wind(Vec2(x, y) / pointsPerMeter), course: course)
+                let v = UInt8(((g * 0.5 + 0.5) * 255).rounded().clamped(to: 0...255))
+                let k = (row * n + column) * 4
+                bytes[k] = v
+                bytes[k + 1] = v
+                bytes[k + 2] = v
+                bytes[k + 3] = 255
+            }
+        }
+        let image = LitWater.image(bytes: bytes, width: n, height: n)
+        let down = -Vec2.heading(course.direction)
+        let mean = Whitecaps.meanWind(of: world.conditions)
+        let knots = RegattaCore.knots(metresPerSecond: mean)
+        let clock = Float(world.time - 600 * (world.time / 600).rounded(.down))
+        LitWater.frame = LitWater.Frame(
+            gust: image, gustRect: rect, downwind: SIMD2(Float(down.x), Float(down.y)),
+            wind: Float(((knots - 4) / 18).clamped(to: 0.05...1)), foam: Float(((knots - 10) / 10).clamped(to: 0...1)),
+            clock: clock, scale: Float(view.scale))
+        guard WaterLook.current == .k else { return }
+        litSprite.isHidden = false
+        litSprite.size = rect.size
+        litSprite.position = CGPoint(x: rect.midX, y: rect.midY)
+        let texture = SKTexture(cgImage: image)
+        texture.filteringMode = .linear
+        Self.litGust.textureValue = texture
+        Self.litGustOrigin.vectorFloat2Value = SIMD2(Float(rect.minX), Float(rect.minY))
+        Self.litGustSize.vectorFloat2Value = SIMD2(Float(rect.width), Float(rect.height))
+        Self.litClock.floatValue = clock
+        LitWater.kRect.vectorFloat4Value = SIMD4(Float(rect.minX), Float(rect.minY), Float(rect.width), Float(rect.height))
+        LitWater.kDown.vectorFloat2Value = SIMD2(Float(down.x), Float(down.y))
+        LitWater.kCam.vectorFloat2Value = SIMD2(Float(cos(view.rotation)), Float(sin(view.rotation)))
+        let tilt = LitWater.tilt
+        LitWater.kView.vectorFloat3Value = SIMD3(0, -Float(sin(tilt)), Float(cos(tilt)))
+        LitWater.kScale.floatValue = Float(view.scale)
+        let f = LitWater.frame
+        LitWater.kWind.vectorFloat2Value = SIMD2(f.wind, f.foam)
+        let d = LitWater.depth
+        LitWater.kMap0.vectorFloat4Value = d.map0
+        LitWater.kMap1.vectorFloat4Value = d.map1
     }
 }

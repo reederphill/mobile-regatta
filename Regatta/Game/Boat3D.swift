@@ -33,6 +33,8 @@ final class Fleet3D {
     /// The nodes the scene holds besides the boats and the buoys: the camera, the sun, the ambient light and the
     /// committee boat's hull and cabin.
     static let fixedNodeCount = 5
+    /// #604 probe J: the lit water plane, drawn by its own camera (`LitWaterPlane`).
+    private(set) var litWater: LitWaterPlane?
 
     init(boats roster: [Boat], colors: [UIColor], boatClass: BoatClass, course: CourseLayout, pointsPerMeter ppm: CGFloat,
          tiltDegrees: Double, sceneSize: CGSize) {
@@ -58,6 +60,11 @@ final class Fleet3D {
         let sunNode = SCNNode()
         sunNode.light = sun
         sunNode.position = SCNVector3(-1, 1.6, -0.8)
+        if WaterLook.current.isLit {
+            // #604: the sun as the lit water takes it (`LitWater.sun`, screen frame → scene: x, up, −y).
+            let l = LitWater.sun
+            sunNode.position = SCNVector3(l.x, l.z, -l.y)
+        }
         sunNode.look(at: SCNVector3(0, 0, 0))
         scene.rootNode.addChildNode(sunNode)
         let ambient = SCNLight()
@@ -104,6 +111,13 @@ final class Fleet3D {
         buoys = ChartMarks.buoys(of: course).map { buoy($0.mark, isPin: false) }
         buoys.append(buoy(course.startLine.pin, isPin: true))
         Self.fixDrawOrder(of: scene.rootNode)
+        if WaterLook.current == .j {
+            // The fleet's camera draws category 1 (every node's default); the plane only the water's.
+            camera.categoryBitMask = 1
+            let lit = LitWaterPlane(scene: scene, fleetCamera: cameraNode, sceneSize: sceneSize)
+            lit.planeNode.renderingOrder = -1
+            litWater = lit
+        }
         pitch(toDegrees: tiltDegrees)
     }
 
@@ -211,6 +225,8 @@ final class Fleet3D {
             // Only when the tone changes (a leg rounded): a material write each frame dirties it for SceneKit.
             if buoy.material.diffuse.contents as? UIColor != tone { buoy.material.diffuse.contents = tone }
         }
+        litWater?.update(center: center, rho: rho, scale: scale, tilt: tiltDegrees * .pi / 180, sceneSize: sceneSize,
+                         cameraScale: cameraScale)
         let at = ground(committeePosition)
         committee.position = SCNVector3(at.x, Float(0.45 * ppm), at.z)
         committee.eulerAngles = SCNVector3(0, Float(rho), 0)

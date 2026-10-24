@@ -243,6 +243,7 @@ final class GameScene: SKScene {
     /// The standing fleet and the land's rim (#596).
     private func buildTilt() {
         let frame = driver.currentFrame
+        LitWater.setDepth(driver.venue.current)
         let fleet = Fleet3D(boats: frame.boats, colors: frame.boats.map { Palette.boat($0.colorIndex) },
                             boatClass: driver.boatClass, course: driver.course, pointsPerMeter: ppm,
                             tiltDegrees: tiltDegrees, sceneSize: size)
@@ -252,6 +253,15 @@ final class GameScene: SKScene {
         fleet.node.name = "fleet3D"
         fleet.node.isHidden = !paintsWorld
         cam.addChild(fleet.node)
+        // #604 probe J: the lit water's own view of the fleet's scene, under the water's sprites (−10 and up).
+        // A child of the scene under the tilt node (the scene draws its children in z order, each with its subtree), at
+        // the camera's origin and scaled with its zoom, so its viewport covers the view.
+        // On the camera at global z −12, under the water's sprites (−11 and up). The plane writes no depth: SpriteKit
+        // shares the SK3DNode's depth buffer, and the plane's depth hid every sprite under global z ≈ 2.
+        if let lit = fleet.litWater {
+            lit.node.zPosition = -12
+            cam.addChild(lit.node)
+        }
         fleet3D = fleet
 
         buildLandRim()
@@ -449,6 +459,7 @@ final class GameScene: SKScene {
         let view = WaterView(center: rig.center, sceneSize: CGSize(width: size.width, height: size.height / squash),
                              scale: rig.cameraScale, rotation: rig.cameraRotation)
         water.hidesRipple = drawsCuesOnly
+        LitWater.tilt = tiltDegrees * .pi / 180
         Signpost.waterUpdate.measure { water.update(WaterWorld(world), view: view, dt: dt) }
 
         // The active leg's marks orange, the rest grey (#15); strokes kept steady on screen as the camera zooms.
