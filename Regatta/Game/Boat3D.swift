@@ -103,7 +103,22 @@ final class Fleet3D {
         }
         buoys = ChartMarks.buoys(of: course).map { buoy($0.mark, isPin: false) }
         buoys.append(buoy(course.startLine.pin, isPin: true))
+        Self.fixDrawOrder(of: scene.rootNode)
         pitch(toDegrees: tiltDegrees)
+    }
+
+    /// #602: gives every node its own `renderingOrder`, in the scene's own order (depth first, children in the order
+    /// added), so SceneKit draws the scene in the same order at every launch. Where two surfaces meet at one depth
+    /// (a deck's edge on its topsides' rim) the one drawn first wins the depth test; left to itself SceneKit orders
+    /// nodes of one `renderingOrder` its own way, which changed between launches, so a frozen render fixture drew a
+    /// pixel or three on a gunwale in the deck's tone at one launch and the far topsides' at the next (the thermal
+    /// render test, which diffs three launches exactly).
+    static func fixDrawOrder(of root: SCNNode) {
+        var order = 0
+        root.enumerateHierarchy { node, _ in
+            node.renderingOrder = order
+            order += 1
+        }
     }
 
     /// Pitches the camera down from the horizontal by 90° − tilt: a ground point (x, 0, −y) lands on screen at
@@ -134,6 +149,12 @@ final class Fleet3D {
     /// The camera's zoom as written and as SceneKit draws it, for tests.
     var orthographicScale: Double { camera.orthographicScale }
     var presentedOrthographicScale: Double { cameraNode.presentation.camera?.orthographicScale ?? .nan }
+    /// Every node's `renderingOrder`, root first, depth first in the scene's order, for tests.
+    var drawOrders: [Int] {
+        var orders: [Int] = []
+        scene.rootNode.enumerateHierarchy { node, _ in orders.append(node.renderingOrder) }
+        return orders
+    }
     /// Every node in the SceneKit scene, the root's descendants, for tests.
     var sceneNodeCount: Int {
         func count(_ node: SCNNode) -> Int { node.childNodes.reduce(0) { $0 + 1 + count($1) } }

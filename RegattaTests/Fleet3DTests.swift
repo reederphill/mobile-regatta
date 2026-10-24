@@ -117,6 +117,18 @@ import RegattaCore
         #expect(node.isHidden)
     }
 
+    /// #602: SceneKit draws the scene in one fixed order, the scene's own: every node its own `renderingOrder`,
+    /// rising depth first, so two surfaces meeting at one depth (a deck's edge on the topsides' rim) resolve the same
+    /// way at every launch. Left to SceneKit, a frozen fixture drew a gunwale pixel or three differently between
+    /// launches and the thermal render test, which diffs three launches exactly, failed.
+    @Test func everyNodeDrawsInAFixedOrder() throws {
+        let (scene, _) = try GameSceneTests.scene(fixture: "cues")
+        let fleet = try #require(scene.standingFleet)
+        let orders = fleet.drawOrders
+        #expect(orders.count == fleet.sceneNodeCount + 1)
+        #expect(orders == Array(0..<orders.count))
+    }
+
     /// #602: a camera move between two renders (a swing, a pinch) leaves every standing node drawn where this frame
     /// projects it: SceneKit's presentation tree, what the `SK3DNode` draws, equals the model the update wrote, with
     /// no animation pending. Before the fix the presentation tree held the last frame's place until the run loop's
