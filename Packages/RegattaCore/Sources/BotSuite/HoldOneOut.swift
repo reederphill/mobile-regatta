@@ -73,6 +73,10 @@ public struct HoldOneOutSeat: Codable, Hashable, Sendable {
     public var oracleDigest: UInt64
 
     public var loss: StartLoss { StartLoss(bot, oracle: oracle) }
+    /// The oracle's floor (#584 stage 2): its search found no clean start here better than the bot's own (none by T+60,
+    /// a penalty called on her, or worth less than the bot's). Named in the report, as the owner reads it.
+    public var isFloor: Bool { oracle.startSeconds == nil || oracle.penalties > 0 || oracle.worth < bot.worth }
+
     /// What the bot paid on top of the oracle in the fleet's air and in forced moves: the gap-finding gap.
     public var gapFinding: Double { loss.air + loss.forced }
 }
@@ -125,6 +129,11 @@ public struct HoldOneOutReport: Codable, Hashable, Sendable {
         lines.append("oracle: mean worth at T+60 \(format(mean(oracles.map(\.worth)))) m, started "
             + "\(oracles.filter { $0.startSeconds != nil }.count)/\(oracles.count), OCS \(oracles.filter(\.ocs).count), "
             + "penalties \(oracles.map(\.penalties).reduce(0, +)), mean start \(format(mean(oracles.map { $0.startSeconds ?? 60 }))) s")
+        // The oracle's floor (owner, 2026-10-24): the seats where the search found no clean start better than her bot's
+        // (`HoldOneOutSeat.isFloor`) are named, not hidden; the tables below keep every seat.
+        let floor = seeds.flatMap { seed in seed.seats.filter(\.isFloor).map { "\(seed.seed.name) seat \($0.seat)" } }
+        lines.append("oracle's floor: \(floor.count) of \(seats.count) seats with no clean start found better than the bot's"
+            + (floor.isEmpty ? "" : " (" + floor.joined(separator: ", ") + ")"))
         let tiers = ["club", "regional", "national"].filter { tier in seats.contains { $0.tier == tier } }
         lines.append("")
         lines.append("mean metres behind the oracle at T+60 against the frozen fleet, by tier (they sum to the gap; air and "
@@ -149,6 +158,21 @@ public struct HoldOneOutReport: Codable, Hashable, Sendable {
                           format(mean(group.map { $0.oracle.startSeconds ?? 60 }))])
         }
         lines += table(fleet)
+        lines.append("")
+        lines.append("waiting against the fleet: mean spot and depth m (speed m/s) at T-30, T-10 and the gun, the oracle's "
+            + "clean starts and each tier's bot on the same seats:")
+        let clean = seats.filter { $0.oracle.startSeconds != nil && $0.oracle.penalties == 0 }
+        var waiting = [["", "seats", "spot -30", "depth -30", "spot -10", "depth -10", "speed -10", "spot gun", "depth gun",
+                        "speed gun"]]
+        func waitRow(_ name: String, _ entries: [StartEntry]) -> [String] {
+            [name, "\(entries.count)", String(format: "%.2f", mean(entries.map(\.atT30.spot))), format(mean(entries.map(\.atT30.depth))),
+             String(format: "%.2f", mean(entries.map(\.atT10.spot))), format(mean(entries.map(\.atT10.depth))),
+             String(format: "%.2f", mean(entries.map(\.atT10.speed))), String(format: "%.2f", mean(entries.map(\.atGun.spot))),
+             format(mean(entries.map(\.atGun.depth))), String(format: "%.2f", mean(entries.map(\.atGun.speed)))]
+        }
+        waiting.append(waitRow("oracle", clean.map(\.oracle)))
+        for tier in tiers { waiting.append(waitRow(tier, clean.filter { $0.tier == tier }.map(\.bot))) }
+        lines += table(waiting)
         lines.append("")
         lines.append("by situation at T-60 (stage 3's features): seats, mean gap and gap-finding gap, metres:")
         var situations = [["feature", "band", "seats", "gap", "gap-finding"]]
