@@ -103,7 +103,22 @@ final class Fleet3D {
         }
         buoys = ChartMarks.buoys(of: course).map { buoy($0.mark, isPin: false) }
         buoys.append(buoy(course.startLine.pin, isPin: true))
+        Self.fixDrawOrder(of: scene.rootNode)
         pitch(toDegrees: tiltDegrees)
+    }
+
+    /// #602: gives every node its own `renderingOrder`, in the scene's own order (depth first, children in the order
+    /// added), so SceneKit draws the scene in the same order at every launch. Where two surfaces meet at one depth
+    /// (a deck's edge on its topsides' rim) the one drawn first wins the depth test; left to itself SceneKit orders
+    /// nodes of one `renderingOrder` its own way, which changed between launches, so a frozen render fixture drew a
+    /// pixel or three on a gunwale in the deck's tone at one launch and the far topsides' at the next (the thermal
+    /// render test, which diffs three launches exactly).
+    static func fixDrawOrder(of root: SCNNode) {
+        var order = 0
+        root.enumerateHierarchy { node, _ in
+            node.renderingOrder = order
+            order += 1
+        }
     }
 
     /// Pitches the camera down from the horizontal by 90° − tilt: a ground point (x, 0, −y) lands on screen at
@@ -129,6 +144,17 @@ final class Fleet3D {
     /// Each buoy's colour as drawn, pin last, and the committee boat's, for tests.
     var buoyTones: [UIColor] { buoys.compactMap { $0.material.diffuse.contents as? UIColor } }
     var committeeColor: UIColor? { committee.geometry?.firstMaterial?.diffuse.contents as? UIColor }
+    /// The nodes each frame places on the camera: every boat's root, the buoys and the committee boat, for tests.
+    var standingNodes: [SCNNode] { boats.map(\.root) + buoys.map(\.node) + [committee] }
+    /// The camera's zoom as written and as SceneKit draws it, for tests.
+    var orthographicScale: Double { camera.orthographicScale }
+    var presentedOrthographicScale: Double { cameraNode.presentation.camera?.orthographicScale ?? .nan }
+    /// Every node's `renderingOrder`, root first, depth first in the scene's order, for tests.
+    var drawOrders: [Int] {
+        var orders: [Int] = []
+        scene.rootNode.enumerateHierarchy { node, _ in orders.append(node.renderingOrder) }
+        return orders
+    }
     /// Every node in the SceneKit scene, the root's descendants, for tests.
     var sceneNodeCount: Int {
         func count(_ node: SCNNode) -> Int { node.childNodes.reduce(0) { $0 + 1 + count($1) } }
@@ -142,6 +168,18 @@ final class Fleet3D {
     func update(_ world: RenderWorld, poses: [BoatPose], style: BoatStyle, center: CGPoint, rotation: CGFloat,
                 cameraScale: CGFloat, tiltDegrees: Double, sceneSize: CGSize, sailDetail: SailDetail = .full,
                 hidesSails: Bool = false, time: Double, dt: Double, settled: Bool) {
+        // #602: every write lands in this frame's draw. SceneKit keeps writes made outside a transaction in an
+        // implicit one that commits at the end of the run loop's turn, after SpriteKit has drawn this frame, so the
+        // `SK3DNode` drew the last frame's places: the boats and buoys trailed every swing and pinch by a frame and
+        // snapped home when the camera stopped. One explicit transaction, committed before the draw, with no
+        // animation, puts the presentation tree on the model as SpriteKit draws.
+        SCNTransaction.begin()
+        SCNTransaction.disableActions = true
+        SCNTransaction.animationDuration = 0
+        defer {
+            SCNTransaction.commit()
+            SCNTransaction.flush()
+        }
         pitch(toDegrees: tiltDegrees)
         if node.viewportSize != sceneSize { node.viewportSize = sceneSize }
         let scale = Double(sceneSize.height / 2 * cameraScale)
@@ -299,6 +337,13 @@ final class Boat3D {
     /// doesn't flap in step.
     private let seat: Int
     private var sailAngle: Float = 0
+    /// Her heel as drawn, radians about her fore-and-aft axis, eased to the pose's at `BoatStyle.heelEaseRate`.
+    private(set) var heelAngle: Float = 0
+    /// Whether she has drawn a pose yet: her first frame takes the pose's heel outright, so a race start, a scene
+    /// rebuild or a resume doesn't ease her in from upright (#602).
+    private var hasPose = false
+    /// Her heel at the pose's full heel (1): 28°.
+    static let fullHeel: Float = 28 * .pi / 180
     /// Whether she is far from your boat (`FarBoat`), kept across frames for its dead band.
     private(set) var isFar = false
     /// How much of her sail animation detail draws, 0…1: eased to 0 while she is far at `SailDetail.farReduced` and
@@ -360,9 +405,15 @@ final class Boat3D {
                 hullsFromYou: Double = 0, hidesSail: Bool = false, time: Double, dt: Double, settled: Bool) {
         root.position = SCNVector3(x, 0, z)
         root.eulerAngles = SCNVector3(0, yaw, 0)
-        // Heel leans the whole rig toward her lee side (+x is starboard): 28° at full heel.
+        // Heel leans the whole rig toward her lee side (+x is starboard): 28° at full heel. Eased like the sail
+        // (#602): the pose's heel steps to 0 as the sheets go out and back as they come in, and through upright on
+        // a tack; the standing hull showed each step as a snap.
         let lee: Float = pose.leeSide == .starboard ? -1 : 1
-        heelNode.eulerAngles = SCNVector3(0, 0, lee * Float(pose.heel) * 28 * .pi / 180)
+        let heelTarget = lee * Float(pose.heel) * Self.fullHeel
+        let snaps = settled || !hasPose
+        heelAngle += (heelTarget - heelAngle) * (snaps ? 1 : min(1, Float(dt) * Float(style.heelEaseRate)))
+        hasPose = true
+        heelNode.eulerAngles = SCNVector3(0, 0, heelAngle)
 
         isFar = FarBoat.isFar(hullsFromYou: hullsFromYou, wasFar: isFar, hulls: style.farBoatHulls)
         let reduced = sailDetail == .farReduced && isFar && !pose.isGhost

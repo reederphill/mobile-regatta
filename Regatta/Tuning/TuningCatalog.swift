@@ -347,8 +347,6 @@ enum TuningCatalog {
                     water("fullTonePressureGain", "Pressure at full tone", \.fullTonePressureGain, 0.03...0.5, 0.01),
                     water("fullTonePressureLoss", "Low pressure at full tone", \.fullTonePressureLoss, 0.03...0.5, 0.01),
                     water("rippleAlpha", "Ripple strength", \.rippleAlpha, 0...1, 0.05),
-                    water("glintAlpha", "Glint strength", \.glintAlpha, 0...0.6, 0.01),
-                    water("glintBand", "Glint band", \.glintBand, 0...1, 0.05),
                     water("whitecapOnsetKnots", "Whitecaps from", \.whitecapOnsetKnots, 0...25, 0.5, unit: " kn"),
                     water("whitecapFullKnots", "Whitecaps full at", \.whitecapFullKnots, 5...35, 0.5, unit: " kn"),
                     water("whitecapMaxShare", "Whitecap share", \.whitecapMaxShare, 0...1, 0.05),
@@ -401,6 +399,8 @@ enum TuningCatalog {
                     // off the beam (`BoatStyle.heelScale`).
                     boat("heelScale", "Heel", \.heelScale, 0...2, 0.05),
                     boat("heelFullKnots", "Overpowered at", \.heelFullKnots, 8...30, 0.5, unit: " kn"),
+                    // #602: how fast the 2.5D boat's heel follows the sheets, per second.
+                    boat("heelEaseRate", "Heel ease", \.heelEaseRate, 1...20, 0.5, unit: " /s"),
                     boat("starvedFullLoss", "Starved flutter at", \.starvedFullLoss, 0.1...0.8, 0.05),
                     boat("flutterDegrees", "Flutter", \.flutterDegrees, 0...20, 0.5, unit: "°"),
                     boat("ghostAlpha", "Ghost fade", \.ghostAlpha, 0.1...0.9, 0.05),

@@ -116,4 +116,102 @@ import RegattaCore
         scene.paintsWorld = false
         #expect(node.isHidden)
     }
+
+    /// #602: SceneKit draws the scene in one fixed order, the scene's own: every node its own `renderingOrder`,
+    /// rising depth first, so two surfaces meeting at one depth (a deck's edge on the topsides' rim) resolve the same
+    /// way at every launch. Left to SceneKit, a frozen fixture drew a gunwale pixel or three differently between
+    /// launches and the thermal render test, which diffs three launches exactly, failed.
+    @Test func everyNodeDrawsInAFixedOrder() throws {
+        let (scene, _) = try GameSceneTests.scene(fixture: "cues")
+        let fleet = try #require(scene.standingFleet)
+        let orders = fleet.drawOrders
+        #expect(orders.count == fleet.sceneNodeCount + 1)
+        #expect(orders == Array(0..<orders.count))
+    }
+
+    /// #602: a camera move between two renders (a swing, a pinch) leaves every standing node drawn where this frame
+    /// projects it: SceneKit's presentation tree, what the `SK3DNode` draws, equals the model the update wrote, with
+    /// no animation pending. Before the fix the presentation tree held the last frame's place until the run loop's
+    /// implicit transaction committed, after SpriteKit had drawn.
+    @Test func aCameraMoveLeavesNoLag() throws {
+        let (scene, session) = try GameSceneTests.scene(fixture: "fleet")
+        let fleet = try #require(scene.standingFleet)
+        let world = session.driver.renderWorld
+        let poses = world.boats.indices.map {
+            BoatPose(world.boats[$0], ease: false, isGhost: false, boatClass: world.boatClass, style: Self.style)
+        }
+        func render(center: CGPoint, rotation: CGFloat, scale: CGFloat) {
+            fleet.update(world, poses: poses, style: Self.style, center: center, rotation: rotation, cameraScale: scale,
+                         tiltDegrees: 45, sceneSize: CameraRigTests.iPhone, time: world.time, dt: 1.0 / 60,
+                         settled: false)
+        }
+        render(center: .zero, rotation: 0, scale: 1)
+        SCNTransaction.flush()
+        // The camera swings 40° and zooms in by half between two frames.
+        render(center: CGPoint(x: 120, y: -80), rotation: 0.7, scale: 0.5)
+        for node in fleet.standingNodes {
+            let drawn = SIMD3<Float>(node.presentation.position), model = SIMD3<Float>(node.position)
+            #expect(drawn == model, "drawn \(drawn), placed \(model)")
+            #expect(SIMD3<Float>(node.presentation.eulerAngles) == SIMD3<Float>(node.eulerAngles))
+            #expect(node.animationKeys.isEmpty)
+        }
+        #expect(fleet.presentedOrthographicScale == fleet.orthographicScale)
+    }
+
+    /// #602: her first frame, not settled (a race start, a scene rebuild, a resume), already shows the pose's heel
+    /// rather than easing her in from upright; the ease rate is the style's.
+    @Test func heelStartsAtThePose() {
+        let boat = WakeTests.boat(speed: 6)
+        var pose = BoatPose(boat, ease: false, isGhost: false, boatClass: WakeTests.boatClass, style: Self.style)
+        pose.heel = 1
+        let drawn = Self.boat3D()
+        drawn.update(pose: pose, style: Self.style, x: 0, z: 0, yaw: 0, time: 2, dt: 1.0 / 60, settled: false)
+        #expect(abs(abs(drawn.heelAngle) - Boat3D.fullHeel) < 1e-6, "eased in from upright: \(drawn.heelAngle)")
+
+        // A slower style rate follows the sheets more slowly.
+        var slow = Self.style
+        slow.heelEaseRate = 1
+        let full = drawn.heelAngle
+        pose.heel = 0
+        drawn.update(pose: pose, style: slow, x: 0, z: 0, yaw: 0, time: 2, dt: 0.1, settled: false)
+        #expect(abs(drawn.heelAngle - full * 0.9) < 1e-5, "rate 1/s over 0.1 s: \(drawn.heelAngle) of \(full)")
+    }
+
+    /// #602: easing the sheets stands her up over about half a second, sheeting in heels her back over the same;
+    /// a settled frame (a frozen render fixture) snaps.
+    @Test func heelEasesInsteadOfSnapping() {
+        let boat = WakeTests.boat(speed: 6)
+        var pose = BoatPose(boat, ease: false, isGhost: false, boatClass: WakeTests.boatClass, style: Self.style)
+        pose.heel = 1
+        let drawn = Self.boat3D()
+        func frames(_ seconds: Double) {
+            for _ in 0..<Int(seconds * 60) {
+                drawn.update(pose: pose, style: Self.style, x: 0, z: 0, yaw: 0, time: 2, dt: 1.0 / 60, settled: false)
+            }
+        }
+        drawn.update(pose: pose, style: Self.style, x: 0, z: 0, yaw: 0, time: 2, dt: 0, settled: true)
+        let full = drawn.heelAngle
+        #expect(abs(abs(full) - Boat3D.fullHeel) < 1e-6)
+
+        // Sheets out: upright over about half a second, not on the next frame.
+        pose.heel = 0
+        frames(1.0 / 60)
+        #expect(abs(drawn.heelAngle) > 0.85 * abs(full), "snapped upright: \(drawn.heelAngle) of \(full)")
+        frames(0.15)
+        #expect(abs(drawn.heelAngle) > 0.3 * abs(full) && abs(drawn.heelAngle) < 0.7 * abs(full))
+        frames(0.35)
+        #expect(abs(drawn.heelAngle) < 0.06 * abs(full), "not upright after half a second: \(drawn.heelAngle)")
+
+        // Sheets in: heeled again over the same.
+        pose.heel = 1
+        frames(1.0 / 60)
+        #expect(abs(drawn.heelAngle) < 0.15 * abs(full), "snapped to heel: \(drawn.heelAngle)")
+        frames(0.5)
+        #expect(abs(drawn.heelAngle - full) < 0.06 * abs(full))
+
+        // Settled snaps.
+        pose.heel = 0
+        drawn.update(pose: pose, style: Self.style, x: 0, z: 0, yaw: 0, time: 2, dt: 0, settled: true)
+        #expect(drawn.heelAngle == 0)
+    }
 }
