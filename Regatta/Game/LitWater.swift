@@ -700,19 +700,22 @@ extension LitWater {
 }
 
 /// #604 round 7: O, the toon ocean after the owner's second read of the reference: "the dark tone almost always
-/// surrounds the light tone". A mid field with pale islands, each carrying its own deep fringe: the island's back face,
-/// the same shape grown a little and pushed to its far side (screen-up, away from the viewer), so the deep hugs the
-/// pale and fades back into mid; no free-standing deep. Islands come from three layers of warped noise cut high (cells
-/// `size` × 30, 12, 5 m): mostly small flecks, some medium, a few large; a slow low-frequency field moves the layers'
-/// cuts apart so neighbours differ in size and spacing. Zooming out the small layer, then the medium, close (their
-/// cuts rise), and every cut rises a little more (`calm`), so the planing view is calmer than the start. Puffs: mid
-/// toward deep, pale shrinks, fringes grow, flecks above ~12 kn. Lulls: pale grows, fringes thin, small flecks go
-/// (glassy). Stars: larger and streakier, only inside the medium and large islands. Knobs (env): `REGATTA_TOON_DEEP|
-/// MID|PALE` hex, `REGATTA_TOON_SIZE` (O2 2), `REGATTA_TOON_TA|TB|TC` the layers' cuts, `REGATTA_TOON_RIM` (deep
-/// all round, in field units), `REGATTA_TOON_SHADOW` (the far-side fringe's growth), `REGATTA_TOON_OFF` (its push, a
-/// share of the cell), `REGATTA_TOON_SOFT` px, `REGATTA_TOON_SPARKS`, `REGATTA_TOON_CELL` (star cell, scene points),
-/// `REGATTA_TOON_PUFF`, `REGATTA_TOON_CALM`, `REGATTA_TOON_WARP` m, `REGATTA_TOON_DRIFT` m/s, `REGATTA_TOON_REF`
-/// (the camera scale the sizes are set at). PROBE: never merged.
+/// surrounds the light tone". A mid field with pale islands, each carrying its own deep fringe: the island swept a
+/// little to its far side (screen-up, away from the viewer) and barely grown, so the deep hugs the pale on its back
+/// face and a thin deep rim wraps it; no free-standing deep (a few faint ones in puffs). Islands come from three layers
+/// of noise cut high (cells `size` × 26, 12, 5 m; the second octave ridged for capes and tendrils; stretched 3× across
+/// the screen, as the reference's perspective lays its islands wide): mostly small flecks, some medium, a few large; a slow low-frequency field moves the layers' cuts apart
+/// so neighbours differ, and a gentle three-octave warp (small enough that "far side" stays screen-up) breaks the
+/// lattice. Sized for the start's camera (`ref` 2.4); zooming out the small layer, then the medium, close (their cuts
+/// rise, and the small one is skipped), and every cut rises a little (`calm`), so the planing view is calmer. Puffs:
+/// the mid darker than the calm deep, pale shrinks, fringes grow and darken, flecks above ~12 kn. Lulls: a paler,
+/// glassy mid, larger islands, thin fringes, no small flecks. Stars: larger and streakier, inside any island. Knobs
+/// (env): `REGATTA_TOON_DEEP|MID|PALE` hex, `REGATTA_TOON_SIZE` (O2 2×), `REGATTA_TOON_TA|TB|TC` the layers' cuts,
+/// `REGATTA_TOON_RIM` (deep all round), `REGATTA_TOON_SHADOW` (the far-side sweep's growth), `REGATTA_TOON_OFF` (its
+/// push, a share of the cell), `REGATTA_TOON_STRETCH`, `REGATTA_TOON_UP` ("x,y" signs mapping the camera to
+/// screen-up), `REGATTA_TOON_SOFT` px, `REGATTA_TOON_SPARKS`, `REGATTA_TOON_CELL` (star cell, scene points),
+/// `REGATTA_TOON_PUFF`, `REGATTA_TOON_CALM`, `REGATTA_TOON_WARP` m, `REGATTA_TOON_DRIFT` m/s, `REGATTA_TOON_REF`.
+/// PROBE: never merged.
 extension LitWater {
     struct Toon {
         var deep = SIMD3<Double>(0x2C, 0x48, 0x6E) / 255
@@ -784,9 +787,10 @@ extension LitWater {
                 return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
             }
             // One layer's island field at `p` (warped metres): two noise octaves, rotated by `r`, cell `C`, slowly morphing.
-            // Stretched along the crests (across the wind), as the reference's islands lie along the swell.
-            float isl(vec2 p, float C, vec2 r, vec2 sd, float t, vec2 dn) {
-                vec2 a = vec2(dot(p, dn), dot(p, vec2(-dn.y, dn.x)) / \(f(stretch)));
+            // Stretched across the screen (`up` is screen-up in world metres), as the reference's islands lie wide under
+            // its perspective; the islands stay world-fixed, only their long axis follows the view.
+            float isl(vec2 p, float C, vec2 r, vec2 sd, float t, vec2 up) {
+                vec2 a = vec2(dot(p, up), dot(p, vec2(up.y, -up.x)) / \(f(stretch)));
                 vec2 q = vec2(a.x * r.x - a.y * r.y, a.x * r.y + a.y * r.x) / C + sd + vec2(0.6, 0.35) * t * 0.012;
                 // The second octave ridged: creases and tendrils rather than round puddles.
                 float r2 = 1.0 - abs(2.0 * vnoise(q * 2.4 + sd.yx) - 1.0);
@@ -815,6 +819,8 @@ extension LitWater {
                 float zs = log2(max(u_scale, 1e-3) / \(f(ref)));
                 float z = max(zs, 0.0);
                 float zin = clamp(-zs, 0.0, 1.5);
+                // The far side, in world metres (screen-up under the camera's turn).
+                vec2 up = vec2(\(f(upX)) * u_cam.y, \(f(upY)) * u_cam.x);
                 // The water drifts downwind, all layers together, so the islands persist.
                 vec2 pd = m - dn * t * \(f(drift));
                 vec2 p = pd + warpAt(pd, t, dn);
@@ -826,20 +832,18 @@ extension LitWater {
                 float tC = \(f(tC)) + zc + 0.03 * lo + 0.10 * puff + 0.05 * lull + 0.5 * smoothstep(0.5, 1.2, z);
                 float rim = \(f(rim)) * (1.0 + 1.2 * puff - 0.8 * lull);
                 float shd = \(f(shadow)) * (1.0 + 1.5 * puff - 0.9 * lull);
-                // The far side, in world metres (screen-up under the camera's turn).
-                vec2 up = vec2(\(f(upX)) * u_cam.y, \(f(upY)) * u_cam.x);
                 vec2 rA = vec2(0.94, 0.34), rB = vec2(0.5, -0.87), rC = vec2(-0.77, 0.64);
                 vec2 sA = vec2(1.7, 9.2), sB = vec2(6.1, 3.3), sC = vec2(2.9, 7.7);
-                float FA = isl(p, \(f(cA)), rA, sA, t, dn);
-                float FB = isl(p, \(f(cB)), rB, sB, t, dn);
+                float FA = isl(p, \(f(cA)), rA, sA, t, up);
+                float FB = isl(p, \(f(cB)), rB, sB, t, up);
                 // The small layer is closed once zoomed out past it: skip it.
                 bool onC = z < 1.2;
-                float FC = onC ? isl(p, \(f(cC)), rC, sC, t, dn) : 0.0;
-                float GA = isl(p - up * \(f(cA * off)), \(f(cA)), rA, sA, t, dn);
-                float HA = isl(p - up * \(f(cA * off * 0.5)), \(f(cA)), rA, sA, t, dn);
-                float HB = isl(p - up * \(f(cB * off * 0.5)), \(f(cB)), rB, sB, t, dn);
-                float GB = isl(p - up * \(f(cB * off)), \(f(cB)), rB, sB, t, dn);
-                float GC = onC ? isl(p - up * \(f(cC * off)), \(f(cC)), rC, sC, t, dn) : 0.0;
+                float FC = onC ? isl(p, \(f(cC)), rC, sC, t, up) : 0.0;
+                float GA = isl(p - up * \(f(cA * off)), \(f(cA)), rA, sA, t, up);
+                float HA = isl(p - up * \(f(cA * off * 0.5)), \(f(cA)), rA, sA, t, up);
+                float HB = isl(p - up * \(f(cB * off * 0.5)), \(f(cB)), rB, sB, t, up);
+                float GB = isl(p - up * \(f(cB * off)), \(f(cB)), rB, sB, t, up);
+                float GC = onC ? isl(p - up * \(f(cC * off)), \(f(cC)), rC, sC, t, up) : 0.0;
                 float s = \(f(soft)) * 0.5;
                 float pA = max(max(CUT(FA, tA), CUT(FB, tB)), CUT(FC, tC));
                 // The fringe: the island swept a little to its far side (two steps), barely grown, so a deep shape
@@ -887,9 +891,9 @@ extension LitWater {
                 vec2 sw0 = sm + dn * t * \(f(drift));
                 if (on > 0.0) {
                     vec2 sp = sm + warpAt(sm, t, dn);
-                    float inA = isl(sp, \(f(cA)), rA, sA, t, dn) - tA;
-                    float inB = isl(sp, \(f(cB)), rB, sB, t, dn) - tB;
-                    float inC = onC ? isl(sp, \(f(cC)), rC, sC, t, dn) - tC : -1.0;
+                    float inA = isl(sp, \(f(cA)), rA, sA, t, up) - tA;
+                    float inB = isl(sp, \(f(cB)), rB, sB, t, up) - tB;
+                    float inC = onC ? isl(sp, \(f(cC)), rC, sC, t, up) - tC : -1.0;
                     on *= smoothstep(0.0, 0.03, max(max(inA, inB), inC));
                 }
                 vec2 dw = (sw0 - m) * 8.0 / u_scale;
