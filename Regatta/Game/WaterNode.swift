@@ -48,7 +48,9 @@ extension WaterWorld {
 /// on the ripple, a depth gradient under the shallows); B cat's paws (the ripple follows the wind it lies in);
 /// C swell (long low crests rolling downwind under the ripple, foam along them). PROBE: never merged.
 nonisolated enum WaterLook: String {
-    case none, a, b, c, d, e, f
+    case none, a, b, c, d, e, f, g, h, i
+    /// Round 3's surface textures: G wavelets, H micro ripples, I caustic shimmer. Under today's water, which stays.
+    var isTexture: Bool { self == .g || self == .h || self == .i }
     /// Round 2's stylized looks: D toon crests, E painterly bands, F wave curls. They replace the ripple.
     var isStylized: Bool { self == .d || self == .e || self == .f }
     static let current: WaterLook = {
@@ -157,6 +159,10 @@ final class WaterNode: SKNode {
     private let wakeLayer = SKNode()
     private var wakeNodes: [SKSpriteNode] = []
     private var styledReferenceScale: CGFloat?
+    /// Looks G, H, I: one sprite over the view, under the puffs, its shader texturing the water in world coordinates.
+    let textureSprite = SKSpriteNode()
+    /// The first frame's camera scale (the default zoom the texture is sized at) and centre (H's turning point).
+    var textureReference: (scale: CGFloat, anchor: CGPoint)?
 
     /// The size a streak tile's texture is drawn for: `style.rippleSpacing` scales it from here.
     private static let tileSize = 96.0
@@ -202,6 +208,12 @@ final class WaterNode: SKNode {
             wakeLayer.zPosition = 0.7
             addChild(wakeLayer)
         }
+        if WaterLook.current.isTexture {
+            textureSprite.zPosition = -0.5
+            textureSprite.shader = Self.textureShader
+            textureSprite.color = .white
+            addChild(textureSprite)
+        }
         addChild(puffLayer)
         addChild(rippleLayer)
         addChild(overlayLines)
@@ -219,6 +231,7 @@ final class WaterNode: SKNode {
         updateSwell(world, view: view)
         updateStyled(world, view: view)
         updateWake(world, view: view)
+        updateTexture(world, view: view)
         updateOverlay(world, view: view)
     }
 
@@ -386,7 +399,7 @@ final class WaterNode: SKNode {
                     // Whitecaps bias toward the puffs and leave the lulls.
                     tileShare = min(share * (1 + 2.5 * gust), 0.9)
                     if share == 0, puff > 0.6 { tileShare = 0.15 * (puff - 0.6) / 0.4 }
-                case .none, .c, .d, .e, .f:
+                case .none, .c, .d, .e, .f, .g, .h, .i:
                     break
                 }
                 updateWhitecap(tile, at: index, share: max(tileShare, 0), time: world.time, period: period)
@@ -487,7 +500,7 @@ final class WaterNode: SKNode {
 
     private static let lookShader: SKShader = {
         switch WaterLook.current {
-        case .none, .c, .d, .e, .f: return waveShader
+        case .none, .c, .d, .e, .f, .g, .h, .i: return waveShader
         case .a: return glitterShader
         case .b: return catspawShader
         }
@@ -1186,5 +1199,219 @@ final class WaterNode: SKNode {
         let top = at(0, 0) + (at(1, 0) - at(0, 0)) * sx
         let bottom = at(0, 1) + (at(1, 1) - at(0, 1)) * sx
         return top + (bottom - top) * sy
+    }
+}
+
+// MARK: - #604 round 3: surface texture (G wavelets, H micro ripples, I caustic shimmer). PROBE.
+
+extension WaterNode {
+    /// The texture sprite's frame (as the styled sprite's): its centre in its own downwind-up axes, its size, its
+    /// turn as (cos, sin); world points per screen point now (`u_scale`) and at the default zoom (`u_ref`); the
+    /// ripple's drift, world points; H's frame offset (drift plus anchor, in the sprite's axes); peak strength.
+    private static let texOrigin = SKUniform(name: "u_origin", vectorFloat2: .zero)
+    private static let texSize = SKUniform(name: "u_size", vectorFloat2: .zero)
+    private static let texRot = SKUniform(name: "u_rot", vectorFloat2: SIMD2(1, 0))
+    private static let texScale = SKUniform(name: "u_scale", float: 1)
+    private static let texRef = SKUniform(name: "u_ref", float: 1)
+    private static let texDrift = SKUniform(name: "u_drift", vectorFloat2: .zero)
+    private static let texLocal = SKUniform(name: "u_loff", vectorFloat2: .zero)
+    private static let texStrength = SKUniform(name: "u_strength", float: 0.13)
+
+    private static let texturePrelude = """
+    float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    vec3 permute3(vec3 x) { return mod(((x * 34.0) + 1.0) * x, 289.0); }
+    float snoise(vec2 v) {
+        const vec4 C = vec4(0.211324865405187, 0.366025403784439, -0.577350269189626, 0.024390243902439);
+        vec2 i = floor(v + dot(v, C.yy));
+        vec2 x0 = v - i + dot(i, C.xx);
+        vec2 i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+        vec4 x12 = x0.xyxy + C.xxzz;
+        x12.xy -= i1;
+        i = mod(i, 289.0);
+        vec3 p = permute3(permute3(i.y + vec3(0.0, i1.y, 1.0)) + i.x + vec3(0.0, i1.x, 1.0));
+        vec3 m = max(0.5 - vec3(dot(x0, x0), dot(x12.xy, x12.xy), dot(x12.zw, x12.zw)), 0.0);
+        m = m * m; m = m * m;
+        vec3 x = 2.0 * fract(p * C.www) - 1.0;
+        vec3 h = abs(x) - 0.5;
+        vec3 ox = floor(x + 0.5);
+        vec3 a0 = x - ox;
+        m *= 1.79284291400159 - 0.85373472095314 * (a0 * a0 + h * h);
+        vec3 g;
+        g.x = a0.x * x0.x + h.x * x0.y;
+        g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+        return 130.0 * dot(m, g);
+    }
+    """
+
+    /// G, wavelets: two octaves of simplex noise, each two layers sliding against each other so the surface morphs
+    /// rather than slides; the fine one ~12 screen points at the default zoom, the coarse ~32; each fades out as it
+    /// shrinks under a few screen points.
+    private static let waveletsSource = """
+    float look(vec2 m, vec2 l, float g, float dth, vec4 U) {
+        float T = U.x;
+        float lf = 12.0 * U.y;
+        float lc = 32.0 * U.y;
+        vec2 st = vec2(0.55, 1.0);
+        vec2 a = l * st / lf;
+        vec2 e = vec2(0.0, 0.18);
+        vec2 r1 = vec2(0.03, 0.17) * T;
+        vec2 r2 = vec2(-0.05, 0.11) * T;
+        mat2 tw = mat2(0.94, -0.34, 0.34, 0.94);
+        float nf = 0.5 * (snoise(a + r1) - snoise(a + r1 + e) + snoise(tw * a * 1.07 + r2) - snoise(tw * (a + e) * 1.07 + r2)) * 2.2
+            + 0.25 * snoise(a * 0.9 - r2);
+        vec2 b = l * st / lc;
+        float nc = 0.5 * (snoise(b + 0.4 * r1) + snoise(tw * b * 1.11 + 0.4 * r2));
+        float ff = smoothstep(3.0, 8.0, lf / U.z);
+        float fc = smoothstep(3.0, 8.0, lc / U.z);
+        return 0.6 * ff * nf + 0.55 * fc * nc;
+    }
+    """
+
+    /// H, micro ripples: hairline dashes along the local wind, a quarter of the ripple's spacing apart, each
+    /// breaking and re-forming on its own cycle; a finer, denser second set in puffs; gone in lulls.
+    private static let microSource = """
+    float dashes(vec2 l, float s, float L, float salt, float density, float dth, vec4 U) {
+        vec2 cs = vec2(s, L);
+        vec2 cp = l / cs;
+        cp.y += h21(vec2(floor(cp.x), salt));
+        vec2 cell = floor(cp);
+        vec2 f = fract(cp);
+        float period = 2.0 + 2.5 * h21(cell + vec2(salt, 1.3));
+        float ph = U.x / period + h21(cell + vec2(5.1, salt));
+        float cyc = floor(ph);
+        float life = sin(3.14159 * fract(ph));
+        if (h21(cell + vec2(cyc * 3.7, salt + 0.5)) > density) { return 0.0; }
+        vec2 c = vec2(0.3 + 0.4 * h21(cell + vec2(cyc + 2.2, salt)), 0.5);
+        vec2 d = (f - c) * cs;
+        float cd = cos(dth), sd = sin(dth);
+        d = vec2(d.x * cd - d.y * sd, d.x * sd + d.y * cd);
+        float hl = L * (0.1 + 0.28 * h21(cell + vec2(cyc + 9.9, salt)));
+        float along = clamp(abs(d.y) / hl, 0.0, 1.0);
+        float dpx = abs(d.x) / U.z;
+        return life * clamp(0.9 - dpx, 0.0, 1.0) * (1.0 - along * along);
+    }
+    float look(vec2 m, vec2 l, float g, float dth, vec4 U) {
+        float puff = max(g, 0.0);
+        float lull = max(-g, 0.0);
+        float glassy = 1.0 - smoothstep(0.05, 0.45, lull);
+        float s = 24.0;
+        float acc = dashes(l, s, 64.0, 0.0, 0.6 + 0.35 * puff, dth, U);
+        acc += 0.8 * dashes(l + vec2(0.37 * s, 23.0), 0.5 * s, 40.0, 7.0, 0.9 * smoothstep(0.1, 0.6, puff), dth, U)
+            * smoothstep(2.5, 4.5, 0.5 * s / U.z);
+        return min(acc, 1.0) * glassy * smoothstep(2.5, 5.0, s / U.z);
+    }
+    """
+
+    /// I, caustic shimmer: the edges of a slowly morphing Worley cell field, ~9 screen points a cell at the
+    /// default zoom, faintly lighter, cell middles faintly darker, swelling and fading under a broad noise; eased
+    /// out as the cells shrink on screen.
+    private static let causticSource = """
+    float look(vec2 m, vec2 l, float g, float dth, vec4 U) {
+        float cs = 9.0 * U.y;
+        vec2 p = m / cs;
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        float f1 = 8.0;
+        float f2 = 8.0;
+        for (int y = -1; y <= 1; y++) {
+            for (int x = -1; x <= 1; x++) {
+                vec2 o = vec2(float(x), float(y));
+                vec2 h = vec2(h21(i + o), h21(i + o + vec2(19.1, 7.3)));
+                vec2 pt = o + 0.5 + 0.38 * sin(U.x * (0.4 + 0.5 * h) + 6.2831 * h);
+                float d = length(pt - f);
+                if (d < f1) { f2 = f1; f1 = d; } else if (d < f2) { f2 = d; }
+            }
+        }
+        float screenCell = cs / U.z;
+        float w = 1.2 / screenCell;
+        float edge = exp(-(f2 - f1) / (w + 0.07));
+        float broad = smoothstep(-0.4, 0.7, snoise(m / (60.0 * U.y) + vec2(0.03, 0.05) * U.x));
+        float breakup = smoothstep(-0.2, 0.6, snoise(m / (1.6 * cs) - vec2(0.1, 0.07) * U.x));
+        return smoothstep(4.0, 10.0, screenCell) * broad * (edge * breakup - 0.15);
+    }
+    """
+
+    private static let textureMain = """
+    void main() {
+        vec2 q = (v_tex_coord - 0.5) * u_size;
+        vec2 p = u_origin + q;
+        vec2 w = vec2(p.x * u_rot.x - p.y * u_rot.y, p.x * u_rot.y + p.y * u_rot.x);
+        vec2 guv = clamp((w - u_gust_origin) / u_gust_size, 0.0, 1.0);
+        vec4 gm = texture2D(u_gust, guv);
+        float g = gm.r * 2.0 - 1.0;
+        float dth = gm.g - 0.5;
+        float t = clamp(look(w - u_drift, p - u_loff, g, dth, vec4(u_clock, u_ref, u_scale, 0.0)), -1.0, 1.0);
+        float a = u_strength * abs(t);
+        vec3 c = t > 0.0 ? u_tint : u_puff_tint;
+        gl_FragColor = vec4(c * a, a);
+    }
+    """
+
+    fileprivate static let textureShader: SKShader = {
+        let body = switch WaterLook.current {
+        case .g: waveletsSource
+        case .h: microSource
+        default: causticSource
+        }
+        texStrength.floatValue = switch WaterLook.current {
+        case .g: 0.15
+        case .h: 0.21
+        default: 0.2
+        }
+        return SKShader(source: texturePrelude + body + textureMain,
+                        uniforms: [waveClock, texOrigin, texSize, texRot, texScale, texRef, texDrift, texLocal,
+                                   texStrength, rippleTint, puffTint, gustMap, gustOrigin, gustSize])
+    }()
+
+    func updateTexture(_ world: WaterWorld, view: WaterView) {
+        guard WaterLook.current.isTexture else { return }
+        guard let course = world.courseWind else {
+            textureSprite.isHidden = true
+            return
+        }
+        textureSprite.isHidden = false
+        let rect = view.rect
+        if textureReference == nil, view.scale > 0 {
+            textureReference = (view.scale, CGPoint(x: rect.midX, y: rect.midY))
+        }
+        let reference = textureReference ?? (view.scale, .zero)
+        let side = hypot(rect.width, rect.height) * 1.2
+        let rotation = CGFloat(-(course.direction + .pi))
+        textureSprite.size = CGSize(width: side, height: side)
+        textureSprite.position = CGPoint(x: rect.midX, y: rect.midY)
+        textureSprite.zRotation = rotation
+        let c = cos(-rotation), s = sin(-rotation)
+        func local(_ x: CGFloat, _ y: CGFloat) -> SIMD2<Float> { SIMD2(Float(x * c - y * s), Float(x * s + y * c)) }
+        Self.texOrigin.vectorFloat2Value = local(rect.midX, rect.midY)
+        Self.texSize.vectorFloat2Value = SIMD2(Float(side), Float(side))
+        Self.texRot.vectorFloat2Value = SIMD2(Float(cos(rotation)), Float(sin(rotation)))
+        Self.texScale.floatValue = Float(view.scale)
+        Self.texRef.floatValue = Float(reference.scale)
+        Self.texDrift.vectorFloat2Value = SIMD2(Float(drift.x), Float(drift.y))
+        Self.texLocal.vectorFloat2Value = local(drift.x + reference.anchor.x, drift.y + reference.anchor.y)
+
+        guard WaterLook.current == .h else { return }
+        // H's gust map: red how much more (lighter) or less wind than the course wind, green the local wind's turn
+        // off the course wind (±0.5 rad), its first row the top.
+        let n = Self.gustColumns
+        var bytes = [UInt8](repeating: 128, count: n * n * 4)
+        for row in 0..<n {
+            let y = Double(rect.maxY) - (Double(row) + 0.5) / Double(n) * Double(rect.height)
+            for column in 0..<n {
+                let x = Double(rect.minX) + (Double(column) + 0.5) / Double(n) * Double(rect.width)
+                let wind = world.wind(Vec2(x, y) / pointsPerMeter)
+                let g = Self.gust(local: wind, course: course)
+                var turn = (wind?.direction ?? course.direction) - course.direction
+                turn = atan2(sin(turn), cos(turn))
+                let k = (row * n + column) * 4
+                bytes[k] = UInt8(((g * 0.5 + 0.5) * 255).rounded().clamped(to: 0...255))
+                bytes[k + 1] = UInt8(((turn + 0.5) * 255).rounded().clamped(to: 0...255))
+                bytes[k + 2] = 128
+                bytes[k + 3] = 255
+            }
+        }
+        Self.gustMap.textureValue = Self.gustTexture(bytes: bytes, side: n)
+        Self.gustOrigin.vectorFloat2Value = SIMD2(Float(rect.minX), Float(rect.minY))
+        Self.gustSize.vectorFloat2Value = SIMD2(Float(rect.width), Float(rect.height))
     }
 }
