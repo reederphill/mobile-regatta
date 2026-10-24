@@ -108,6 +108,14 @@ struct FreezeTickRow: Decodable {
     var planingSeconds: Double?
     /// At least this many boats on the plane in view, you among them: each trails her stern-corner wakes.
     var planingInView: Int?
+    /// Your spinnaker (#311), as the app draws it from `Boat.spinnaker`: "hoisting", "dropping", "up" (up and drawing)
+    /// or "collapsed" (`Boat.isSpinnakerCollapsed(in:)`).
+    var yourSpinnaker: String?
+    /// How far up it is drawn, inside these bounds, both included: `1 − remaining/T` hoisting, `remaining/T` dropping,
+    /// 1 up or collapsed (the app's `SpinnakerPose.hoisted`).
+    var yourSpinnakerProgress: [Double]?
+    /// At least this many boats in view with their spinnaker up (drawing or collapsed), you among them.
+    var spinnakersInView: Int?
 
     static let callSeconds = 8
     static let callFadeSeconds = 1.5
@@ -302,6 +310,16 @@ enum FreezeTicks {
         if let n = row.planingInView, inView.filter({ race.boats[$0].isPlaning && !race.boats[$0].isGhost }).count < n {
             return false
         }
+        if let n = row.spinnakersInView,
+           inView.filter({ race.boats[$0].spinnaker.isUp && !race.boats[$0].isGhost }).count < n {
+            return false
+        }
+        if let state = row.yourSpinnaker, spinnakerState(boat, in: race.boatClass) != state { return false }
+        if let bounds = row.yourSpinnakerProgress, bounds.count == 2 {
+            guard let progress = spinnakerProgress(boat, in: race.boatClass), (bounds[0]...bounds[1]).contains(progress) else {
+                return false
+            }
+        }
         if let bounds = row.planeMargin, bounds.count == 2 {
             guard let margin = planeMargin(boat, in: race.boatClass), (bounds[0]...bounds[1]).contains(margin) else { return false }
         }
@@ -376,6 +394,27 @@ enum FreezeTicks {
         guard boat.isPlaning, !boat.isGhost, let rule = boatClass.planing else { return nil }
         return rule.planeMargin(isPlaning: true, twa: boat.twa, speed: boat.speed, tws: boat.polarWindSpeed(in: boatClass),
                                 polar: boatClass.polar)
+    }
+
+    /// Her spinnaker's state as the app draws it (#311): nil down.
+    static func spinnakerState(_ boat: Boat, in boatClass: BoatClass) -> String? {
+        switch boat.spinnaker {
+        case .down: nil
+        case .hoisting: "hoisting"
+        case .dropping: "dropping"
+        case .up: boat.isSpinnakerCollapsed(in: boatClass) ? "collapsed" : "up"
+        }
+    }
+
+    /// How far up her spinnaker is drawn (#311, the app's `SpinnakerPose.hoisted`): nil down.
+    static func spinnakerProgress(_ boat: Boat, in boatClass: BoatClass) -> Double? {
+        let duration = boatClass.spinnaker?.transitionTime ?? 0
+        switch boat.spinnaker {
+        case .down: return nil
+        case .up: return 1
+        case .hoisting(let remaining): return duration > 0 ? 1 - min(max(remaining / duration, 0), 1) : 1
+        case .dropping(let remaining): return duration > 0 ? min(max(remaining / duration, 0), 1) : 1
+        }
     }
 
     /// The strength of `seat`'s backwind wedge as the app draws it (`BoatEffects`), 0...1: none for a ghost.
