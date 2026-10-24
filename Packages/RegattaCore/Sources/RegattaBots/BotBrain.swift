@@ -1941,7 +1941,7 @@ struct BotBrain: Sendable {
     func isAboutToHit(_ other: SeatView.OtherBoat, _ b: SeatView.OwnBoat, _ view: SeatView, desired: Double,
                               lookahead: Double) -> Bool {
         guard (other.position - b.position).length < 30 else { return false }
-        return Self.closestApproach(of: other, to: b, heading: desired, lookahead: lookahead)
+        return approach(of: other, to: b, heading: desired, lookahead: lookahead, view)
             < view.boatClass.hull.length * keepClearLengths
     }
 

@@ -216,8 +216,10 @@ extension BotBrain {
         let turned = abs(wrapAngle(b.heading - b.windDirection)) - start
         let onHerTack = wrapAngle(b.heading - b.windDirection) * side >= 0
         let first: Double = !keepsFirst && abs(turned) > Self.clearingStep && onHerTack ? (turned > 0 ? 1 : -1) : first
+        let tracks = near.map { projectedTrack(of: $0, lookahead: lookahead, view) }
         func distance(_ heading: Double) -> Double {
-            near.map { Self.closestApproach(of: $0, to: b, heading: heading, lookahead: lookahead) }.min() ?? .infinity
+            zip(near, tracks).map { Self.approach(of: $0, track: $1, to: b, heading: heading, lookahead: lookahead) }.min()
+                ?? .infinity
         }
         var furthest: (heading: Double, distance: Double)?
         for way in [first, -first] {
@@ -347,7 +349,7 @@ extension BotBrain {
             }
             guard gap <= Self.tapRange else { return true }
             let lookahead = (ontoPort && other.tack == .starboard ? Self.tapOntoPortLookahead : Self.tapLookahead) * tapLookaheadScale
-            let approach = Self.closestApproach(of: other, to: b, heading: heading, speed: speed, lookahead: lookahead)
+            let approach = approach(of: other, to: b, heading: heading, speed: speed, lookahead: lookahead, view)
             guard approach >= min(clear, gap) else { return false }
             // A live bot racing on the shared scorer (#531, racing only: Q6) looks along the tack she will sail too,
             // `other` rolled as the scorer rolls her against a tack (`tackReaction`: rule 13, nobody gives way to her).

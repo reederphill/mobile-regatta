@@ -456,8 +456,8 @@ extension BotBrain {
             let hits = view.others.first { other in
                 !other.isGhost && other.seat != committed.escaping
                     && (other.position - b.position).length < Self.keepClearRange
-                    && Self.closestApproach(of: other, to: b, heading: heading, speed: b.speed * Self.tapSpeedShare,
-                                            lookahead: lookahead) < collision
+                    && approach(of: other, to: b, heading: heading, speed: b.speed * Self.tapSpeedShare,
+                                lookahead: lookahead, view) < collision
             }
             guard hits != nil else { return (RacingKeepClear(heading: nil, threat: committed.escaping), []) }
         }

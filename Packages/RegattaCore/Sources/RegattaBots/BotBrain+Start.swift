@@ -495,8 +495,10 @@ extension BotBrain {
         let floor = Self.startLuffFloor(view)
         let near = view.others.filter { !$0.isGhost && ($0.position - b.position).length < Self.keepClearRange }
         let clear = view.boatClass.hull.length * keepClearLengths * Self.keepClearMargin
+        let tracks = near.map { projectedTrack(of: $0, lookahead: lookahead, view) }
         func passes(_ heading: Double) -> Bool {
-            let closest = near.map { Self.closestApproach(of: $0, to: b, heading: heading, lookahead: lookahead) }.min()
+            let closest = zip(near, tracks).map { Self.approach(of: $0, track: $1, to: b, heading: heading, lookahead: lookahead) }
+                .min()
             return (closest ?? .infinity) >= clear
         }
         var angle = max(floor, min(abs(wrapAngle(desired - b.windDirection)), abs(wrapAngle(b.heading - b.windDirection))))

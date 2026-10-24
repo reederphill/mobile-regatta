@@ -326,7 +326,7 @@ extension BotBrain {
         // Sailing on she crosses its track ahead of it ...
         guard offset.dot(forward) + relative.dot(forward) * (toLeeward / closing) > 0 else { return false }
         // ... clear of it as she keeps clear (`isAboutToHit`).
-        return Self.closestApproach(of: other, to: b, heading: b.heading, lookahead: keepClearLookahead)
+        return approach(of: other, to: b, heading: b.heading, lookahead: keepClearLookahead, view)
             >= view.boatClass.hull.length * keepClearLengths
     }
 

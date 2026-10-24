@@ -26,7 +26,7 @@ import Testing
                           Double(seats.filter { $0.ocsCount > 0 }.count) / Double(seats.count))
         }
         let env = ProcessInfo.processInfo.environment
-        let label = ["KC_DISTANCE", "KC_MARGIN", "KC_SLOPE", "KC_THIN_COST", "KC_PLANNER", "KC_PROFILES"].map { "\($0)=\(env[$0] ?? "-")" }
+        let label = ["KC_DISTANCE", "KC_MARGIN", "KC_SLOPE", "KC_THIN_COST", "KC_PLANNER", "KC_PROFILES", "KC_CURVED"].map { "\($0)=\(env[$0] ?? "-")" }
             .joined(separator: " ")
         let profiles = ProfileMix(rawValue: env["KC_PROFILES"] ?? "live") ?? .live
         if env["KC_CONDUCT_ONLY"] == nil {
