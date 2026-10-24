@@ -64,7 +64,7 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
     BotProfile.swift        the bot suite's scripted profiles: baseline (groove only) and tactician (#231), blip-tacker (#238), hunter (#355), executor and Club-execution tactician (#105)
     FleetRoster.swift       display metadata: which seats are bots, and their sailing names
   Sources/BotSuite/       the headless bot-race suite (#97): harness, matrix, per-seat metrics, per-tier gate, the skill-gap gate (#231), the fun-pass gate (#238), JSON report; #105's mixes (execution, cautious, rivals, rank stability), the 16.1 watchdog and the placeholder keys #389 sets
-  Sources/regatta-botsuite `swift run -c release regatta-botsuite [--profile-mix <mix>] [--json <path|->]`: sails matrix.json, exits 1 on a breach; CI's botsuite.yml runs it on main and nightly
+  Sources/regatta-botsuite `swift run -c release regatta-botsuite [--profile-mix <mix>] [--json <path|->]`: sails matrix.json, exits 1 on a breach; botsuite.yml runs it nightly
   Tests/Goldens.json      golden digests keyed by simulation version
   Tests/Fixtures/         the golden 16-seat scripted race log, and a wind seed pool for the loader
 Packages/RegattaProtocol/ The race wire protocol: messages, frames and a binary codec, no transport (#63)
@@ -150,7 +150,7 @@ Regatta/                The iOS app
   PrivacyInfo.xcprivacy   privacy manifest (#28)
   Regatta.entitlements    Game Center and App Attest environment
 RegattaTests/           Hosted unit tests for the app
-RegattaUITests/         UI tests; screenshots attach to the xcresult
+RegattaUITests/         the online UI tests scripts/e2e.sh runs; Fixtures/ for -fixture previews
 ```
 
 The simulation runs at a fixed 30 Hz (`Race.tickRate`), independent of the display (the app renders at
@@ -238,10 +238,12 @@ cd Packages/RegattaCore && swift test
 and the protocol's, the client's and the server's with `swift test` in `Packages/RegattaProtocol`,
 `Packages/RegattaClient` and `Packages/RegattaServer`.
 
-Check everything a change reaches, compiling it all before running any test (flags are in the script):
+The merge gate (what CI's `packages` job runs): every package built with its tests and run at `-O`, the bot suites
+left out (`--bots` adds them; name packages to narrow it):
 
 ```bash
-scripts/check.sh
+scripts/test.sh                 # every package
+scripts/test.sh RegattaCore     # one
 ```
 
 Run the golden and RegattaBots' replay race in debug and release, and build every package, on the pinned Linux
@@ -353,7 +355,7 @@ podman stop regatta
 Bandwidth: with 16 boats a client receives about 4.9 KB/s at worst (a snapshot of about 480 bytes with the
 umpire's relations 10 times a second, plus pongs and events) and joins in about 0.7 KB. Fewer boats send less.
 The 5 KB/s budget (#27) holds, with little room: `BandwidthBudgetTests` measures it for 16 clients on a virtual
-clock (#216), and CI's container job over real sockets. The 1 MB per race budget is measured only on the short
+clock (#216), and the nightly container job over real sockets. The 1 MB per race budget is measured only on the short
 races (8 to 20 s after the start sequence), where it passes trivially. A race costs the join plus that rate times
 its length from the join to the close, so it extrapolates to about 2.6 MB for an 8-minute race (with a 60 s
 sequence): at the measured rate 1 MB holds only to about 3.4 minutes. The two budgets disagree for real race lengths; which one
@@ -364,8 +366,8 @@ gives way (or whether the snapshot rate changes) is an open question for the pro
 `Persistence` keeps players, sessions, the race registry, race logs and every version of every data file in
 Postgres 17 (ADR 0009). `PersistenceTests` run against a real database named by `REGATTA_TEST_DATABASE_URL`; each
 test makes its own schema and drops it, so they run in parallel. Without the variable they're skipped, saying why
-(so `scripts/check.sh` runs without a database, CI's macOS job included); with `REGATTA_REQUIRE_DATABASE=1` a
-missing variable fails them instead, and CI's `persistence` job sets it and runs them in the pinned Linux image
+(so `scripts/test.sh` runs without a database); with `REGATTA_REQUIRE_DATABASE=1` a
+missing variable fails them instead, and the nightly `persistence` job sets it and runs them in the pinned Linux image
 next to a `postgres:17` service container.
 
 Locally, with Homebrew's `postgresql@17` (trust auth on localhost; `createdb regatta_test` once). Start it only
@@ -427,19 +429,17 @@ signs in, accepts the terms, joins the queue and leaves it, relaunches, meets a 
 bump (`TERMS_VERSION=2`); then `OnlineQueueRaceUITests` (#162) on a 4 s queue and a 12 s race (queue to the close, Leave
 in the briefing, Rejoin race after a drop, Leave race after the gun, the livery back from the server), with a headless
 second person in the fleet (`regatta-loadclient --queue-player 7001`), and with the server killed under a race and
-started again. The regular UI test run skips those tests, saying why, since it has no server.
+started again. Those are the only UI tests: they skip without a server, saying why. It runs nightly.
 
 ```bash
 scripts/e2e.sh
 ```
 
-Run the app's unit tests (`RegattaTests`) and UI tests (`RegattaUITests`) on the simulator:
+Run the app's unit tests (`RegattaTests`) on the simulator:
 
 ```bash
-xcodebuild test -scheme Regatta -destination 'platform=iOS Simulator,name=iPhone 17'
+xcodebuild test -scheme Regatta -destination 'platform=iOS Simulator,name=iPhone 17' -only-testing:RegattaTests
 ```
-
-UI tests attach screenshots to the result bundle with `attachScreenshot(named:)`.
 
 ### Shipping config
 
@@ -468,12 +468,11 @@ after adding either, and CI checks it's current:
 swift scripts/generate-acknowledgements.swift
 ```
 
-CI (`.github/workflows/ci.yml`) runs only the jobs a change reaches: `scripts/linux-test.sh` on Linux,
-`scripts/check.sh` for the packages plus `scripts/check-digest-stable.sh` on macOS, and `xcodebuild test` on the
-iOS Simulator (iPhone, plus the iPad letterbox test on main and nightly), and `scripts/e2e.sh` when online code changes. `.github/workflows/ios27.yml` runs on GitHub's Xcode 27 image: it archives with the iOS 27 SDK, checks
-the archive with `scripts/check-shipping-config.sh`, launches the app, and runs its tests on iOS 27 iPhone and
-iPad simulators. To save macOS minutes it runs only on main pushes that touch shipping config, weekly
-and by hand, never on a pull request.
+CI (`.github/workflows/ci.yml`), the merge gate: `scripts/test.sh` on macOS and the app compiled with its test targets.
+Nightly (`.github/workflows/nightly.yml`), never blocking: `scripts/linux-test.sh` (the golden and RegattaBots digests
+on the pinned Linux replay platform), the server image under load, Postgres, `scripts/test.sh --bots` plus
+`scripts/check-digest-stable.sh`, the app's unit tests on the simulator, and `scripts/e2e.sh`. The bot suite
+(`botsuite.yml`) runs nightly too; `ios27.yml` (the iOS 27 SDK: archive, shipping config, launch, unit tests) weekly.
 
 ### Launch arguments
 
@@ -489,13 +488,13 @@ Parsed by `LaunchOptions`; bad values are logged and ignored.
 - `-timescale <n>` runs the simulation at `n`× real time.
 - `-uitesting` marks a UI test run. It and `-fixture` hide the Debug FPS, node and draw-count overlay so
   screenshots are deterministic.
-- `-fixture <name>`, `-scheme halves|tiller` and `-camera course|boat` are parsed for the render fixtures
+- `-fixture <name>`, `-scheme halves|tiller` and `-camera course|boat` are parsed for fixture previews
   (#62), steering schemes (#112) and camera (#113): `-camera` overrides Settings' camera as course-up or boat-up.
 - `-online` starts an online dev race at launch (Debug builds), on `-onlineHost <host:port>` or the menu's
   host; `-startSeconds <n>` (1…60) and `-raceSeconds <n>` ask the dev server for a short sequence and race.
 - `-vision deut|prot|trit|grey|sun` (or `deuteranopia`, `protanopia`, `tritanopia`, `greyscale`, `washout`,
   `none`) puts a colour-vision filter over the whole race view, scene, HUD and letterbox alike (Debug builds,
-  #111), to check every cue still reads. The render fixtures diff the scene through each (`RegattaUITests/Fixtures/prestart-*.json`).
+  #111), to check every cue still reads.
 - `-tuning` opens the debug tuning panel at launch (Debug builds, #232; see below).
 - `-fakeServices signed-out|underage|communication-restricted|multiplayer-restricted|offline|queued|cancelled-race`
   runs the online services on that scenario's scripted fakes (`RegattaServices`), for UI tests (#242).

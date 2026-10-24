@@ -21,7 +21,7 @@
 # `"camera": "race"` the race camera's frame on the phone's screen (`RaceCameraFrame`); a row naming a fixture drawn
 # from the other camera is refused. `regatta-replay freeze-ticks --explain <fixtures> <table>` prints what each
 # committed frame holds (boats on screen, zoom). Fixtures the table doesn't name keep their hand-set ticks (a fixed time into the log), and a recorded
-# log reaches them. Look at the renders CI makes (render-actuals, scripts/adopt-references.sh) before adopting them.
+# log reaches them. Look at a local preview of the scenes before committing.
 #
 # The tool is `regatta-replay` (Packages/RegattaCore, release build, through scripts/heavy.sh); the conditions are
 # documented on `FreezeTickRow`, the scenes on `FixtureScene`.

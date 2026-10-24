@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # The bot-suite workflow (.github/workflows/botsuite.yml, #105) sails in the pinned Linux replay image, the one
-# scripts/linux-test.sh pins as IMAGE (changing it changes the simulation version), and CI's persistence job
-# (.github/workflows/ci.yml, #144) tests the server's Postgres stores in it. Fails unless every container image
-# botsuite.yml names, and every swift image ci.yml names, is exactly that IMAGE, so the pins can't drift.
-# check.sh runs it.
+# scripts/linux-test.sh pins as IMAGE (changing it changes the simulation version), and the nightly persistence job
+# (.github/workflows/nightly.yml, #144) tests the server's Postgres stores in it. Fails unless every container image
+# botsuite.yml names, and every swift image nightly.yml names, is exactly that IMAGE, so the pins can't drift.
+# nightly.yml runs it.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -25,6 +25,6 @@ check() {
 }
 
 check botsuite.yml 's/^ *image: *\([^ ]*\) *$/\1/p'
-# ci.yml also names service images (postgres): only its swift images are the replay platform's.
-check ci.yml 's/^ *image: *\(swift[:@][^ ]*\) *$/\1/p'
+# nightly.yml also names service images (postgres): only its swift images are the replay platform's.
+check nightly.yml 's/^ *image: *\(swift[:@][^ ]*\) *$/\1/p'
 exit "$status"
