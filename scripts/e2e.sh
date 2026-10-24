@@ -204,9 +204,11 @@ run_tests race -only-testing:RegattaUITests/OnlineQueueRaceUITests
 
 # 4. pair (#162): the app and a headless second person in one fleet. xcodebuild takes a minute or two to reach the
 # test, so she doesn't join on the script's clock: the test arranges a race on the server as it taps Race online, and
-# she joins as soon as /health shows it. The 30 s to the lock take either order of the two joins.
+# she joins as soon as /health shows it. The 30 s to the lock take either order of the two joins. The race closes
+# 30 s after its gun: the test leaves it after the gun, and on CI's simulator reading the clock and working the race
+# menu took longer than 12 s (run 40016922723: the close came first, and Leave race found the results).
 stop_server
-start_server free QUEUE_LOCK_SECONDS=30 QUEUE_RACE_SECONDS=12 CATCH_FINISHERS=off
+start_server free QUEUE_LOCK_SECONDS=30 QUEUE_RACE_SECONDS=30 CATCH_FINISHERS=off
 echo "== pair: OnlineQueueRaceUITests/testTwoHumansShareOneFleet with regatta-loadclient --queue-player 7001"
 pair_port=$port
 (

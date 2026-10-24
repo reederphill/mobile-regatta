@@ -9,7 +9,8 @@ import XCTest
 /// in `REGATTA_E2E_PHASE`; a test skips outside its phase, and without a server (`REGATTA_ONLINE_HOST`):
 /// - `race`: the queue locks 4 s after the join, a queue race closes 12 s after the gun, and a race everyone dropped
 ///   out of waits two minutes for someone to come back.
-/// - `pair`: the queue locks 30 s after the first join, and the script queues a headless second person
+/// - `pair`: the queue locks 30 s after the first join, a queue race closes 30 s after the gun (time to leave it
+///   after the gun on a slow simulator), and the script queues a headless second person
 ///   (`regatta-loadclient --queue-player 7001`) beside the app, once the test has arranged a race on the server to
 ///   say the app is about to join (the script watches `/health` for it).
 /// - `kill`: the script kills the server while the app is in a race, and starts it again on the same port.
@@ -347,7 +348,7 @@ final class OnlineQueueRaceUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["race-clock"].waitForExistence(timeout: 60), "no race clock on the water")
 
         // #163, the ticket's "rating push arrives while queued": past the gun she leaves the race (RET, rated: two
-        // humans were at the gun), and queues again. The close, 12 s after the gun, pushes her rating change, and
+        // humans were at the gun), and queues again. The close, 30 s after the gun, pushes her rating change, and
         // Home's Last race shows it while the queue bar is up.
         try await waitForTheGun(app)
         let menu = app.buttons["race-pause"]
