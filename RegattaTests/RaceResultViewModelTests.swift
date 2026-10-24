@@ -2,6 +2,7 @@ import Foundation
 import Testing
 import RegattaBots
 import RegattaCore
+import RegattaServices
 @testable import Regatta
 
 /// The results sheet's model (#132, #24, #30): rows from the core's results or the live frame, gaps, ⚑, the Your race
@@ -281,6 +282,40 @@ import RegattaCore
         #expect(model.lastRace == replaced, "a race you retired from doesn't replace it")
         model.leaveRace()
         #expect(model.lastRace == replaced)
+    }
+
+    /// #163, T1: a Last race read from the service wears the briefing's fleet the device kept for that race. For any
+    /// other race it keeps today's fallback byte for byte (her livery, `yours` elsewhere), which
+    /// `home-last-race-rating`'s reference draws.
+    @Test func lastRaceDrawsTheStoredFleet() throws {
+        let name = "RaceResultViewModelTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let model = AppModel(launchOptions: LaunchOptions(arguments: ["/path/to/Regatta"]), defaults: defaults)
+        let last = try #require(FakeServiceScenario.onlineRace(rated: true).lastRace)
+        let briefing = FakeServiceScenario.briefing()
+        #expect(briefing.fleet.count == last.report.roster.count)
+
+        model.keepHandOff(RaceFleet(raceID: last.report.raceID, briefing: briefing))
+        model.keepLastRace(last.report, rating: last.rating?.outcome)
+        let kept = try #require(model.lastRace)
+        #expect(kept.rows.map(\.livery) == kept.rows.map { briefing.fleet[$0.seat].livery })
+        #expect(kept.myRow?.livery.sailNumber == briefing.fleet[last.report.seat].livery.sailNumber)
+
+        model.keepHandOff(RaceFleet(raceID: RaceID("another-race"), briefing: briefing))
+        model.keepLastRace(last.report, rating: last.rating?.outcome)
+        let fallback = try #require(model.lastRace)
+        let today = RaceResultViewModel(lastRace: last, livery: model.myLivery)
+        #expect(fallback == today)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        #expect(try encoder.encode(fallback) == encoder.encode(today))
+        #expect(RaceResultViewModel(lastRace: last, livery: model.myLivery, fleet: Array(briefing.fleet.map(\.livery).dropLast()))
+            == today, "a fleet that doesn't fit the roster isn't this race's")
+        // A relaunch reads the hand-off's fleet back.
+        let relaunched = AppModel(launchOptions: LaunchOptions(arguments: ["/path/to/Regatta"]), defaults: defaults)
+        #expect(relaunched.fleet(of: RaceID("another-race")) == briefing.fleet.map(\.livery))
+        #expect(relaunched.fleet(of: last.report.raceID) == nil)
     }
 
     /// Results you retired from aren't kept as Last race; any other result of yours is.

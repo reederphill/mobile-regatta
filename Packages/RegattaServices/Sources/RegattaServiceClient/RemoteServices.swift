@@ -199,6 +199,13 @@ public struct RemoteLobbyService: LobbyService {
     public func report(race: RaceID, seat: Int, reason: RaceReportReason) async throws {
         try await done(.reportRace(raceID: race.rawValue, seat: seat, reason: reason.wire))
     }
+
+    public func boatCard(_ player: GamePlayerID) async throws -> BoatCard {
+        guard case .boatCard(let card) = try await call(.boatCard(gamePlayerID: player.rawValue)) else {
+            throw ServiceLinkError.unexpectedReply("to boatCard")
+        }
+        return BoatCard(wire: card)
+    }
 }
 
 /// The player's online profile and stored livery (#25, #21).

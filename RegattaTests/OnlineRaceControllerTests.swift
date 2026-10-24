@@ -79,6 +79,8 @@ nonisolated final class MutableRaceSession: RaceSessionService, @unchecked Senda
     var handOffAnswer: HandOff?
     var offer: RejoinOffer?
     var last: LastRace?
+    /// What `lastRace()` throws instead of answering (#163).
+    var lastRaceFailure: (any Error)?
     private(set) var rejoinsAsked = 0
     /// What `rejoin()` throws instead of answering: a session that is down, or a call that timed out (#162).
     var rejoinFailure: (any Error)?
@@ -104,7 +106,10 @@ nonisolated final class MutableRaceSession: RaceSessionService, @unchecked Senda
         return stream
     }
 
-    func lastRace() -> LastRace? { last }
+    func lastRace() throws -> LastRace? {
+        if let lastRaceFailure { throw lastRaceFailure }
+        return last
+    }
 
     func push(_ change: RatingChange) {
         for stream in ratings { stream.yield(change) }
@@ -126,13 +131,17 @@ nonisolated final class CountingQueue: QueueService, @unchecked Sendable {
     static let fresh = RaceToken(bytes: [0xFE])
 
     let clock = QueueControllerTests.FakeClock()
-    let model = AppModel()
+    /// On defaults of its own, so a kept Last race or hand-off is this rig's alone.
+    let model = AppModel(launchOptions: LaunchOptions(arguments: ["/path/to/Regatta"]),
+                         defaults: UserDefaults(suiteName: "SequenceRig.\(UUID().uuidString)")!)
     let session = MutableRaceSession()
     let counting = CountingQueue()
     let race: OnlineRaceController
     let queue: QueueController
     private(set) var links: [ScriptedRaceLink] = []
     private(set) var handOffs: [HandOff] = []
+    /// The seat liveries each link's launch was given (#163): the kept briefing's for its race, or nil.
+    private(set) var fleets: [[Livery]?] = []
 
     init() {
         let clock = clock
@@ -148,6 +157,7 @@ nonisolated final class CountingQueue: QueueService, @unchecked Sendable {
             let link = ScriptedRaceLink()
             links.append(link)
             handOffs.append(handOff)
+            fleets.append(model.fleet(of: handOff.raceID))
             return link
         }
     }
@@ -182,6 +192,269 @@ nonisolated final class CountingQueue: QueueService, @unchecked Sendable {
 
     static var closedReport: RaceReport {
         FakeServiceScenario.onlineRace(rated: true).lastRace!.report
+    }
+
+    /// The race before the close: two boats in, four sailing.
+    static var openReport: RaceReport {
+        guard case .report(let report) = FakeServiceScenario.onlineRace(rated: true).results[1] else { fatalError("no open report") }
+        return report
+    }
+
+    /// The closed race with her row RET: she left after the gun.
+    static var retiredReport: RaceReport {
+        var report = closedReport
+        report.results.rows = report.results.rows.map { row in
+            var row = row
+            if row.seat == report.seat { row.code = .ret; row.finishTick = nil }
+            return row
+        }
+        return report
+    }
+
+    static func report(_ report: RaceReport, id: String) -> RaceReport {
+        var report = report
+        report.raceID = RaceID(id)
+        return report
+    }
+
+    /// The sheet the link keeps from `report`.
+    static func sheet(_ report: RaceReport, rating: RaceResultViewModel.RatingCell = .pending) -> RaceResultViewModel {
+        RaceResultViewModel(report: report, entrants: RaceResultViewModel.onlineSampleEntrants(roster: report.roster, botSeats: []),
+                            rating: rating, earned: nil)
+    }
+
+    static func rated(_ change: Int, race: RaceID = raceID) -> RatingChange {
+        RatingChange(raceID: race, outcome: .rated(before: Rating(value: 1500, isProvisional: true),
+                                                   after: Rating(value: 1500 + change, isProvisional: true)))
+    }
+
+    /// Done mid-race with boats still sailing, then Race again before the close: the sheet as it stood is Home's.
+    func raceAgainBeforeTheClose() async {
+        await sail(to: 9000)
+        link.kept = Self.sheet(Self.openReport)
+        link.isPlayerDone = true
+        race.tick()
+        await race.raceAgain()
+        await settle()
+    }
+}
+
+/// The race just left, followed to its close (#163): the push, then the service's last race replaces Home's Last race.
+@MainActor @Suite struct RaceFollowerTests {
+    @Test func raceAgainBeforeTheCloseThenThePushReplacesTheFrozenRows() async throws {
+        let rig = SequenceRig()
+        await rig.raceAgainBeforeTheClose()
+        let frozen = try #require(rig.model.lastRace)
+        #expect(frozen.rows.filter { $0.result == .sailing }.count >= 1 && !frozen.isFinal)
+        #expect(rig.race.isFollowing && rig.model.lastRace?.ratingBadge == nil)
+
+        rig.session.last = LastRace(report: SequenceRig.closedReport, rating: SequenceRig.rated(12))
+        // Another race's change is not this one's close.
+        rig.session.push(SequenceRig.rated(30, race: RaceID("other")))
+        await rig.settle()
+        #expect(rig.model.lastRace == frozen && rig.race.isFollowing)
+        rig.session.push(SequenceRig.rated(12))
+        await rig.settle()
+        let closed = try #require(rig.model.lastRace)
+        #expect(closed.rows.filter { $0.result == .sailing }.count == 0, "the closed rows replace the frozen ones")
+        #expect(closed.isFinal && closed.ratingBadge?.text == "+12" && closed.summary == "3 of 6")
+        #expect(!rig.race.isFollowing && !rig.race.needsTicks)
+    }
+
+    /// G1: Leave race after the gun keeps nothing at once (T3 (1)); once the race closes, it is Home's Last race, with
+    /// her RET row and the badge.
+    @Test func leaveAfterTheGunKeepsTheRetRaceOnceItCloses() async throws {
+        let rig = SequenceRig()
+        await rig.sail(to: 300)
+        rig.link.kept = SequenceRig.sheet(SequenceRig.openReport)
+        rig.race.askToLeave()
+        rig.race.leaveRace()
+        await rig.race.leaving?.value
+        await rig.settle()
+        #expect(rig.model.lastRace == nil, "nothing is kept before the close")
+        #expect(rig.race.isFollowing)
+
+        rig.session.last = LastRace(report: SequenceRig.retiredReport, rating: SequenceRig.rated(-12))
+        rig.session.push(SequenceRig.rated(-12))
+        await rig.settle()
+        let kept = try #require(rig.model.lastRace)
+        #expect(kept.online?.raceID == SequenceRig.raceID.rawValue && kept.myRow?.result == .ret && kept.summary == "RET")
+        #expect(kept.isFinal && kept.ratingBadge?.text == "\u{2212}12")
+        #expect(!rig.race.isFollowing)
+    }
+
+    /// Disqualified mid-race, Home before the close (e2e run 40016922723): the server's report before the close lists
+    /// a DSQ seat neither as scored nor as sailing, so the sheet has no row of hers and nothing can be kept. The race
+    /// was hers past the gun, so it is followed, and once it closes it is Home's Last race, her DSQ row with it.
+    @Test func homeWithNoRowOfHersBeforeTheCloseFollowsTheRace() async throws {
+        let rig = SequenceRig()
+        await rig.sail(to: 300)
+        var open = SequenceRig.openReport
+        open.results.rows.removeAll { $0.seat == open.seat }
+        open.sailing.removeAll { $0 == open.seat }
+        rig.link.kept = SequenceRig.sheet(open)
+        #expect(rig.link.kept?.myRow == nil)
+        rig.link.isPlayerDone = true
+        rig.race.tick()
+        rig.race.home()
+        await rig.race.leaving?.value
+        await rig.settle()
+        #expect(rig.model.lastRace == nil, "no row of hers to keep before the close")
+        #expect(rig.race.isFollowing, "the race she was in past the gun isn't followed to its close")
+
+        var closed = SequenceRig.closedReport
+        closed.results.rows = closed.results.rows.map { row in
+            var row = row
+            if row.seat == closed.seat { row.code = .dsq; row.finishTick = nil }
+            return row
+        }
+        rig.session.last = LastRace(report: closed, rating: nil)
+        rig.session.push(RatingChange(raceID: SequenceRig.raceID, outcome: .unrated))
+        await rig.settle()
+        let kept = try #require(rig.model.lastRace)
+        #expect(kept.online?.raceID == SequenceRig.raceID.rawValue && kept.myRow?.result == .dsq && kept.isFinal)
+        #expect(!rig.race.isFollowing)
+    }
+
+    /// Disqualified in the sequence, Home just past the gun (e2e run 40049197023: idle on the line, "Rule 12 against
+    /// you, DSQ" at -0:25, so the race menu has no Leave and the results' Home is her way out): she was at the gun, so
+    /// the race is followed, and its rated close lands on Home's Last race with her DSQ row and the loss.
+    @Test func dsqInTheSequenceThenHomePastTheGunGetsTheRatedClose() async throws {
+        let rig = SequenceRig()
+        await rig.sail(to: -25 * Race.tickRate)
+        var open = SequenceRig.openReport
+        open.results.rows.removeAll { $0.seat == open.seat }
+        open.sailing.removeAll { $0 == open.seat }
+        rig.link.kept = SequenceRig.sheet(open)
+        rig.link.isPlayerDone = true
+        rig.race.tick()
+        #expect(rig.race.isBeforeGun)
+        rig.link.tick = 2 * Race.tickRate
+        rig.race.tick()
+        #expect(!rig.race.isBeforeGun)
+        rig.race.home()
+        await rig.race.leaving?.value
+        await rig.settle()
+        #expect(rig.race.isFollowing, "a race she was at the gun of isn't followed to its close")
+
+        var closed = SequenceRig.closedReport
+        closed.results.rows = closed.results.rows.map { row in
+            var row = row
+            if row.seat == closed.seat { row.code = .dsq; row.finishTick = nil }
+            return row
+        }
+        rig.session.last = LastRace(report: closed, rating: SequenceRig.rated(-12))
+        rig.session.push(SequenceRig.rated(-12))
+        await rig.settle()
+        let kept = try #require(rig.model.lastRace)
+        #expect(kept.myRow?.result == .dsq && kept.isFinal)
+        #expect(kept.ratingBadge?.spoken == "Rating minus 12")
+        #expect(!rig.race.isFollowing)
+    }
+
+    /// A leave before the gun gives the race away: nothing follows it, and its push changes nothing.
+    @Test func briefingLeaveFollowsNothing() async {
+        let rig = SequenceRig()
+        await rig.lock()
+        rig.race.askToLeave()
+        rig.race.leaveRace()
+        await rig.race.leaving?.value
+        await rig.settle()
+        #expect(!rig.race.isFollowing && !rig.race.needsTicks)
+        rig.session.last = LastRace(report: SequenceRig.closedReport, rating: SequenceRig.rated(12))
+        rig.session.push(SequenceRig.rated(12))
+        await rig.settle()
+        #expect(rig.model.lastRace == nil)
+    }
+
+    /// The service doesn't answer for the last race after the push: the pushed rating still lands on Home's row, and
+    /// the next session's open refreshes the rows (T4 (b)).
+    @Test func aFailedLastRaceReadKeepsThePushedRating() async throws {
+        let rig = SequenceRig()
+        await rig.raceAgainBeforeTheClose()
+        rig.session.lastRaceFailure = OnlineSessionError.notConnected
+        rig.session.push(SequenceRig.rated(12))
+        await rig.settle()
+        let rated = try #require(rig.model.lastRace)
+        #expect(rated.ratingBadge?.text == "+12" && !rated.isFinal)
+        #expect(!rig.race.isFollowing)
+
+        rig.session.lastRaceFailure = nil
+        rig.session.last = LastRace(report: SequenceRig.closedReport, rating: SequenceRig.rated(12))
+        await rig.race.adoptLastRace()
+        let refreshed = try #require(rig.model.lastRace)
+        #expect(refreshed.isFinal && refreshed.rows.filter { $0.result == .sailing }.isEmpty && refreshed.ratingBadge?.text == "+12")
+    }
+
+    @Test func followerGivesUpAfterTheRatingWait() async {
+        let rig = SequenceRig()
+        await rig.raceAgainBeforeTheClose()
+        #expect(rig.race.isFollowing && rig.race.needsTicks)
+        rig.clock.advance(OnlineRaceController.ratingWait - 1)
+        rig.race.tick()
+        #expect(rig.race.isFollowing)
+        rig.clock.advance(1)
+        rig.race.tick()
+        #expect(!rig.race.isFollowing && !rig.race.needsTicks, "no task and no ticks")
+        let frozen = rig.model.lastRace
+        rig.session.push(SequenceRig.rated(12))
+        await rig.settle()
+        #expect(rig.model.lastRace == frozen)
+    }
+
+    /// T4: the session's open reads her last race from the service once, and Home takes it when (a) it has none, (b)
+    /// it is the same race, or (c) it is the race this device was last handed. Otherwise Home's is newer and stays.
+    @Test func sessionOpenAdoptsTheServersLastRace() async throws {
+        let closed = LastRace(report: SequenceRig.closedReport, rating: SequenceRig.rated(12))
+        // (a) None on the device (a relaunch under UI tests, a reinstall, a second device), through the open itself.
+        let none = SequenceRig()
+        none.session.handOffAnswer = nil
+        none.session.last = closed
+        none.race.sessionOpened()
+        await none.settle()
+        #expect(none.model.lastRace?.isFinal == true && none.model.lastRace?.ratingBadge?.text == "+12")
+        #expect(none.model.phase == .home && none.race.phase == .idle)
+
+        // (b) The same race, frozen before the close: refreshed.
+        let same = SequenceRig()
+        same.model.keepLastRace(SequenceRig.sheet(SequenceRig.openReport))
+        same.session.last = closed
+        await same.race.adoptLastRace()
+        #expect(same.model.lastRace?.isFinal == true && same.model.lastRace?.ratingBadge?.text == "+12")
+
+        // (c) The race this device was handed, while Home has the one before: the app was killed in it.
+        let handed = SequenceRig()
+        handed.model.keepLastRace(SequenceRig.sheet(SequenceRig.report(SequenceRig.closedReport, id: "race-before"), rating: .unrated(.noOtherHumans)))
+        handed.model.keepHandOff(RaceFleet(raceID: SequenceRig.raceID, briefing: FakeServiceScenario.briefing()))
+        handed.session.last = closed
+        await handed.race.adoptLastRace()
+        #expect(handed.model.lastRace?.online?.raceID == SequenceRig.raceID.rawValue)
+
+        // Kept: a practice race since the hand-off.
+        let practice = SequenceRig()
+        practice.model.keepHandOff(RaceFleet(raceID: SequenceRig.raceID, briefing: FakeServiceScenario.briefing()))
+        practice.model.lastRace = RaceResultViewModel.gallerySample(final: true)
+        practice.session.last = closed
+        await practice.race.adoptLastRace()
+        #expect(practice.model.lastRace == RaceResultViewModel.gallerySample(final: true))
+
+        // Kept: this device's race is newer than the one another device sailed.
+        let mine = SequenceRig()
+        let newer = SequenceRig.sheet(SequenceRig.report(SequenceRig.closedReport, id: "race-mine"), rating: .unrated(.noOtherHumans))
+        mine.model.keepHandOff(RaceFleet(raceID: RaceID("race-mine"), briefing: FakeServiceScenario.briefing()))
+        mine.model.keepLastRace(newer)
+        mine.session.last = closed
+        await mine.race.adoptLastRace()
+        #expect(mine.model.lastRace == newer)
+
+        // Kept: race 2 is finished but not closed, and the server still names race 1.
+        let next = SequenceRig()
+        let race2 = SequenceRig.sheet(SequenceRig.report(SequenceRig.openReport, id: "race-2"))
+        next.model.keepHandOff(RaceFleet(raceID: RaceID("race-2"), briefing: FakeServiceScenario.briefing()))
+        next.model.keepLastRace(race2)
+        next.session.last = closed
+        await next.race.adoptLastRace()
+        #expect(next.model.lastRace == race2, "until the next race ends")
     }
 }
 
@@ -565,6 +838,32 @@ nonisolated final class CountingQueue: QueueService, @unchecked Sendable {
         rig.race.tick()
         rig.race.home()
         #expect(rig.queue.entry == .ready && rig.model.phase == .home)
+    }
+
+    /// #163, T1: a rejoin's hand-off has no briefing. With none kept for the race, the service's hand-off has it, and
+    /// the launch wears its fleet; with no hand-off either, the seeded fleet (none given). The fleet locked at the
+    /// briefing is the launch's from the start.
+    @Test func rejoinTakesTheBriefingFleetFromTheHandOff() async {
+        let briefing = FakeServiceScenario.briefing()
+        let locked = SequenceRig()
+        await locked.lock()
+        #expect(locked.fleets == [briefing.fleet.map(\.livery)])
+
+        let rig = SequenceRig()
+        rig.session.offer = rig.offer(at: 600)
+        await rig.queue.receive(.fleetLocked)
+        await rig.settle()
+        #expect(rig.model.fleet(of: SequenceRig.raceID) == nil)
+        await rig.race.rejoin()
+        #expect(rig.race.phase == .racing && rig.fleets == [briefing.fleet.map(\.livery)])
+
+        let bare = SequenceRig()
+        bare.session.handOffAnswer = nil
+        bare.session.offer = bare.offer(at: 600)
+        await bare.queue.receive(.fleetLocked)
+        await bare.settle()
+        await bare.race.rejoin()
+        #expect(bare.race.phase == .racing && bare.fleets == [nil])
     }
 
     /// The app was killed in the briefing and is back before the gun: the stream says `.fleetLocked`, there is

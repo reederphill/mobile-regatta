@@ -24,6 +24,11 @@ nonisolated struct DeviceSettings: Equatable, Sendable {
     var autoZoom = true
     /// The pinch-zoom multiplier on every shot's zoom (#322), kept across races; a two-finger double tap resets it to 1.
     var zoomMultiplier = 1.0
+    /// The race scene's tilt (#597): degrees off vertical the flat world is seen from, `tiltRange`, `defaultTilt` on a
+    /// new install. Per device like the camera.
+    var tilt = DeviceSettings.defaultTilt {
+        didSet { tilt = Self.clampedTilt(tilt) }
+    }
     var laylines = true
     var ladderLines = false
     /// The live leaderboard on the race HUD (#268).
@@ -49,6 +54,7 @@ nonisolated struct DeviceSettings: Equatable, Sendable {
         if let stored = defaults.object(forKey: Key.zoomMultiplier.rawValue) as? Double, stored.isFinite, stored > 0 {
             zoomMultiplier = stored
         }
+        if let stored = defaults.object(forKey: Key.tilt.rawValue) as? Double, stored.isFinite { tilt = Self.clampedTilt(stored) }
         laylines = flag(.laylines, laylines)
         ladderLines = flag(.ladderLines, ladderLines)
         liveLeaderboard = flag(.liveLeaderboard, liveLeaderboard)
@@ -66,6 +72,7 @@ nonisolated struct DeviceSettings: Equatable, Sendable {
         defaults.set(camera.rawValue, forKey: Key.camera.rawValue)
         defaults.set(autoZoom, forKey: Key.autoZoom.rawValue)
         defaults.set(zoomMultiplier, forKey: Key.zoomMultiplier.rawValue)
+        defaults.set(tilt, forKey: Key.tilt.rawValue)
         defaults.set(laylines, forKey: Key.laylines.rawValue)
         defaults.set(ladderLines, forKey: Key.ladderLines.rawValue)
         defaults.set(liveLeaderboard, forKey: Key.liveLeaderboard.rawValue)
@@ -83,6 +90,7 @@ nonisolated struct DeviceSettings: Equatable, Sendable {
         case camera = "settings.camera"
         case autoZoom = "settings.autoZoom"
         case zoomMultiplier = "settings.zoomMultiplier"
+        case tilt = "settings.tilt"
         case laylines = "settings.laylines"
         case ladderLines = "settings.ladderLines"
         case liveLeaderboard = "settings.liveLeaderboard"
@@ -92,6 +100,16 @@ nonisolated struct DeviceSettings: Equatable, Sendable {
         case haptics = "settings.haptics"
         case hidesLobbyChat = "settings.hidesLobbyChat"
         case sharesUsageData = "settings.sharesUsageData"
+    }
+
+    /// The tilt a new install starts with (#597): every tuning, fixture and reference is made at it.
+    static let defaultTilt = 45.0
+    /// The tilts Settings offers (#597): nearly straight down to 55°.
+    static let tiltRange = 5.0...55.0
+    /// `degrees` held inside `tiltRange`.
+    static func clampedTilt(_ degrees: Double) -> Double {
+        guard degrees.isFinite else { return defaultTilt }
+        return min(max(degrees, tiltRange.lowerBound), tiltRange.upperBound)
     }
 
     /// Where Auto zoom lived as Auto framing (#113), read when `Key.autoZoom` isn't stored.

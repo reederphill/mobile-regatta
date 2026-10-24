@@ -181,6 +181,9 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
     var heelShadowOffset = 0.22
     /// The drop shadow's alpha at full heel; less heel, fainter.
     var heelShadowAlpha = 0.35
+    /// How fast the 2.5D boat's drawn heel follows the pose's, per second: at 6 about half a second to settle (95% in
+    /// 0.5 s) as the sheets go out or come in (#602).
+    var heelEaseRate = 6.0
 
     // MARK: Sail
 
@@ -226,8 +229,6 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
     /// Your glow's blur, points: soft, with no hard edge that would read as a ring (#15). Baked into the textures
     /// when the fleet is built, so the boats built after a change take it.
     var glowBlur = 5.0
-    /// Every hull's outline width, points, drawn inside her silhouette. Baked in when the fleet is built.
-    var outlineWidth = 1.0
 
     // MARK: Wake (#15, #220, #222, #121)
 
@@ -380,7 +381,8 @@ nonisolated extension BoatStyle {
         let fields: [(CodingKeys, WritableKeyPath<BoatStyle, Double>)] = [
             (.heelOnsetKnots, \.heelOnsetKnots), (.heelFullKnots, \.heelFullKnots), (.heelScale, \.heelScale),
             (.heelNarrowing, \.heelNarrowing), (.heelShadowOffset, \.heelShadowOffset),
-            (.heelShadowAlpha, \.heelShadowAlpha), (.trimPerApparentAngle, \.trimPerApparentAngle),
+            (.heelShadowAlpha, \.heelShadowAlpha), (.heelEaseRate, \.heelEaseRate),
+            (.trimPerApparentAngle, \.trimPerApparentAngle),
             (.minTrimDegrees, \.minTrimDegrees), (.maxTrimDegrees, \.maxTrimDegrees),
             (.headToWindMarginDegrees, \.headToWindMarginDegrees), (.headToWindTrimDegrees, \.headToWindTrimDegrees),
             (.flutterDegrees, \.flutterDegrees), (.byTheLeeFlutter, \.byTheLeeFlutter),
@@ -389,7 +391,7 @@ nonisolated extension BoatStyle {
             (.glowAlpha, \.glowAlpha), (.ghostAlpha, \.ghostAlpha),
             (.ghostSailBelly, \.ghostSailBelly), (.flapBellyLoss, \.flapBellyLoss),
             (.flutterSwingRate, \.flutterSwingRate), (.flapBellyRate, \.flapBellyRate),
-            (.flutterPhaseStep, \.flutterPhaseStep), (.glowBlur, \.glowBlur), (.outlineWidth, \.outlineWidth),
+            (.flutterPhaseStep, \.flutterPhaseStep), (.glowBlur, \.glowBlur),
             (.wakeFullSpeed, \.wakeFullSpeed), (.wakeMaxHulls, \.wakeMaxHulls),
             (.wakeSpreadDegrees, \.wakeSpreadDegrees), (.wakePressureFan, \.wakePressureFan),
             (.wakeAlpha, \.wakeAlpha), (.wakePlaningBoost, \.wakePlaningBoost),

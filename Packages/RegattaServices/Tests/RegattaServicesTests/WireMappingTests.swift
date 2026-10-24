@@ -19,7 +19,7 @@ import Testing
         let closures: [LobbyClosure] = [.notSignedIn, .termsNotAccepted, .communicationRestricted, .racing]
         let errors: [LobbyError] = closures.map(LobbyError.closed) + [
             .freeTextLocked, .empty, .tooLong(limit: 200), .rateLimited(retryAfterSeconds: 3), .muted(until: 1_790_086_400), .banned,
-            .unknownMessage, .notReportable, .cannotBlockSelf,
+            .unknownMessage, .notReportable, .cannotBlockSelf, .unknownPlayer,
         ]
         for error in errors { #expect(LobbyError(wire: error.wire) == error) }
         for quick in QuickChat.allCases { #expect(QuickChat(wire: quick.wire) == quick) }
@@ -36,6 +36,9 @@ import Testing
         #expect(LobbyState(wire: open.wire) == open)
         let notSent = LobbyMessage(id: MessageID("m"), kind: .post(LobbyPost(author: Fixtures.wren, body: .text("x"), delivery: .notSent)))
         #expect(LobbyMessage(wire: notSent.wire) == notSent)
+        let card = BoatCard(gamePlayerID: GamePlayerID("G:wren"), nickname: "Wren", rating: Rating(value: 1610, isProvisional: true),
+                            livery: Livery(design: DesignID("stripe"), colours: [SwatchID("red"), SwatchID("white")], sailNumber: 207))
+        #expect(BoatCard(wire: card.wire) == card)
         let unrated = RatingChange(raceID: RaceID("r"), outcome: .unrated)
         #expect(RatingChange(wire: unrated.wire) == unrated)
         for suspension in [nil, RacingSuspension(until: nil), RacingSuspension(until: 5)] {

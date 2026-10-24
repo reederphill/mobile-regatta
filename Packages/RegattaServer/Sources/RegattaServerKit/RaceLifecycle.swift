@@ -241,10 +241,11 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
     }
 
     /// The player gave her seat in `race` up for good (#469): the queue calls this when it frees her (a leave before
-    /// the gun, `QueueMatchmaker.releaseSeat`; #149's `leaveRace`). From here that race is no longer hers: she can't
-    /// rejoin it, her results stream for it ends without a last word, and its close or cancel says nothing to her, so it
-    /// can't reach the stream, the ending or the rating changes of a race she queues into meanwhile. Nothing for a
-    /// race she isn't seated in (her next race registered first: the `seated` check in the close covers that order).
+    /// the gun, `QueueMatchmaker.releaseSeat`; #149's `leaveRace`). From here she can't rejoin it, her results stream
+    /// for it ends without a last word, and its close or cancel ends nothing of hers, so it can't reach the stream or
+    /// the ending of a race she queues into meanwhile. Its close does push her a rating change (`.rated`, or `.unrated`
+    /// from #163) when she left after the gun, since it is then her last race; the change names its race. Nothing for
+    /// a race she isn't seated in (her next race registered first: the `seated` check in the close covers that order).
     public func seatReleased(_ playerID: String, race: UUID) {
         guard seated[playerID] == race else { return }
         seated[playerID] = nil
@@ -379,7 +380,8 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
     }
 
     /// Rating changes for the player as they come, starting with any she hasn't read (#24): `.rated` with her rating
-    /// before and after for a race she was rated in, `.unrated` for one that didn't move it (#151). The ones she
+    /// before and after for a race she was rated in, `.unrated` for one that didn't move it (#151). Every player whose
+    /// `lastRace` a close makes it hears one, a post-gun leaver included (#163), so it is the close's signal. The ones she
     /// hasn't read are kept in memory only: after a restart the profile and `lastRace` still show the change.
     public nonisolated func ratingChanges(for playerID: String) -> AsyncStream<RatingChange> {
         let (stream, token) = ratingWatchers.open(playerID, bufferingPolicy: .bufferingNewest(settings.pendingRatingChanges))
@@ -523,6 +525,14 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
             ended[player] = .closed(report)
             resultWatchers.finish(player, last: .report(report))
             if settled, changes[player] == nil { push(RatingChange(raceID: raceID, outcome: .unrated), to: player) }
+        }
+        // One who left after the gun and was released (#163): this race is her last race now, so an unrated close tells
+        // her too, and the push is the close's word to everyone whose last race it becomes. A seat given away before the
+        // gun isn't in `seats`, and one not at the gun was never hers to leave after it (#469: a seat released before
+        // she sailed hears nothing of its close). The change names its race, so it can't touch the race she queued into.
+        let seatedNow = Set(seatedPlayers(id, live).map(\.player))
+        for (player, row) in seats where settled && atGun.contains(row.seat) && !seatedNow.contains(player) && changes[player] == nil {
+            push(RatingChange(raceID: raceID, outcome: .unrated), to: player)
         }
         // Every rated player, seated or not: one who left after the gun was rated as retired, and is told.
         for change in rating?.changes ?? [] { push(RatingChange(raceID: raceID, outcome: Self.outcome(change)), to: change.playerID) }

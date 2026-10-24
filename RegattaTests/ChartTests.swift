@@ -321,7 +321,7 @@ import RegattaCore
     /// The chart is in world space, under the world node with the water, so the camera's rotation (#113) turns it.
     @Test func chartLayersAreInTheWorld() throws {
         let (scene, _) = try DrawOrderTests.scene(fixture: "chart-saltings-reach")
-        let world = try #require(scene.children.first { $0.childNode(withName: "water") != nil })
+        let world = try #require(scene.childNode(withName: "//water")?.parent)
         for name in [ChartLayer.shallowsName, ChartLayer.boundaryName, ChartLayer.landName, ChartLayer.landmarksName] {
             let nodes = world.children.filter { $0.name == name }
             #expect(!nodes.isEmpty, "\(name)")

@@ -4,6 +4,7 @@ import Testing
 import UIKit
 import RegattaBots
 import RegattaCore
+import RegattaServices
 @testable import Regatta
 
 @MainActor @Suite struct AppModelTests {
@@ -52,7 +53,8 @@ import RegattaCore
     @Test func aRaceKeepsThePathUnderTheCover() {
         let model = AppModel()
         model.path = [.practiceSetup]
-        model.sheet = .boatCard
+        model.sheet = .boatCard(LobbyAuthor(gamePlayerID: GamePlayerID("G:fake-2"), nickname: "Wren", rating: Rating(value: 1610, isProvisional: false),
+                                                chip: LiveryChip(deck: SwatchID("charcoal"), sail: SwatchID("white"))))
 
         model.startRaceSequence(GameSession(config: Self.config))
         #expect(model.sheet == nil)
@@ -231,5 +233,44 @@ import RegattaCore
         let (model, _) = Self.isolatedModel()
         model.isLiveryLocked = true
         #expect(model.myBoat.action == .fleetLocked)
+    }
+
+    /// #163, G1: an online race she retired from is Home's Last race, read from the service or kept from the sheet; a
+    /// practice race she retired from isn't (#132).
+    @Test func onlineRetIsKeptPracticeRetIsNot() throws {
+        let (model, _) = Self.isolatedModel()
+        let retired = SequenceRig.retiredReport
+        model.keepLastRace(retired, rating: .unrated)
+        #expect(model.lastRace?.summary == "RET" && model.lastRace?.online?.raceID == retired.raceID.rawValue)
+        #expect(SequenceRig.sheet(retired, rating: .unrated(.noOtherHumans)).keepsAsLastRace)
+
+        let rows = [SeatResult(seat: 1, place: 1, code: .finished, finishTick: 9_000), SeatResult(seat: 0, place: 2, code: .ret)]
+        let entrants = (0..<2).map {
+            RaceResultViewModel.Entrant(name: $0 == 0 ? "You" : "Bot", isBot: $0 != 0, livery: FleetLiveries.yours)
+        }
+        let practice = RaceResultViewModel(results: RaceResults(rows: rows, rated: false), live: [], entrants: entrants,
+                                           mySeat: 0, incidents: nil)
+        #expect(practice.online == nil && !practice.keepsAsLastRace)
+    }
+
+    /// #163, T5: an online race's counted close adds one on the device at once (the results' +1), then the server's
+    /// count, read at the close, replaces it: the server wins.
+    @Test func raceClosedAdoptsTheServersCount() async {
+        let (model, _) = Self.isolatedModel()
+        let profiles = LiverySyncTests.Profiles(FleetLiveries.yours)
+        profiles.completedRaces = 40
+        let sync = LiverySync(profile: profiles)
+        sync.isLive = true
+        sync.attach(model)
+        model.isLiveryLocked = true
+        let results = model.onlineResults(service: ScriptedRaceSessionService(RaceSessionScenario()), raceID: SequenceRig.raceID)
+        let (before, livery) = (model.myBoat.completedRaces, model.myLivery)
+        for update in FakeServiceScenario.onlineRace(rated: true).results {
+            if case .report(let report) = update { results.consume(.report(report)) }
+        }
+        #expect(model.myBoat.completedRaces == before + 1, "the +1 at once")
+        await SequenceRig().settle()
+        #expect(profiles.asked == 1 && model.myBoat.completedRaces == 40, "the server's count, read at the close")
+        #expect(model.myLivery == livery, "the server's livery isn't taken at a close")
     }
 }

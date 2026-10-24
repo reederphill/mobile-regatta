@@ -44,7 +44,8 @@ final class OnlineDriver: RaceDriver {
                               sailingName: entry.name.isEmpty ? nil : entry.name)
         })
     }
-    /// Each seat's livery (#119). The wire carries none yet: every other seat wears a seeded free starter.
+    /// Each seat's livery (#119): the briefing's (#163), which the wire's race start doesn't carry, when the app kept
+    /// them for this race; else a seeded free starter in every seat but hers.
     let liveries: FleetLiveries
     let client: RaceClient
     /// The race had begun when this client joined it (`joiningUnderway`): her first frame is the setup's, predicted
@@ -83,8 +84,10 @@ final class OnlineDriver: RaceDriver {
     /// Sails the race `start` joined on `transport`. `now` is the monotonic clock in microseconds;
     /// `connect` opens a new connection to the race server for a rejoin with `token`.
     /// `joiningUnderway`: the race had begun when this client joined it, so it sails from the server's `Resync`.
+    /// `liveries`: the briefing's, by seat (#163).
     init(start: RaceStart, transport: RaceTransport, token: [UInt8], clientBuild: String,
-         now: @escaping () -> UInt64, connect: @escaping () -> RaceTransport, joiningUnderway: Bool = false) {
+         now: @escaping () -> UInt64, connect: @escaping () -> RaceTransport, joiningUnderway: Bool = false,
+         liveries: [Livery]? = nil) {
         client = RaceClient(start: start, transport: transport, joiningUnderway: joiningUnderway)
         joinedUnderway = joiningUnderway
         self.now = now
@@ -96,7 +99,7 @@ final class OnlineDriver: RaceDriver {
         course = race.course
         venue = race.files.venue.content
         boatClass = race.boatClass
-        liveries = FleetLiveries(setup: start.setup, mySeat: start.yourSeat)
+        self.liveries = FleetLiveries(briefing: liveries, setup: start.setup, mySeat: start.yourSeat)
         corrections = race.boats.map { _ in VisualCorrection(snapDistance: race.boatClass.hull.length) }
         currentFrame = TickFrame(race: race, isOver: false, keepClearOf: start.yourSeat)
         previousFrame = currentFrame

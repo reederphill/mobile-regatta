@@ -19,6 +19,8 @@ final class AppModel {
     /// Pages pushed on the home screen.
     enum Page: Hashable {
         case practiceSetup, myBoat, profile, help, settings
+        /// Settings → Blocked players (#110, #142).
+        case blockedPlayers
         #if DEBUG
         /// The debug tuning panel (#232): Debug builds only.
         case tuning
@@ -26,15 +28,27 @@ final class AppModel {
     }
 
     /// Sheets are only for small, brief things (#25).
-    enum Sheet: String, Identifiable {
+    enum Sheet: Identifiable, Equatable {
         /// The Terms of Use (#34, #138): after Game Center sign-in, and reopened from the lobby area.
         case terms
-        /// A lobby player's boat card.
-        case boatCard
+        /// A lobby player's boat card (#142), from her chip or name on a line: the line's author.
+        case boatCard(LobbyAuthor)
         /// Your last race's results, reopened from home's Last race (#24, #132): large, with Close only.
         case lastRace
 
-        var id: Self { self }
+        /// One per sheet, and one per sailor's card (T8).
+        var id: String {
+            if case .boatCard(let author) = self { "boatCard-\(author.gamePlayerID.rawValue)" } else { name }
+        }
+
+        /// The sheet's kind: `sheet-<name>` is its accessibility id.
+        var name: String {
+            switch self {
+            case .terms: "terms"
+            case .boatCard: "boatCard"
+            case .lastRace: "lastRace"
+            }
+        }
     }
 
     /// What the race sequence shows.
@@ -118,6 +132,17 @@ final class AppModel {
         didSet {
             guard lastRace != oldValue, let lastRace else { return }
             LastRaceStore(defaults: practiceDefaults).save(lastRace)
+            // A practice race is newer than the last hand-off's race: the server's word on that race no longer replaces it.
+            if lastRace.online == nil, lastHandOff?.superseded == false { lastHandOff?.superseded = true }
+        }
+    }
+
+    /// The last online race this device was handed, with its briefing's seat liveries (#163): what that race's results
+    /// and Last race wear. Kept in the practice defaults (`LastHandOffStore`).
+    private(set) var lastHandOff: RaceFleet? {
+        didSet {
+            guard lastHandOff != oldValue, let lastHandOff else { return }
+            LastHandOffStore(defaults: practiceDefaults).save(lastHandOff)
         }
     }
 
@@ -169,6 +194,7 @@ final class AppModel {
         }
         practiceSetup = PracticeSetup(defaults: practiceDefaults)
         lastRace = LastRaceStore(defaults: practiceDefaults).load()
+        lastHandOff = LastHandOffStore(defaults: practiceDefaults).load()
         let myBoatDefaults = MyBoatDefaults.defaults(for: launchOptions, standard: defaults)
         self.myBoatDefaults = myBoatDefaults
         let boatClass = RaceFiles.defaults.boatClass.ref.id
@@ -210,8 +236,9 @@ final class AppModel {
     }
 
     /// The server's count of the online races you've completed (#139, T3): what Profile shows, so My boat's
-    /// "n / N races" reads the same. Taken at each session's open (`LiverySync`) and at each profile read; it replaces
-    /// the device's own count, the results' +1 included.
+    /// "n / N races" reads the same. Taken at each session's open (`LiverySync`), at each profile read and at each
+    /// online race's close (#163, `LiverySync.raceClosed`); it replaces the device's own count, the results' +1
+    /// included.
     func adoptServerCount(_ count: Int) {
         let completed = CompletedRacesStore(defaults: myBoatDefaults)
         completed.count = count
@@ -220,7 +247,8 @@ final class AppModel {
 
     /// An online race's results stream (#133), counting from the online races completed so far: its close, when it
     /// counts (G6), adds one on the device at once, so the earned line's Try it lands on an unlocked design. That +1
-    /// is a stopgap: the server's count replaces it at the next profile read (`adoptServerCount`).
+    /// is the instant guess (and the offline one): the close also reads the server's count (#163, `onlineRaceClosed`),
+    /// which replaces it within a round trip (`adoptServerCount`).
     func onlineResults(service: any RaceSessionService, raceID: RaceID?) -> OnlineResults {
         let completed = CompletedRacesStore(defaults: myBoatDefaults)
         let results = OnlineResults(service: service, raceID: raceID, completedBefore: completed.count)
@@ -228,8 +256,15 @@ final class AppModel {
             guard let self, completed.countCompletion(of: race.rawValue) else { return }
             myBoat.completedRaces = completed.count
         }
+        results.onClosed = { [weak self] _ in self?.onlineRaceClosed() }
         return results
     }
+
+    /// Told when an online race of hers has closed (#163, T5): `LiverySync` reads the server's count of her completed
+    /// races then. Set by `LiverySync.attach`.
+    @ObservationIgnored var onOnlineRaceClosed: (() -> Void)?
+
+    func onlineRaceClosed() { onOnlineRaceClosed?() }
 
     /// The online results' Race again (#24, #25): home, with the queue joining (#140's bar). A refusal (cooldown,
     /// suspension) lands on Race online's line.
@@ -487,8 +522,9 @@ final class AppModel {
         let results = onlineResults(service: service, raceID: handOff.raceID)
         // `-timescale` runs the fakes' race, as it does their queue and briefing.
         let timescale = launchOptions.fakeServices == nil ? 1 : launchOptions.timescale
+        let liveries = fleet(of: handOff.raceID)
         return OnlineRaceLink(handOff: handOff, connector: connector, results: results) { [self] connect, token in
-            OnlineLaunch(connect: connect, token: token, timescale: timescale, haptics: haptics, sound: sound,
+            OnlineLaunch(connect: connect, token: token, liveries: liveries, timescale: timescale, haptics: haptics, sound: sound,
                          controls: controls, rulesSeen: rulesSeen, hints: hintEngine, onHintRetired: logsHintRetired,
                          results: results)
         }
@@ -519,9 +555,25 @@ final class AppModel {
     func keepLastRace(_ report: RaceReport, rating: RatingOutcome?) {
         let results = RaceResultViewModel(lastRace: LastRace(report: report, rating: rating.map {
             RatingChange(raceID: report.raceID, outcome: $0)
-        }), livery: myLivery)
+        }), livery: myLivery, fleet: fleet(of: report.raceID))
         if results.keepsAsLastRace { lastRace = results }
     }
+
+    func keepHandOff(_ fleet: RaceFleet) { lastHandOff = fleet }
+
+    /// Whether the server's last race, `raceID`, read as a session opens (#163, T4), replaces Home's Last race: (a)
+    /// Home has none; (b) it is the same race, now closed and rated; (c) it is the race this device was last handed and
+    /// Home's isn't it (the app was killed in or after it), unless a practice race has been kept since. Otherwise
+    /// Home's is newer: a practice race, a race of this device's that is newer than another device's, or a race she
+    /// has finished that hasn't closed yet while the server still names the one before ("until the next race ends").
+    func adoptsLastRace(_ raceID: RaceID) -> Bool {
+        guard let kept = lastRace else { return true }
+        if kept.online?.raceID == raceID.rawValue { return true }
+        guard let lastHandOff, !lastHandOff.superseded else { return false }
+        return lastHandOff.raceID == raceID.rawValue
+    }
+
+    func fleet(of raceID: RaceID) -> [Livery]? { lastHandOff?.liveries(of: raceID) }
 
     func setLastRaceRating(_ outcome: RatingOutcome, raceID: RaceID) {
         guard var kept = lastRace, kept.online?.raceID == raceID.rawValue else { return }

@@ -21,6 +21,8 @@ struct MenuPageView: View {
             HelpPage()
         case .settings:
             SettingsView(model: model)
+        case .blockedPlayers:
+            BlockedPlayersPage()
         #if DEBUG
         case .tuning:
             TuningView(model: model.tuning)
@@ -155,7 +157,7 @@ struct DevRaceServerField: View {
 }
 #endif
 
-/// A brief sheet over the home screen (#25). A placeholder until the lobby's boat card.
+/// A brief sheet over the home screen (#25): what `HomeView` has no view of its own for.
 struct MenuSheetView: View {
     let sheet: AppModel.Sheet
     @Environment(\.dismiss) private var dismiss
@@ -178,7 +180,7 @@ struct MenuSheetView: View {
         }
         .tint(ChromePalette.tint)
         .presentationDetents([.medium])
-        .accessibilityIdentifier("sheet-\(sheet.rawValue)")
+        .accessibilityIdentifier("sheet-\(sheet.name)")
     }
 
     private var title: String {
@@ -193,7 +195,8 @@ struct MenuSheetView: View {
         switch sheet {
         // `HomeView` always shows `TermsSheet` for the terms.
         case .terms: ""
-        case .boatCard: "A sailor's boat card arrives here."
+        // `HomeView` always shows `BoatCardSheet` for a card.
+        case .boatCard: ""
         // `HomeView` shows the results themselves; this only when there are none to show.
         case .lastRace: "No last race yet."
         }

@@ -189,7 +189,8 @@ import Testing
         await rig.joinAndWait()
         rig.model.path = [.settings]
         rig.model.startRaceSequence(GameSession(config: Self.config))
-        rig.model.sheet = .boatCard
+        rig.model.sheet = .boatCard(LobbyAuthor(gamePlayerID: GamePlayerID("G:fake-2"), nickname: "Wren", rating: Rating(value: 1610, isProvisional: false),
+                                                chip: LiveryChip(deck: SwatchID("charcoal"), sail: SwatchID("white"))))
         let lastRace = rig.model.lastRace
         #expect(rig.model.isPracticeShowing && rig.controller.showsChip, "the chip rides over the practice race")
 

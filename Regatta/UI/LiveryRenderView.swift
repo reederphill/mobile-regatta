@@ -21,7 +21,8 @@ struct LiveryRenderView: View {
             .frame(width: size.width, height: size.height)
             .clipShape(.rect(cornerRadius: min(size.width, size.height) * 0.08))
             .accessibilityElement()
-            .accessibilityLabel("Boat, sail number \(livery.sailNumber)")
+            // Verbatim, as the sail shows it: a localized key would group the digits ("3,097").
+            .accessibilityLabel(Text(verbatim: livery.sailNumber > 0 ? "Boat, sail number \(livery.sailNumber)" : "Boat"))
     }
 }
 

@@ -92,6 +92,7 @@ final class UnreadableModeration: LobbyModeration {
     func report(line: ReportedLine, by playerID: String) async throws { throw LobbyError.notReportable }
     func report(player: LobbyPlayerRef, by playerID: String) async throws { throw LobbyError.notReportable }
     func report(race: RaceID, seat: Int, reason: RaceReportReason, by playerID: String) async throws { throw LobbyError.notReportable }
+    func nicknameOverridden(_ playerID: String) async throws -> Bool { throw Down() }
 }
 
 /// A feed a test reads one event at a time.
@@ -126,19 +127,21 @@ struct LobbyRig {
     let hub: LobbyHub
 
     init(settings: LobbySettings = LobbySettings(), classifier: FakeToxicityClassifier? = nil, classifierTimeout: Duration = .seconds(30),
-         clock: VirtualClock = VirtualClock(), book: InMemoryRatingBook = InMemoryRatingBook(), moderation custom: (any LobbyModeration)? = nil) {
+         clock: VirtualClock = VirtualClock(), book: InMemoryRatingBook = InMemoryRatingBook(), moderation custom: (any LobbyModeration)? = nil,
+         card: @escaping LobbyCardSource = LobbyHub.starterCard) {
         self.clock = clock
         self.book = book
         self.classifier = classifier
         hub = Self.hub(settings: settings, store: store, book: book, moderation: custom ?? moderation, classifier: classifier,
-                       classifierTimeout: classifierTimeout, clock: clock)
+                       classifierTimeout: classifierTimeout, clock: clock, card: card)
     }
 
     static func hub(settings: LobbySettings = LobbySettings(), store: any LobbyStore, book: InMemoryRatingBook, moderation: any LobbyModeration,
-                    classifier: FakeToxicityClassifier? = nil, classifierTimeout: Duration = .seconds(30), clock: VirtualClock) -> LobbyHub {
+                    classifier: FakeToxicityClassifier? = nil, classifierTimeout: Duration = .seconds(30), clock: VirtualClock,
+                    card: @escaping LobbyCardSource = LobbyHub.starterCard) -> LobbyHub {
         LobbyHub(settings: settings, store: store, ratings: book, moderation: moderation, wordList: ChatWordList(entries: words),
                  classifier: classifier.map { ClassifierGate($0, timeout: classifierTimeout, now: { clock.now.timeIntervalSince1970 }) },
-                 now: { clock.now })
+                 card: card, now: { clock.now })
     }
 
     /// A player who has completed `races` online races.
@@ -676,6 +679,50 @@ func isMessage(_ event: LobbyEvent) -> Bool {
 
     /// From her fleet's lock to her own finish: no reading, no posting, and her feed carries the state only. After it
     /// she sees what was said meanwhile (owner 2026-10-11: the last hour's lines).
+    // MARK: Boat cards (#142)
+
+    @Test func theBoatCardShowsHerCurrentBoat() async throws {
+        let stored = Livery(design: DesignID("stripe"), colours: [SwatchID("red"), SwatchID("white")], sailNumber: 207)
+        let rig = LobbyRig(card: { player in
+            if player.teamPlayerID == "T:gull" { return stored }
+            return try await StarterLiveries().livery(of: player)
+        })
+        let gull = rig.service("gull"), wren = rig.service("wren", races: 3)
+        // Her line keeps its chip; the card reads her boat now, and her rating now.
+        rig.book.setStats(completedRaces: 3, wins: 0, for: "T:gull")
+        let card = try await wren.boatCard(GamePlayerID("G:gull"))
+        #expect(card == BoatCard(gamePlayerID: GamePlayerID("G:gull"), nickname: "gull", rating: Rating(value: 1500, isProvisional: true),
+                                 livery: stored))
+        // One who stored none sails her starter.
+        let starter = try await StarterLiveries().livery(of: rig.player("wren", races: 3))
+        #expect(try await gull.boatCard(GamePlayerID("G:wren")).livery == starter)
+    }
+
+    @Test func noBoatCardForHerselfAStrangerOrABlockedPair() async throws {
+        let rig = LobbyRig()
+        let wren = rig.service("wren"), gull = rig.service("gull"), tern = rig.service("tern")
+        await #expect(throws: LobbyError.unknownPlayer) { try await wren.boatCard(GamePlayerID("G:wren")) }
+        await #expect(throws: LobbyError.unknownPlayer) { try await wren.boatCard(GamePlayerID("G:nobody")) }
+        try await wren.block(GamePlayerID("G:gull"))
+        // Both ways, and only for the pair.
+        await #expect(throws: LobbyError.unknownPlayer) { try await wren.boatCard(GamePlayerID("G:gull")) }
+        await #expect(throws: LobbyError.unknownPlayer) { try await gull.boatCard(GamePlayerID("G:wren")) }
+        #expect(try await tern.boatCard(GamePlayerID("G:gull")).nickname == "gull")
+        try await wren.unblock(GamePlayerID("G:gull"))
+        #expect(try await gull.boatCard(GamePlayerID("G:wren")).nickname == "wren")
+    }
+
+    @Test func noBoatCardWhileSilencedOrClosed() async throws {
+        let rig = LobbyRig()
+        let wren = rig.service("wren")
+        _ = rig.service("gull")
+        rig.hub.fleetLocked(race: UUID(), humans: ["T:wren"])
+        await #expect(throws: LobbyError.closed(.racing)) { try await wren.boatCard(GamePlayerID("G:gull")) }
+        for closure in [LobbyClosure.notSignedIn, .termsNotAccepted, .communicationRestricted] {
+            await #expect(throws: LobbyError.closed(closure)) { try await ClosedLobbyService(closure: closure).boatCard(GamePlayerID("G:gull")) }
+        }
+    }
+
     @Test func silenceFromLockToFinish() async throws {
         let rig = LobbyRig()
         let wren = rig.service("wren"), finn = rig.service("finn")

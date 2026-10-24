@@ -520,6 +520,8 @@ jobs:
       TEST_RUNNER_CI: "true"
       TEST_RUNNER_GITHUB_ACTIONS: "true"
       E2E_DESTINATION: platform=iOS Simulator,name=iPhone 17,OS=26.5
+      # The race phase sails three queue races since #163 (about 13 minutes with its build): room for a retry.
+      E2E_STEP_TIMEOUT_MINUTES: "25"
     steps:
       - uses: actions/checkout@v4
       # The server's accounts live in Postgres (#161); macOS runners have no Docker, so Homebrew's.

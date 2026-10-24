@@ -328,6 +328,16 @@ extension LobbyEvent {
     }
 }
 
+extension BoatCard {
+    public init(wire: WireBoatCard) {
+        self.init(gamePlayerID: GamePlayerID(wire.gamePlayerID), nickname: wire.nickname, rating: Rating(wire: wire.rating), livery: wire.livery)
+    }
+
+    public var wire: WireBoatCard {
+        WireBoatCard(gamePlayerID: gamePlayerID.rawValue, nickname: nickname, rating: rating.wire, livery: livery)
+    }
+}
+
 extension RaceReportReason {
     public init(wire: WireRaceReportReason) {
         switch wire {
@@ -357,6 +367,7 @@ extension LobbyError {
         case .unknownMessage: self = .unknownMessage
         case .notReportable: self = .notReportable
         case .cannotBlockSelf: self = .cannotBlockSelf
+        case .unknownPlayer: self = .unknownPlayer
         }
     }
 
@@ -372,6 +383,7 @@ extension LobbyError {
         case .unknownMessage: .unknownMessage
         case .notReportable: .notReportable
         case .cannotBlockSelf: .cannotBlockSelf
+        case .unknownPlayer: .unknownPlayer
         }
     }
 }

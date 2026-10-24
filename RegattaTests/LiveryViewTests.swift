@@ -52,6 +52,20 @@ import UIKit
         #expect(FleetLiveries(setup: setup, mySeat: 1) != FleetLiveries(setup: Self.setup(seed: 8), mySeat: 1))
     }
 
+    /// #163: an online race wears its briefing's fleet seat for seat; one that doesn't fit the setup (another race's,
+    /// or none) leaves the seeded fleet.
+    @Test func anOnlineFleetWearsTheBriefingsLiveriesWhenTheyFit() {
+        let setup = Self.setup(seed: 7)
+        let briefing = setup.seats.indices.map { seat in
+            Livery(design: FleetLiveries.yours.design, colours: FleetLiveries.yours.colours, sailNumber: 4500 + seat)
+        }
+        #expect(FleetLiveries(briefing: briefing, setup: setup, mySeat: 1).liveries == briefing)
+        let seeded = FleetLiveries(setup: setup, mySeat: 1)
+        #expect(FleetLiveries(briefing: Array(briefing.dropLast()), setup: setup, mySeat: 1) == seeded)
+        #expect(FleetLiveries(briefing: briefing + [FleetLiveries.yours], setup: setup, mySeat: 1) == seeded)
+        #expect(FleetLiveries(briefing: nil, setup: setup, mySeat: 1) == seeded)
+    }
+
     @Test func aSeatOutOfRangeWearsYours() {
         #expect(FleetLiveries(liveries: [])[3] == FleetLiveries.yours)
     }
