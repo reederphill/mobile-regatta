@@ -84,4 +84,53 @@ import Testing
         #expect(!sweep.canReach(distant.0, distant.1, hull: hull) && !sweep.hits(distant.0, distant.1, hull: hull))
         #expect(sweep.canReach(near.0, near.1, hull: hull))
     }
+
+    /// #344: the near-miss reach a client draws is the umpire's own sweep. For a boat on a slant, with a current
+    /// across her, the public `swept` hull at every check equals the sweep worked out from the spec by hand (her heading
+    /// turned by each offset, sailed on at her speed plus the current), within 1e-9 m.
+    @Test func reachIsTheUmpiresSweep() throws {
+        let rules = try RulesConfigFile.bundled(id: "fleet-rules", version: 8).content
+        let sweep = rules.incidents.nearMissSweep
+        let hull = try BoatClassFile.bundled(id: Fixtures.classID, version: Fixtures.version).content.hull
+        var row = Boat(id: 0, isPlayer: false, colorIndex: 0, position: Vec2(12.5, -40.25), heading: deg2rad(37), speed: 3.2)
+        row.current = Vec2(0.3, -0.15)
+        let reach = sweep.swept(row, hull: hull)
+
+        let ticks = RulesConfig.ticks(sweep.seconds) / sweep.stepTicks
+        #expect(reach.times.count == ticks && ticks > 0)
+        #expect(reach.hulls.count == sweep.headingSamples)
+        var worst = 0.0
+        for (h, offset) in sweep.headingOffsets.enumerated() {
+            let forward = Vec2.heading(row.heading + offset), right = forward.rightPerp
+            for k in 0..<ticks {
+                let t = Double((k + 1) * sweep.stepTicks) * Race.dt
+                let centre = row.position + (forward * row.speed + row.current) * t
+                worst = max(worst, (reach.centres[h][k] - centre).length)
+                for (corner, local) in zip(reach.hulls[h][k], hull.outline) {
+                    worst = max(worst, (corner - (centre + right * local.x + forward * local.y)).length)
+                }
+            }
+        }
+        #expect(worst <= 1e-9, "max difference \(worst) m")
+
+        // The outline holds every swept corner, and a keep-clear boat lying still just inside it on her bow is a near
+        // miss, just outside it none.
+        let outline = reach.outline
+        #expect(outline.count >= 3)
+        let outside = reach.hulls.joined().joined().filter { corner in
+            outline.indices.contains { i in
+                (outline[(i + 1) % outline.count] - outline[i]).cross(corner - outline[i]) < -1e-9
+            }
+        }
+        #expect(outside.isEmpty)
+        var straight = Boat(id: 0, isPlayer: false, colorIndex: 0, position: .zero, heading: 0, speed: 3)
+        straight.current = .zero
+        let ahead = sweep.swept(straight, hull: hull).outline.map(\.y).max() ?? 0
+        let stern = hull.outline.map(\.y).min() ?? 0
+        func lyingAhead(_ into: Double) -> Boat {
+            Boat(id: 1, isPlayer: false, colorIndex: 1, position: Vec2(0, ahead - into - stern), heading: 0, speed: 0)
+        }
+        #expect(sweep.hits(straight, lyingAhead(0.1), hull: hull))
+        #expect(!sweep.hits(straight, lyingAhead(-0.1), hull: hull))
+    }
 }

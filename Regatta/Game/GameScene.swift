@@ -70,6 +70,14 @@ final class GameScene: SKScene {
     var drawsCuesOnly = false {
         didSet { needsPausedRender = true }
     }
+    /// The near-miss reach on each right-of-way boat (#344, `NearMissReach`): a debug overlay, off by default, the
+    /// tuning panel's toggle and `-nearMissReach`'s seam. Off, the scene holds no node for it.
+    var showsNearMissReach = false {
+        didSet { needsPausedRender = true }
+    }
+    private lazy var nearMissReach = NearMissReachOverlay(pointsPerMeter: ppm)
+    /// The seats whose near-miss reach draws (#344), ascending, for tests.
+    var nearMissReachSeats: [Int] { nearMissReach.seats }
 
     /// Draws at `policy`'s tiers from the next frame (#127), and at its frame rate: `RaceView` gives the same rate to
     /// its `SpriteView`, and setting it on the view here too makes a change take hold whether or not SpriteView passes
@@ -460,6 +468,7 @@ final class GameScene: SKScene {
                            sailDetail: sailDetail, hidesSails: drawsCuesOnly, time: world.time, dt: dt, settled: settled)
             updateLandRim()
         }
+        updateNearMissReach(world)
 
         updateCues(world, dt: dt, settled: settled)
         ruleCues?.isHidden = !showsRuleCues
@@ -476,6 +485,20 @@ final class GameScene: SKScene {
         for (seat, node) in boatNodes.enumerated() {
             node.setRightOfWayGlow(seat < glows.count ? glows[seat] : nil, style: boatStyle)
         }
+    }
+
+    /// The near-miss reach (#344) on each right-of-way boat while `showsNearMissReach` is on and the frame carries the
+    /// rules' sweep; none otherwise, and no node left behind.
+    private func updateNearMissReach(_ world: RenderWorld) {
+        guard showsNearMissReach, paintsWorld, let sweep = world.frame.nearMissSweep else {
+            nearMissReach.clear()
+            return
+        }
+        let seats = NearMissReach.rightOfWaySeats(keepClear: world.frame.keepClear, positions: world.boats.map(\.position),
+                                                  me: world.myBoatIndex, isGhost: world.isGhost(ofSeat:),
+                                                  rangeHulls: boatStyle.glowRangeHulls,
+                                                  hullLength: world.boatClass.hull.length)
+        nearMissReach.update(seats: seats, world: world, sweep: sweep, parent: self.world, px: cam.xScale)
     }
 
     /// Eases the shown tilt to the device's (#597), at `tiltEaseRate`; a settled frame snaps to it. On the sim's `dt`,

@@ -92,6 +92,9 @@ import RegattaServices
 ///   Low Power Mode, so references stay put.
 /// - `-cuesOnly` (with `-uitesting`) hides what the thermal tiers change, the ripple and whitecaps, the wakes
 ///   and the sails, so a UI test can compare the race cues alone across tiers (#127).
+/// - `-nearMissReach` draws the near-miss reach on each boat holding right of way over yours or owed it by yours
+///   (#344, `NearMissReach`): the debug tuning panel's Boat toggle, on at launch, live races and render fixtures alike. Debug
+///   builds only.
 struct LaunchOptions: Equatable {
     enum SteeringScheme: String, CaseIterable {
         case halves, tiller
@@ -215,6 +218,8 @@ struct LaunchOptions: Equatable {
     #if DEBUG
     var tuning = false
     var fps120 = false
+    /// `-nearMissReach` (#344).
+    var nearMissReach = false
     /// `-captureAppAttestFixture`: writes #175's App Attest fixture on a device (`AppAttestFixtureCapture`, #158).
     var captureAppAttestFixture = false
     /// `-beatMetres`: honoured only with `-uitesting` (`AppModel`).
@@ -255,6 +260,7 @@ struct LaunchOptions: Equatable {
             #if DEBUG
             case "-tuning": tuning = true
             case "-fps120": fps120 = true
+            case "-nearMissReach": nearMissReach = true
             case "-captureAppAttestFixture": captureAppAttestFixture = true
             case "-fakeServices", "-referenceRace", "-beatMetres", "-devIdentity", "-devRestrictions", "-termsVersion", "-tap",
                  "-boats":
@@ -290,7 +296,7 @@ struct LaunchOptions: Equatable {
                           "-thermal", "-cuesOnly",
                           "-onlineResults"]
         #if DEBUG
-        flags.formUnion(["-tuning", "-fps120", "-captureAppAttestFixture", "-fakeServices", "-referenceRace", "-beatMetres", "-devIdentity", "-devRestrictions",
+        flags.formUnion(["-tuning", "-fps120", "-nearMissReach", "-captureAppAttestFixture", "-fakeServices", "-referenceRace", "-beatMetres", "-devIdentity", "-devRestrictions",
                          "-termsVersion", "-tap", "-boats"])
         #endif
         return flags

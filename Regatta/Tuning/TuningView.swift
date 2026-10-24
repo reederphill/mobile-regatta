@@ -175,6 +175,13 @@ private struct TuningGroupView: View {
                     .tint(ChromePalette.tint)
                     .accessibilityIdentifier("tuning-shows-pressure")
             }
+            if group.id == TuningCatalog.nearMissReachGroup {
+                Toggle("Show the near-miss reach", isOn: Binding(get: { model.showsNearMissReach },
+                                                                  set: { model.showsNearMissReach = $0 }))
+                    .font(MenuFont.body(.subheadline))
+                    .tint(ChromePalette.tint)
+                    .accessibilityIdentifier("tuning-shows-near-miss-reach")
+            }
             ForEach(group.sliders) { slider in
                 TuningSliderRow(slider: slider, model: model)
             }

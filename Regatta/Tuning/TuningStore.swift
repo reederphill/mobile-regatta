@@ -24,6 +24,9 @@ struct Tuning: Codable, Equatable {
     var ease = EaseGestureTuning.standard
     /// The pressure overlay on the water (#289): a look for tuning by, not a tuning, so never the TUNED badge.
     var showsPressure = false
+    /// The near-miss reach on each right-of-way boat (#344): a debug overlay, a look like `showsPressure`, so never
+    /// the TUNED badge.
+    var showsNearMissReach = false
 
     init() {}
 
@@ -80,7 +83,8 @@ struct Tuning: Codable, Equatable {
         || hint != .standard || ease != .standard }
 
     private enum CodingKeys: String, CodingKey {
-        case name, boatClass, conditions, rulesConfiguration, boatClassValues, conditionsValues, rulesValues, water, camera, boat, hint, ease, showsPressure
+        case name, boatClass, conditions, rulesConfiguration, boatClassValues, conditionsValues, rulesValues, water, camera, boat, hint, ease, showsPressure,
+             showsNearMissReach
     }
 
     /// Lenient: a value this build no longer has, or a render style saved before it gained a field, falls back
@@ -100,6 +104,7 @@ struct Tuning: Codable, Equatable {
         hint = (try? c.decode(HintTuning.self, forKey: .hint)) ?? .standard
         ease = (try? c.decode(EaseGestureTuning.self, forKey: .ease)) ?? .standard
         showsPressure = (try? c.decode(Bool.self, forKey: .showsPressure)) ?? false
+        showsNearMissReach = (try? c.decode(Bool.self, forKey: .showsNearMissReach)) ?? false
     }
 
     func jsonData() throws -> Data {

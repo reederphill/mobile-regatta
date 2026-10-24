@@ -251,6 +251,10 @@ final class GameSession {
         scene.paintsWorld = driver.isFrozen || !LaunchOptions.current.hidesScene
         // `-cuesOnly` (#127): a UI test's cue-only render.
         scene.drawsCuesOnly = LaunchOptions.current.drawsCuesOnly
+        #if DEBUG
+        // `-nearMissReach` (#344): the debug overlay, a render fixture's too; the tuning panel's toggle over it live.
+        scene.showsNearMissReach = LaunchOptions.current.nearMissReach
+        #endif
         // The minimap's first pressure sample (up to ~170 ms on first use, #310) waits for the scene's first HUD
         // refresh, off the race's construction; a frozen fixture takes it here, as its render holds still.
         // The first refresh posts the steering hint at once (#129); a frozen fixture shows only the notice it names.
